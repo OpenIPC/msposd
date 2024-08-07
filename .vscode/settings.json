@@ -1,0 +1,12 @@
+{
+    "workbench.colorTheme": "Default High Contrast",
+    "files.associations": {
+        "mavlink.h": "c",
+        "system_error": "c",
+        "chrono": "c",
+        "common.h": "c",
+        "array": "c",
+        "string": "c",
+        "string_view": "c"
+    }
+}

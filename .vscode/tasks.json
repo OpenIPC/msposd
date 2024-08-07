@@ -1,0 +1,22 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "gcc build",
+            "type": "shell",
+            "command": "gcc",
+            "args": [
+                "-g",
+                "-o",
+                "${workspaceFolder}/mavfwd",
+                "${workspaceFolder}/mavfwd.c",
+                "-levent",
+                "-levent_core"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        }
+    ]
+}
