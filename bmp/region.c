@@ -5,6 +5,7 @@ const double inv16 = 1.0 / 16.0;
 int create_region(int *handle, int x, int y, int width, int height)
 {
     int s32Ret = -1;
+#ifndef _x86    
 #ifdef __SIGMASTAR__
     MI_RGN_ChnPort_t stChn;
 
@@ -155,6 +156,7 @@ int create_region(int *handle, int x, int y, int width, int height)
     HI_MPI_RGN_AttachToChn(*handle, &stChn, &stChnAttr);
 #endif
 
+#endif
     return s32Ret;
 }
 
@@ -437,10 +439,11 @@ int prepare_bitmapOld(const char *filename, BITMAP *bitmap, int bFil, unsigned i
 
 int set_bitmap(int handle, BITMAP *bitmap)
 {
+    int s32Ret=0;
 #ifdef __SIGMASTAR__
-    int s32Ret = MI_RGN_SetBitMap(handle, (MI_RGN_Bitmap_t *)(bitmap));
-#else
-    int s32Ret = HI_MPI_RGN_SetBitMap(handle, (BITMAP_S *)(bitmap));
+     s32Ret = MI_RGN_SetBitMap(handle, (MI_RGN_Bitmap_t *)(bitmap));
+#elif __GOKE__
+     s32Ret = HI_MPI_RGN_SetBitMap(handle, (BITMAP_S *)(bitmap));
 #endif
     if (s32Ret)
     {
@@ -463,7 +466,9 @@ void unload_region(int *handle)
     stChn.s32OutputPortId = 0;
     MI_RGN_DetachFromChn(*handle, &stChn);
     int s32Ret = MI_RGN_Destroy(*handle);
-#else
+    if (s32Ret)
+        fprintf(stderr, "[%s:%d]RGN_Destroy failed with %#x %d!\n", __func__, __LINE__, s32Ret, *handle);
+#elif __GOKE__
     MPP_CHN_S stChn;
     stChn.s32DevId = 0;
     stChn.s32ChnId = 0;
@@ -471,7 +476,8 @@ void unload_region(int *handle)
     stChn.enModId = HI_ID_VENC;
     HI_MPI_RGN_DetachFromChn(*handle, &stChn);
     int s32Ret = HI_MPI_RGN_Destroy(*handle);
-#endif
     if (s32Ret)
         fprintf(stderr, "[%s:%d]RGN_Destroy failed with %#x %d!\n", __func__, __LINE__, s32Ret, *handle);
+#endif
+    
 }

@@ -16,7 +16,7 @@
     #include <SFML/Graphics.h>
     #include <SFML/Window.h>
  #else
-    #include "bmp/region.h"f
+    #include "bmp/region.h"
     #include "bmp/common.h"    
 #endif
 #include "bmp/region.h"

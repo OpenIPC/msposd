@@ -4,14 +4,28 @@
         {
             "label": "gcc build",
             "type": "shell",
-            "command": "gcc",
+            "command": "cc",
             "args": [
+                "mavfwd.c",
+                "bmp/bitmap.c",
+                "bmp/region.c",
+                "osd/net/network.c",
+                "osd/msp/msp.c",
+                "-I",
+                "./sdk/gk7205v300/include",
+                "-L",
+                "-O1",
                 "-g",
+                "-fno-omit-frame-pointer",
+                "-Wall",
+                "-Wextra",
+                "-D_x86",
+                "-lcsfml-graphics",
+                "-lcsfml-window",
+                "-lcsfml-system",
+                "-levent_core",
                 "-o",
-                "${workspaceFolder}/mavfwd",
-                "${workspaceFolder}/mavfwd.c",
-                "-levent",
-                "-levent_core"
+                "msposd"
             ],
             "group": {
                 "kind": "build",

@@ -15,6 +15,7 @@
         "mi_rgn.h": "c",
         "mi_common.h": "c",
         "bitmap.h": "c",
-        "random": "c"
+        "random": "c",
+        "format": "c"
     }
 }
