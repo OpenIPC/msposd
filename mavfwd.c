@@ -24,9 +24,9 @@
 #include "mavlink/common/mavlink.h"
 
 #include "osd/msp/msp.h"
-#include "osd/msp/msp.c" // why the fuck
+//#include "osd/msp/msp.h" // why the fuck
 #include "osd/msp_displayport_mux.c"
-#include "osd/net/network.c"
+#include "osd/net/network.h"
 
 #include "osd.c"
 
@@ -968,6 +968,7 @@ err:
 		event_base_free(base);
 
 	libevent_global_shutdown();
+	CloseMSP();
 
 	return ret;
 }

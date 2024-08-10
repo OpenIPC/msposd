@@ -5,7 +5,7 @@ LDLIBS=-levent_core
 
 
 #SRCS := lib/schrift.c compat.c bitmap.c net.c region.c text.c main.c
-SRCS := mavfwd.c
+SRCS := mavfwd.c bmp/bitmap.c bmp/region.c osd/net/network.c osd/msp/msp.c
 #BUILD = $(CC) $(SRCS) -I $(SDK)/include -L $(DRV) $(LIB) -Os -s -o $(or $(TARGET),$@)
 
 #BUILD = $(CC) $(SRCS) -I $(SDK)/include -L $(DRV) $(LIB) $(CFLAGS) $(LDFLAGS) $(LDLIBS) -o $(or $(TARGET),$@)
@@ -18,28 +18,28 @@ clean:
 
 
 osd-goke:
-	$(eval SDK = ../sdk/gk7205v300)
+	$(eval SDK = ./sdk/gk7205v300)
 	$(eval LIB = -ldnvqe -lgk_api -lhi_mpi -lsecurec -lupvqe -lvoice_engine)
 	$(BUILD)
 
 osd-hisi:
-	$(eval SDK = ../sdk/hi3516ev300)
-	$(eval LIB = -ldnvqe -lmpi -lsecurec -lupvqe -lVoiceEngine)
+	$(eval SDK = ./sdk/hi3516ev300)
+	$(eval LIB = -D__GOKE__ -ldnvqe -lmpi -lsecurec -lupvqe -lVoiceEngine)
 	$(BUILD)
 
 osd-star6b0:
-	$(eval SDK = ../sdk/infinity6)
+	$(eval SDK = ./sdk/infinity6)
 	$(eval LIB = -D__SIGMASTAR__ -D__INFINITY6__ -D__INFINITY6B0__ -lcam_os_wrapper -lm -lmi_rgn -lmi_sys)
 	$(BUILD)
 
 osd-star6e:
-	$(eval SDK = ../sdk/infinity6)
+	$(eval SDK = ./sdk/infinity6)
 	$(eval LIB = -D__SIGMASTAR__ -D__INFINITY6__ -D__INFINITY6E__ -lcam_os_wrapper -lm -lmi_rgn -lmi_sys)
 	$(BUILD)
 
 
 osd-x86:
-	$(eval SDK = .)
+	$(eval SDK = ./sdk/gk7205v300)
 	$(eval CFLAGS += -D_x86)
 	$(eval LIB = -lcsfml-graphics -lcsfml-window -lcsfml-system)
 	$(eval TARGET = msposd)

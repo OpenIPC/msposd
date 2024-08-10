@@ -10,6 +10,11 @@
         "string_view": "c",
         "msp_displayport.h": "c",
         "msp.h": "c",
-        "graphics.h": "c"
+        "graphics.h": "c",
+        "thread": "c",
+        "mi_rgn.h": "c",
+        "mi_common.h": "c",
+        "bitmap.h": "c",
+        "random": "c"
     }
 }

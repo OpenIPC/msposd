@@ -8,6 +8,7 @@ extern "C"
 #endif
 #endif
 
+#include "common.h"
 
     typedef enum osd_color_fmt
     {

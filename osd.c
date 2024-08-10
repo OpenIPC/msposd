@@ -13,12 +13,15 @@
 #include "osd/msp/msp_displayport.h"
 
 #ifdef _x86
-#include <SFML/Graphics.h>
-#include <SFML/Window.h>
+    #include <SFML/Graphics.h>
+    #include <SFML/Window.h>
+ #else
+    #include "bmp/region.h"f
+    #include "bmp/common.h"    
 #endif
+#include "bmp/region.h"
+#include "bmp/bitmap.h"
 
-#include "bmp/bitmap.c"
-#include "bmp/common.h"
 
 
 #define X_OFFSET 120
@@ -29,6 +32,11 @@
 #define HEIGHT 810
 
 #define CLOCK_MONOTONIC 1
+
+
+void *io_map;
+struct osd *osds;
+char timefmt[32] = DEF_TIMEFMT;
 
 
 typedef struct display_info_s {
@@ -54,6 +62,10 @@ static const display_info_t hd_display_info = {
 #define MAX_OSD_WIDTH 50
 #define MAX_OSD_HEIGHT 18
 
+#define OVERLAY_WIDTH 1280
+#define OVERLAY_HEIGHT 800
+
+#define FULL_OVERLAY_ID 1
 
 char font_2_name[256];
 
@@ -141,21 +153,28 @@ void draw_character_on_console(int row, int col, char ch) {
 BITMAP bitmapFnt;
 uint16_t character_map[MAX_OSD_WIDTH][MAX_OSD_HEIGHT];
 
+struct osd *osds;//regions over the overlay
+
+int cnt=0;
+
 static void draw_screenBMP(){
     
     int s32BytesPerPix=2;//ARGB1555, 16bit
 
     BITMAP bitmap;
 
-    bitmap.u32Height=900;
-    bitmap.u32Width=1280;
+    bitmap.u32Height=OVERLAY_HEIGHT;
+    bitmap.u32Width=OVERLAY_WIDTH;
     bitmap.pData = malloc(s32BytesPerPix * bitmap.u32Height * bitmap.u32Width);
     bitmap.enPixelFormat = PIXEL_FORMAT_1555;
 
-    memset( bitmap.pData, 0x8AAA ,bitmap.u32Width * bitmap.u32Height*2);
+    memset( bitmap.pData, 0x7111 + (cnt%0x900) ,bitmap.u32Width * bitmap.u32Height*2);
     current_display_info.font_width = bitmapFnt.u32Width/2;
     current_display_info.font_height = bitmapFnt.u32Height/256;
- 
+    cnt++;
+    if (cnt>current_display_info.char_height*current_display_info.char_width)
+        cnt=0;
+
     for (int y = 0; y < current_display_info.char_height; y++)
     {
         for (int x = 0; x < current_display_info.char_width; x++)
@@ -184,6 +203,11 @@ static void draw_screenBMP(){
                                 d_x,d_y);
 
                
+            }else{
+                if (x*y==cnt){
+                    memset( bitmap.pData + (bitmap.u32Width*y*2) + x*current_display_info.font_width , 
+                    0x7777 ,current_display_info.font_width *2);
+                }
             }
             DEBUG_PRINT("  ");
         }
@@ -210,6 +234,11 @@ static void draw_screenBMP(){
     // Cleanup resources
     sfSprite_destroy(sprite);
     sfTexture_destroy(texture);
+#else
+   int id=0;
+
+    set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);
+
 #endif
 
 
@@ -259,16 +288,10 @@ static void set_options(uint8_t font, uint8_t is_hd) {
     }
 }
 
-
+int fd_mem;
 static void InitMSPHook(){
     memset(character_map, 0, sizeof(character_map));
     
-
-    #ifdef _x86
-        sfVideoMode videoMode = {1440, 810, 32};
-        window = sfRenderWindow_create(videoMode, "MSP OSD", 0, NULL);
-        sfRenderWindow_display(window);
-    #endif
     char *font_name;   
     font_name = "font_inav.png";    
     char font_load_name[255];
@@ -284,6 +307,39 @@ static void InitMSPHook(){
     current_display_info.font_height = bitmapFnt.u32Height/256;
     printf("Font %s character size:%d:%d",font_name,current_display_info.font_width,current_display_info.font_height);
 
+
+    #ifdef _x86
+        sfVideoMode videoMode = {1440, 810, 32};
+        window = sfRenderWindow_create(videoMode, "MSP OSD", 0, NULL);
+        sfRenderWindow_display(window);
+    #else
+            //register overlays
+        fd_mem = open("/dev/mem", O_RDWR);
+        io_map = mmap(NULL, IO_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd_mem, IO_BASE);
+
+        #ifdef __SIGMASTAR__
+            static MI_RGN_PaletteTable_t g_stPaletteTable = {{{0, 0, 0, 0}}};
+            int s32Ret = MI_RGN_Init(&g_stPaletteTable);
+            if (s32Ret)
+                fprintf(stderr, "[%s:%d]RGN_Init failed with %#x!\n", __func__, __LINE__, s32Ret);
+        #endif
+
+            osds = mmap(NULL, sizeof(*osds) * MAX_OSD,
+                PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
+            for (int id = 0; id < MAX_OSD; id++)
+            {
+                osds[id].hand = id;
+                osds[id].size = DEF_SIZE;
+                osds[id].posx = DEF_POSX;
+                osds[id].posy = DEF_POSY;
+                osds[id].updt = 0;
+                strcpy(osds[id].font, DEF_FONT);
+                osds[id].text[0] = '\0';
+            }  
+            
+            create_region(&osds[FULL_OVERLAY_ID].hand, osds[FULL_OVERLAY_ID].posx, osds[FULL_OVERLAY_ID].posy, OVERLAY_WIDTH, OVERLAY_HEIGHT);
+    #endif
+    
     display_driver = calloc(1, sizeof(displayport_vtable_t));
     display_driver->draw_character = &draw_character;
     display_driver->clear_screen = &clear_screen;
@@ -292,4 +348,18 @@ static void InitMSPHook(){
 
     msp_state_t *msp_state = calloc(1, sizeof(msp_state_t));
     msp_state->cb = &msp_callback;
+    printf("\r\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",font_name);
+
+}
+
+static void CloseMSP(){
+     munmap(osds, sizeof(*osds) * MAX_OSD);
+    #ifdef __SIGMASTAR__
+    int s32Ret = MI_RGN_DeInit();
+    if (s32Ret)
+        printf("[%s:%d]RGN_DeInit failed with %#x!\n", __func__, __LINE__, s32Ret);
+    #endif
+    munmap(io_map, IO_SIZE);
+    close(fd_mem);
+
 }

@@ -1,8 +1,6 @@
 #ifndef COMMON_H_
 #define COMMON_H_
 
-#define __SIGMASTAR__
-
 #include <stdio.h>  // FILE, fseek, (f|p)open, (as|f)printf
 #include <stdlib.h> // abort, atoi, exit, free, malloc
 #include <string.h> // memcpy, memset, strcmp, strlen
@@ -31,18 +29,9 @@ extern "C"
 
 #include "config.h"
 
- 
- typedef enum
-{
-    E_MI_RGN_PIXEL_FORMAT_ARGB1555 = 0,
-    E_MI_RGN_PIXEL_FORMAT_ARGB4444,
-    E_MI_RGN_PIXEL_FORMAT_I2,
-    E_MI_RGN_PIXEL_FORMAT_I4,
-    E_MI_RGN_PIXEL_FORMAT_I8,
-    E_MI_RGN_PIXEL_FORMAT_RGB565,
-    E_MI_RGN_PIXEL_FORMAT_ARGB8888,
-    E_MI_RGN_PIXEL_FORMAT_MAX
-} MI_RGN_PixelFormat_e;
+#ifdef __SIGMASTAR__
+#include "mi_common.h"
+#include "mi_rgn.h"
 
 #define IO_BASE 0x1F000000
 #define IO_SIZE 0x400000
@@ -50,7 +39,27 @@ extern "C"
 #define PIXEL_FORMAT_1555 E_MI_RGN_PIXEL_FORMAT_ARGB1555
 #define PIXEL_FORMAT_2BPP E_MI_RGN_PIXEL_FORMAT_I2
 #define PIXEL_FORMAT_8888 E_MI_RGN_PIXEL_FORMAT_ARGB8888
- 
+#elif defined(__INGENIC__)
+#include "imp_system.h"
+#include "imp_osd.h"
+#include "imp_isp.h"
+
+#define PIXEL_FORMAT_4444 0
+#define PIXEL_FORMAT_1555 PIX_FMT_RGB555LE
+#define PIXEL_FORMAT_2BPP PIX_FMT_0RGB
+#define PIXEL_FORMAT_8888 PIX_FMT_ARGB
+#else
+#include "hi_common.h"
+#include "hi_math.h"
+#include "mpi_region.h"
+
+#define IO_BASE 0x12000000
+#define IO_SIZE 0x100000
+#define PIXEL_FORMAT_4444 PIXEL_FORMAT_ARGB_4444
+#define PIXEL_FORMAT_1555 PIXEL_FORMAT_ARGB_1555
+#define PIXEL_FORMAT_2BPP PIXEL_FORMAT_ARGB_2BPP
+#define PIXEL_FORMAT_8888 PIXEL_FORMAT_ARGB_8888
+#endif
 
 #ifndef DIV_UP
 #define DIV_UP(x, a) (((x) + ((a)-1)) / a)
@@ -93,7 +102,7 @@ extern "C"
         short width, height;
     } RECT;
 
-    
+    int sysinfo(struct sysinfo *);
 
     static void fatal(const char *message)
     {

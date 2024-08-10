@@ -1,7 +1,163 @@
 #include "region.h"
 
 const double inv16 = 1.0 / 16.0;
- 
+
+int create_region(int *handle, int x, int y, int width, int height)
+{
+    int s32Ret = -1;
+#ifdef __SIGMASTAR__
+    MI_RGN_ChnPort_t stChn;
+
+    MI_RGN_Attr_t stRegionCurrent;
+    MI_RGN_Attr_t stRegion;
+
+    MI_RGN_ChnPortParam_t stChnAttr;
+    MI_RGN_ChnPortParam_t stChnAttrCurrent;
+
+    stChn.eModId = E_MI_RGN_MODID_VPE;
+    stChn.s32DevId = 0;
+    stChn.s32ChnId = 0;
+
+    stRegion.eType = E_MI_RGN_TYPE_OSD;
+    stRegion.stOsdInitParam.stSize.u32Height = height;
+    stRegion.stOsdInitParam.stSize.u32Width = width;
+    stRegion.stOsdInitParam.ePixelFmt = PIXEL_FORMAT_1555;
+
+    s32Ret = MI_RGN_GetAttr(*handle, &stRegionCurrent);
+#else
+    MPP_CHN_S stChn;
+
+    RGN_ATTR_S stRegionCurrent;
+    RGN_ATTR_S stRegion;
+
+    RGN_CHN_ATTR_S stChnAttr;
+    RGN_CHN_ATTR_S stChnAttrCurrent;
+
+    stChn.enModId = HI_ID_VENC;
+    stChn.s32DevId = 0;
+    stChn.s32ChnId = 0;
+
+    stRegion.enType = OVERLAY_RGN;
+    stRegion.unAttr.stOverlay.stSize.u32Height = height;
+    stRegion.unAttr.stOverlay.stSize.u32Width = width;
+    stRegion.unAttr.stOverlay.u32CanvasNum = 2;
+    stRegion.unAttr.stOverlay.enPixelFmt = PIXEL_FORMAT_1555;
+    stRegion.unAttr.stOverlay.u32BgColor = 0x7fff;
+
+    s32Ret = HI_MPI_RGN_GetAttr(*handle, &stRegionCurrent);
+#endif
+    if (s32Ret)
+    {
+        fprintf(stderr, "[%s:%d]RGN_GetAttr failed with %#x , creating region %d...\n", __func__, __LINE__, s32Ret, *handle);
+#ifdef __SIGMASTAR__
+        s32Ret = MI_RGN_Create(*handle, &stRegion);
+#else
+        s32Ret = HI_MPI_RGN_Create(*handle, &stRegion);
+#endif
+        if (s32Ret)
+        {
+            fprintf(stderr, "[%s:%d]RGN_Create failed with %#x!\n", __func__, __LINE__, s32Ret);
+            return -1;
+        }
+    }
+    else
+    {
+#ifdef __SIGMASTAR__
+        if (stRegionCurrent.stOsdInitParam.stSize.u32Height != stRegion.stOsdInitParam.stSize.u32Height || stRegionCurrent.stOsdInitParam.stSize.u32Width != stRegion.stOsdInitParam.stSize.u32Width)
+#else
+        if (stRegionCurrent.unAttr.stOverlay.stSize.u32Height != stRegion.unAttr.stOverlay.stSize.u32Height || stRegionCurrent.unAttr.stOverlay.stSize.u32Width != stRegion.unAttr.stOverlay.stSize.u32Width)
+#endif
+        {
+            fprintf(stderr, "[%s:%d] Region parameters are different, recreating ... \n", __func__, __LINE__);
+#ifdef __SIGMASTAR__
+            stChn.s32OutputPortId = 1;
+            MI_RGN_DetachFromChn(*handle, &stChn);
+            stChn.s32OutputPortId = 0;
+            MI_RGN_DetachFromChn(*handle, &stChn);
+            MI_RGN_Destroy(*handle);
+            s32Ret = MI_RGN_Create(*handle, &stRegion);
+#else
+            HI_MPI_RGN_DetachFromChn(*handle, &stChn);
+            HI_MPI_RGN_Destroy(*handle);
+            s32Ret = HI_MPI_RGN_Create(*handle, &stRegion);
+#endif
+            if (s32Ret)
+            {
+                fprintf(stderr, "[%s:%d]RGN_Create failed with %#x!\n", __func__, __LINE__, s32Ret);
+                return -1;
+            }
+        }
+    }
+
+#ifdef __SIGMASTAR__
+    s32Ret = MI_RGN_GetDisplayAttr(*handle, &stChn, &stChnAttrCurrent);
+#else
+    s32Ret = HI_MPI_RGN_GetDisplayAttr(*handle, &stChn, &stChnAttrCurrent);
+#endif
+    if (s32Ret)
+        fprintf(stderr, "[%s:%d]RGN_GetDisplayAttr failed with %#x %d, attaching...\n", __func__, __LINE__, s32Ret, *handle);
+#ifdef __SIGMASTAR__
+    else if (stChnAttrCurrent.stPoint.u32X != x || stChnAttrCurrent.stPoint.u32Y != y)
+#else
+    else if (stChnAttrCurrent.unChnAttr.stOverlayChn.stPoint.s32X != x || stChnAttrCurrent.unChnAttr.stOverlayChn.stPoint.s32Y != y)
+#endif
+    {
+        fprintf(stderr, "[%s:%d] Position has changed, detaching handle %d from channel %d...\n", __func__, __LINE__, *handle, &stChn.s32ChnId);
+#ifdef __SIGMASTAR__
+        stChn.s32OutputPortId = 1;
+        MI_RGN_DetachFromChn(*handle, &stChn);
+        stChn.s32OutputPortId = 0;
+        MI_RGN_DetachFromChn(*handle, &stChn);
+#else
+        HI_MPI_RGN_DetachFromChn(*handle, &stChn);
+#endif
+    }
+
+#ifdef __SIGMASTAR__
+    memset(&stChnAttr, 0, sizeof(MI_RGN_ChnPortParam_t));
+    stChnAttr.bShow = 1;
+    stChnAttr.stPoint.u32X = x;
+    stChnAttr.stPoint.u32Y = y;
+    stChnAttr.unPara.stOsdChnPort.u32Layer = 0;
+    
+    stChnAttr.unPara.stOsdChnPort.stOsdAlphaAttr.eAlphaMode = E_MI_RGN_PIXEL_ALPHA;
+    stChnAttr.unPara.stOsdChnPort.stOsdAlphaAttr.stAlphaPara.stArgb1555Alpha.u8BgAlpha = 0;//0;
+    stChnAttr.unPara.stOsdChnPort.stOsdAlphaAttr.stAlphaPara.stArgb1555Alpha.u8FgAlpha = 255;
+    
+    /*
+    stChnAttr.unPara.stOsdChnPort.stOsdAlphaAttr.eAlphaMode =  E_MI_RGN_CONSTANT_ALPHA;
+    stChnAttr.unPara.stOsdChnPort.stOsdAlphaAttr.stAlphaPara.stArgb1555Alpha.u8BgAlpha = 64;
+    stChnAttr.unPara.stOsdChnPort.stOsdAlphaAttr.stAlphaPara.stArgb1555Alpha.u8FgAlpha = 127;
+    */
+
+    stChn.s32OutputPortId = 0;
+    MI_RGN_AttachToChn(*handle, &stChn, &stChnAttr);
+    stChn.s32OutputPortId = 1;
+    MI_RGN_AttachToChn(*handle, &stChn, &stChnAttr);
+#else
+    memset(&stChnAttr, 0, sizeof(RGN_CHN_ATTR_S));
+    stChnAttr.bShow = 1;
+    stChnAttr.enType = OVERLAY_RGN;
+    stChnAttr.unChnAttr.stOverlayChn.u32BgAlpha = 0;
+    stChnAttr.unChnAttr.stOverlayChn.u32FgAlpha = 128;
+    stChnAttr.unChnAttr.stOverlayChn.stQpInfo.bQpDisable = 0;
+    stChnAttr.unChnAttr.stOverlayChn.stQpInfo.bAbsQp = 0;
+    stChnAttr.unChnAttr.stOverlayChn.stQpInfo.s32Qp = 0;
+#ifndef __16CV300__
+    stChnAttr.unChnAttr.stOverlayChn.u16ColorLUT[0] = 0x3e0;
+    stChnAttr.unChnAttr.stOverlayChn.u16ColorLUT[1] = 0x7FFF;
+    stChnAttr.unChnAttr.stOverlayChn.enAttachDest = ATTACH_JPEG_MAIN;
+#endif
+    stChnAttr.unChnAttr.stOverlayChn.stPoint.s32X = x;
+    stChnAttr.unChnAttr.stOverlayChn.stPoint.s32Y = y;
+    stChnAttr.unChnAttr.stOverlayChn.u32Layer = 7;
+
+    HI_MPI_RGN_AttachToChn(*handle, &stChn, &stChnAttr);
+#endif
+
+    return s32Ret;
+}
+
 static int skipcol=1;
 
 int prepare_bitmap(const char *filename, BITMAP *bitmap, int bFil, unsigned int u16FilColor, int enPixelFmt)
@@ -279,3 +435,43 @@ int prepare_bitmapOld(const char *filename, BITMAP *bitmap, int bFil, unsigned i
 }
 
 
+int set_bitmap(int handle, BITMAP *bitmap)
+{
+#ifdef __SIGMASTAR__
+    int s32Ret = MI_RGN_SetBitMap(handle, (MI_RGN_Bitmap_t *)(bitmap));
+#else
+    int s32Ret = HI_MPI_RGN_SetBitMap(handle, (BITMAP_S *)(bitmap));
+#endif
+    if (s32Ret)
+    {
+        fprintf(stderr, "RGN_SetBitMap failed with %#x!\n", s32Ret);
+        return -1;
+    }
+    return s32Ret;
+}
+
+void unload_region(int *handle)
+{
+#ifdef __SIGMASTAR__
+    MI_RGN_ChnPort_t stChn;
+    stChn.s32DevId = 0;
+    stChn.s32ChnId = 0;
+
+    stChn.eModId = E_MI_RGN_MODID_VPE;
+    stChn.s32OutputPortId = 1;
+    MI_RGN_DetachFromChn(*handle, &stChn);
+    stChn.s32OutputPortId = 0;
+    MI_RGN_DetachFromChn(*handle, &stChn);
+    int s32Ret = MI_RGN_Destroy(*handle);
+#else
+    MPP_CHN_S stChn;
+    stChn.s32DevId = 0;
+    stChn.s32ChnId = 0;
+
+    stChn.enModId = HI_ID_VENC;
+    HI_MPI_RGN_DetachFromChn(*handle, &stChn);
+    int s32Ret = HI_MPI_RGN_Destroy(*handle);
+#endif
+    if (s32Ret)
+        fprintf(stderr, "[%s:%d]RGN_Destroy failed with %#x %d!\n", __func__, __LINE__, s32Ret, *handle);
+}

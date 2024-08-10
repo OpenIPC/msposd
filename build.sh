@@ -36,7 +36,7 @@ elif [ "$1" = "osd-star6e" ]; then
 	make -C . -B CC=$GCC DRV=$DRV $1
 elif [ "$1" = "osd-x86" ]; then
 	DRV=$PWD
-	make -C . 
+	make -C .  DRV=$DRV $1
 else
 	echo "Usage: $0 [osd-goke|osd-hisi|osd-star6b0|osd-star6e]"
 	exit 1
