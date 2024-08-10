@@ -9,7 +9,7 @@
             "program": "${workspaceFolder}/mavfwd",
             "args": [                
                 "--master",
-                "/dev/ttyUSB2",
+                "/dev/ttyUSB0",
                 "--baudrate",
                 "115200",
                 "--out",

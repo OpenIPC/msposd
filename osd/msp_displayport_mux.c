@@ -118,7 +118,7 @@ static void rx_msp_callback(msp_msg_t *msp_message)
             if (true) {
                 // This was an MSP DisplayPort message and we're in compressed mode, so pass it off to the DisplayPort handlers.
                 displayport_process_message(display_driver, msp_message);
-            } else {
+           // } else {
                 // This was an MSP DisplayPort message and we're in legacy mode, so buffer it until we get a whole frame.
                 if(fb_cursor > sizeof(frame_buffer)) {
                     printf("Exhausted frame buffer! Resetting...\n");
@@ -129,8 +129,10 @@ static void rx_msp_callback(msp_msg_t *msp_message)
                 copy_to_msp_frame_buffer(message_buffer, size);
                 if(msp_message->payload[0] == MSP_DISPLAYPORT_DRAW_SCREEN) {
                     // Once we have a whole frame of data, send it to the goggles.
-                    write(socket_fd, frame_buffer, fb_cursor);
-                    DEBUG_PRINT("DRAW! wrote %d bytes\n", fb_cursor);
+                    int written=write(socket_fd, frame_buffer, fb_cursor);
+                    //int written = sendto(socket_fd, frame_buffer, fb_cursor, 0, (struct sockaddr *)&si_other, sizeof(si_other));
+
+                    DEBUG_PRINT("DRAW! wrote %d bytes %d\n", fb_cursor, written);
                     fb_cursor = 0;
                 }
             }

@@ -26,6 +26,7 @@
 #include "osd/msp/msp.h"
 #include "osd/msp/msp.c" // why the fuck
 #include "osd/msp_displayport_mux.c"
+#include "osd/net/network.c"
 
 //#include "msp/msp.cpp"
 
@@ -1091,13 +1092,28 @@ int main(int argc, char **argv)
 	if (ParseMSP){
  		//msp_process_data(rx_msp_state, serial_data[i]);
 		 rx_msp_state = calloc(1, sizeof(msp_state_t));   
-		 rx_msp_state->cb = &rx_msp_callback;   
-		
+		 rx_msp_state->cb = &rx_msp_callback;  
+		if (true){//Debug parsing from device to PC
+			socket_fd = bind_socket(MSP_PORT+1); 
+			// Connect the socket to the target address and port
+			struct sockaddr_in si_other;
+			memset((char *)&si_other, 0, sizeof(si_other));
+			si_other.sin_family = AF_INET;
+			si_other.sin_port = htons(MSP_PORT);
+			si_other.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // Loopback address (localhost)
 
-    	          
+			if (connect(socket_fd, (struct sockaddr *)&si_other, sizeof(si_other)) == -1) {
+				perror("Failed to connect");
+				close(socket_fd);
+				return 1;
+			}
+		}
+		//loadfonts    	          
 	}
 
 	return handle_data(port_name, baudrate, out_addr, in_addr);
 }
+
+
 
 
