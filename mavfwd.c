@@ -28,6 +28,8 @@
 #include "osd/msp_displayport_mux.c"
 #include "osd/net/network.c"
 
+#include "osd.c"
+
 //#include "msp/msp.cpp"
 
 #define MAX_MTU 9000
@@ -1093,9 +1095,10 @@ int main(int argc, char **argv)
  		//msp_process_data(rx_msp_state, serial_data[i]);
 		 rx_msp_state = calloc(1, sizeof(msp_state_t));   
 		 rx_msp_state->cb = &rx_msp_callback;  
+		 InitMSPHook();
 		if (true){//Debug parsing from device to PC
 			socket_fd = bind_socket(MSP_PORT+1); 
-			// Connect the socket to the target address and port
+			// Connect the socket to the target address and port so that we can debug
 			struct sockaddr_in si_other;
 			memset((char *)&si_other, 0, sizeof(si_other));
 			si_other.sin_family = AF_INET;

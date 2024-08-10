@@ -6,7 +6,7 @@
             "name": "C Debug",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/mavfwd",
+            "program": "${workspaceFolder}/msposd",
             "args": [                
                 "--master",
                 "/dev/ttyUSB0",

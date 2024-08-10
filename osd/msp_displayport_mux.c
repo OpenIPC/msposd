@@ -128,10 +128,8 @@ static void rx_msp_callback(msp_msg_t *msp_message)
                 uint16_t size = msp_data_from_msg(message_buffer, msp_message);
                 copy_to_msp_frame_buffer(message_buffer, size);
                 if(msp_message->payload[0] == MSP_DISPLAYPORT_DRAW_SCREEN) {
-                    // Once we have a whole frame of data, send it to the goggles.
-                    int written=write(socket_fd, frame_buffer, fb_cursor);
-                    //int written = sendto(socket_fd, frame_buffer, fb_cursor, 0, (struct sockaddr *)&si_other, sizeof(si_other));
-
+                    // Once we have a whole frame of data, send it DEBUG it !!!
+                    int written=write(socket_fd, frame_buffer, fb_cursor);                    
                     DEBUG_PRINT("DRAW! wrote %d bytes %d\n", fb_cursor, written);
                     fb_cursor = 0;
                 }
