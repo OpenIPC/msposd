@@ -249,11 +249,7 @@ int prepare_bitmap(const char *filename, BITMAP *bitmap, int bFil, unsigned int 
                     {
                         *pu16Temp &= 0x7FFF;
                         
-                    }
-                    if (j==skipcol){
-                        *pu16Temp = 0x80FF;
-                         ccc++;
-                    }
+                    }                    
                     pu16Temp++;
                 }
             }

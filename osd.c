@@ -28,7 +28,7 @@
 
 #define PORT 7654
 
-#define WIDTH 1440
+#define WIDTH 1800
 #define HEIGHT 810
 
 #define CLOCK_MONOTONIC 1
@@ -62,10 +62,12 @@ static const display_info_t hd_display_info = {
 #define MAX_OSD_WIDTH 50
 #define MAX_OSD_HEIGHT 18
 
-#define OVERLAY_WIDTH 1280
-#define OVERLAY_HEIGHT 800
+#define OVERLAY_WIDTH 1600
+#define OVERLAY_HEIGHT 960
 
-#define FULL_OVERLAY_ID 1
+#define TRANSPARENT_COLOR 0x8000
+
+#define FULL_OVERLAY_ID 3
 
 char font_2_name[256];
 
@@ -85,8 +87,12 @@ static display_info_t current_display_info = SD_DISPLAY_INFO;
 static int load_font(const char *filename, BITMAP *bitmap){
     if (access(filename, F_OK))
         return -1;        
-    prepare_bitmap(filename, bitmap, 1, 0x8000, PIXEL_FORMAT_1555);                                    
-    return 0;    
+
+    //return prepare_bitmap(filename, bitmap, 1, 0x8000, PIXEL_FORMAT_1555);                                    
+
+    //White will be the transparant color
+    return prepare_bitmap(filename, bitmap, 1, TRANSPARENT_COLOR, PIXEL_FORMAT_1555);                                    
+      
 }
 
 void Convert1555ToRGBA(unsigned short* bitmap1555, unsigned char* rgbaData, unsigned int width, unsigned int height) {
@@ -123,6 +129,7 @@ void copyRectARGB1555(
     if (srcX + width > srcWidth || srcY + height > srcHeight ||
         destX + width > destWidth || destY + height > destHeight){
         // Handle error: the rectangle is out of bounds
+        printf("Error copyRectARGB1555 to %dx:%d\r\n", destX, destY);
         return;
     }
 
@@ -155,10 +162,13 @@ uint16_t character_map[MAX_OSD_WIDTH][MAX_OSD_HEIGHT];
 
 struct osd *osds;//regions over the overlay
 
-int cnt=0;
+static int cntr=-100;
 
 static void draw_screenBMP(){
-    
+        cntr++;
+    if (cntr<0 || cntr%3 != 1)
+        return ;
+
     int s32BytesPerPix=2;//ARGB1555, 16bit
 
     BITMAP bitmap;
@@ -168,12 +178,16 @@ static void draw_screenBMP(){
     bitmap.pData = malloc(s32BytesPerPix * bitmap.u32Height * bitmap.u32Width);
     bitmap.enPixelFormat = PIXEL_FORMAT_1555;
 
-    memset( bitmap.pData, 0x7111 + (cnt%0x900) ,bitmap.u32Width * bitmap.u32Height*2);
+    //test blink
+    //memset( bitmap.pData, 0x7111 + (cntr%0x200) ,bitmap.u32Width * bitmap.u32Height*2);
     current_display_info.font_width = bitmapFnt.u32Width/2;
     current_display_info.font_height = bitmapFnt.u32Height/256;
-    cnt++;
-    if (cnt>current_display_info.char_height*current_display_info.char_width)
-        cnt=0;
+ 
+    
+    if (cntr>current_display_info.char_height*current_display_info.char_width){
+        cntr=0;
+        printf("RESET testes\r\n");
+    }
 
     for (int y = 0; y < current_display_info.char_height; y++)
     {
@@ -204,10 +218,6 @@ static void draw_screenBMP(){
 
                
             }else{
-                if (x*y==cnt){
-                    memset( bitmap.pData + (bitmap.u32Width*y*2) + x*current_display_info.font_width , 
-                    0x7777 ,current_display_info.font_width *2);
-                }
             }
             DEBUG_PRINT("  ");
         }
@@ -236,7 +246,7 @@ static void draw_screenBMP(){
     sfTexture_destroy(texture);
 #else
    int id=0;
-
+    printf("set_bitmap:%d %d %d\r\n", bitmap.u32Height, bitmap.u32Width, cntr);
     set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);
 
 #endif
@@ -251,7 +261,7 @@ static void draw_screenBMP(){
 
 static void draw_character(uint32_t x, uint32_t y, uint16_t c)
 {
-    draw_character_on_console(y,x,c);
+    //draw_character_on_console(y,x,c);
     if (x > current_display_info.char_width - 1 || y > current_display_info.char_height - 1)
     {
         return;
@@ -293,12 +303,12 @@ static void InitMSPHook(){
     memset(character_map, 0, sizeof(character_map));
     
     char *font_name;   
-    font_name = "font_inav.png";    
+    font_name = "font_inav";    
     char font_load_name[255];
 
-    snprintf(font_load_name, 255, "%s.png", font_name);
+    snprintf(font_load_name, 255, "%s.bmp", font_name);
  
-    font_name = "font_inav.bmp";
+    font_name = "/font_inav.bmp";
     if (load_font(font_name,&bitmapFnt)<-1)// must clean up after free(bitmap.pData);
         printf("Can't load font %s",font_name);
     
@@ -314,8 +324,8 @@ static void InitMSPHook(){
         sfRenderWindow_display(window);
     #else
             //register overlays
-        fd_mem = open("/dev/mem", O_RDWR);
-        io_map = mmap(NULL, IO_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd_mem, IO_BASE);
+//        fd_mem = open("/dev/mem", O_RDWR);
+//        io_map = mmap(NULL, IO_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd_mem, IO_BASE);
 
         #ifdef __SIGMASTAR__
             static MI_RGN_PaletteTable_t g_stPaletteTable = {{{0, 0, 0, 0}}};
@@ -336,8 +346,47 @@ static void InitMSPHook(){
                 strcpy(osds[id].font, DEF_FONT);
                 osds[id].text[0] = '\0';
             }  
-            
-            create_region(&osds[FULL_OVERLAY_ID].hand, osds[FULL_OVERLAY_ID].posx, osds[FULL_OVERLAY_ID].posy, OVERLAY_WIDTH, OVERLAY_HEIGHT);
+            int rgn=0;
+            if (true)
+                rgn=create_region(&osds[FULL_OVERLAY_ID].hand, osds[FULL_OVERLAY_ID].posx, osds[FULL_OVERLAY_ID].posy, OVERLAY_WIDTH, OVERLAY_HEIGHT);
+
+            //LOGO
+            char img[32];
+            sprintf(img, "/tmp/osd%d.bmp", FULL_OVERLAY_ID);
+            if (!access(img, F_OK)){
+                    
+                BITMAP bitmap;
+                                
+                int prepared =!(prepare_bitmap(img, &bitmap, 1, TRANSPARENT_COLOR, PIXEL_FORMAT_1555));                                    
+                    //create_region(&osds[id].hand, osds[id].posx, osds[id].posy, bitmap.u32Width, bitmap.u32Height);
+
+                //prepared =!(prepare_bitmap(img, &bitmap, 1, 0x8000, PIXEL_FORMAT_1555));                                    
+                //rgn=create_region(&osds[FULL_OVERLAY_ID].hand, osds[FULL_OVERLAY_ID].posx, osds[FULL_OVERLAY_ID].posy, bitmap.u32Width, bitmap.u32Height);
+
+                printf("Loaded bmp  %d x %d success:%d\n",bitmap.u32Height, bitmap.u32Width,rgn);
+                 
+                if (prepared){
+                    printf("set_bitmap at %d tick\n");
+
+                    //Draw a line
+                    /*
+                    unsigned short *pu16Temp;
+                    pu16Temp = (unsigned short *)bitmap.pData;
+                    pu16Temp+= bitmap.u32Height * counter;                 
+                    for (int j = 0; j < bitmap.u32Width; j++){                            
+                        *pu16Temp = 0x80FF;                                                            
+                        pu16Temp++;
+                    }                                       
+                    */
+                    set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);
+                    free(bitmap.pData);
+                }
+               
+            }else
+                 printf("No logo file %s \n",img);
+
+
+
     #endif
     
     display_driver = calloc(1, sizeof(displayport_vtable_t));
@@ -359,7 +408,7 @@ static void CloseMSP(){
     if (s32Ret)
         printf("[%s:%d]RGN_DeInit failed with %#x!\n", __func__, __LINE__, s32Ret);
     #endif
-    munmap(io_map, IO_SIZE);
-    close(fd_mem);
+//    munmap(io_map, IO_SIZE);
+//    close(fd_mem);
 
 }
