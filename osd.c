@@ -12,10 +12,10 @@
 #include "osd/msp/msp.h"
 #include "osd/msp/msp_displayport.h"
 
-//#ifdef _x86
+#ifdef _x86
 #include <SFML/Graphics.h>
 #include <SFML/Window.h>
-//#endif
+#endif
 
 #include "bmp/bitmap.c"
 #include "bmp/common.h"

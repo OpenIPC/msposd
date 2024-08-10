@@ -1,6 +1,6 @@
-CFLAGS=-O1 -g -fsanitize=address -fno-omit-frame-pointer -Wall -Wextra
+CFLAGS=-O1 -g  -fno-omit-frame-pointer -Wall -Wextra
 #LDFLAGS = -g -fsanitize=address -L/usr/lib/x86_64-linux-gnu/
-LDFLAGS = -g -fsanitize=address
+LDFLAGS = -g 
 LDLIBS=-levent_core
 
 
