@@ -23,13 +23,11 @@
 #include "bmp/bitmap.h"
 
 
-
-#define X_OFFSET 120
+#define X_OFFSET 0
 
 #define PORT 7654
 
-#define WIDTH 1800
-#define HEIGHT 810
+
 
 #define CLOCK_MONOTONIC 1
 
@@ -59,21 +57,28 @@ static const display_info_t hd_display_info = {
     .num_chars = 512,
 };
 
+/*
+36*50=1800
+54*18=972
+*/
 #define MAX_OSD_WIDTH 50
 #define MAX_OSD_HEIGHT 18
 
-#define OVERLAY_WIDTH 1600
-#define OVERLAY_HEIGHT 960
+#define OVERLAY_WIDTH 1800
+#define OVERLAY_HEIGHT 1000
 
-#define TRANSPARENT_COLOR 0x8000
+#define TRANSPARENT_COLOR 0xFBDE
 
 #define FULL_OVERLAY_ID 3
+#define FAST_OVERLAY_ID 4
 
 char font_2_name[256];
 
 static displayport_vtable_t *display_driver;
 
 static display_info_t current_display_info = SD_DISPLAY_INFO;
+
+static int  MinTimeBetweenScreenRefresh;
 
 #ifdef _x86
     sfTexture *font_1;
@@ -86,12 +91,10 @@ static display_info_t current_display_info = SD_DISPLAY_INFO;
 
 static int load_font(const char *filename, BITMAP *bitmap){
     if (access(filename, F_OK))
-        return -1;        
-
-    //return prepare_bitmap(filename, bitmap, 1, 0x8000, PIXEL_FORMAT_1555);                                    
+        return -1;                                                
 
     //White will be the transparant color
-    return prepare_bitmap(filename, bitmap, 1, TRANSPARENT_COLOR, PIXEL_FORMAT_1555);                                    
+    return prepare_bitmap(filename, bitmap, 2, TRANSPARENT_COLOR, PIXEL_FORMAT_1555);                                    
       
 }
 
@@ -129,7 +132,7 @@ void copyRectARGB1555(
     if (srcX + width > srcWidth || srcY + height > srcHeight ||
         destX + width > destWidth || destY + height > destHeight){
         // Handle error: the rectangle is out of bounds
-        printf("Error copyRectARGB1555 to %dx:%d\r\n", destX, destY);
+        printf("Error copyRectARGB1555 to %d : %d\r\n", destX, destY);
         return;
     }
 
@@ -139,6 +142,8 @@ void copyRectARGB1555(
             uint32_t srcIndex = (srcY + y) * srcWidth + (srcX + x);
             uint32_t destIndex = (destY + y) * destWidth + (destX + x);
 
+            //if (srcBitmap[srcIndex]==TRANSPARENT_COLOR)
+             //   srcBitmap[srcIndex]=0x7FFF;
             // Copy the pixel
             destBitmap[destIndex] = srcBitmap[srcIndex];
         }
@@ -157,6 +162,15 @@ void draw_character_on_console(int row, int col, char ch) {
     printf("%c", ch);
 }
 
+uint64_t get_time_ms() // in milliseconds
+{
+    struct timespec ts;
+    int rc = clock_gettime(1 /*CLOCK_MONOTONIC*/, &ts);
+    //if (rc < 0) 
+//		return get_current_time_ms_Old();
+    return ts.tv_sec * 1000LL + ts.tv_nsec / 1000000;
+}
+
 BITMAP bitmapFnt;
 uint16_t character_map[MAX_OSD_WIDTH][MAX_OSD_HEIGHT];
 
@@ -164,10 +178,108 @@ struct osd *osds;//regions over the overlay
 
 static int cntr=-100;
 
+int center_refresh=0;
+//static int center_x=3,center_y=0, center_width=0,center_height=0;
+
+static void draw_screenCenter(){
+
+    cntr++;
+    //if (cntr<0 || cntr%30 != 1)
+    //    return ;
+
+    int s32BytesPerPix=2;//ARGB1555, 16bit
+
+    BITMAP bitmap;
+
+    bitmap.u32Height= osds[FAST_OVERLAY_ID].height;
+    bitmap.u32Width= osds[FAST_OVERLAY_ID].width;
+    bitmap.pData = malloc(s32BytesPerPix * bitmap.u32Height * bitmap.u32Width);
+    bitmap.enPixelFormat = PIXEL_FORMAT_1555;
+    
+    current_display_info.font_width = bitmapFnt.u32Width/2;
+    current_display_info.font_height = bitmapFnt.u32Height/256;
+    int yy= (OVERLAY_HEIGHT - osds[FAST_OVERLAY_ID].height)/2;
+    int xx=(OVERLAY_WIDTH - osds[FAST_OVERLAY_ID].width)/2;
+
+    int cy= current_display_info.char_height * yy/OVERLAY_HEIGHT;
+    int cx= current_display_info.char_width * xx/OVERLAY_WIDTH;
+
+    for (int y = cy; y < current_display_info.char_height-cy; y++)
+    {
+        for (int x = cx; x < current_display_info.char_width-cx; x++)
+        {
+            uint16_t c = character_map[x][y];
+            if (c != 0)
+            {
+                uint8_t page = 0;
+                if (c > 255) {
+                    page = 1;
+                    c = c & 0xFF;
+                }
+               // DEBUG_PRINT("%02X", c);
+                //Where is the rectangle in the Font Bitmap
+                u_int16_t s_left = page*current_display_info.font_width;
+                u_int16_t s_top = current_display_info.font_height * c;
+                u_int16_t s_width = current_display_info.font_width;
+                u_int16_t s_height = current_display_info.font_height;                                
+                //the location in the screen bmp where we will place the character glyph
+                u_int16_t d_x=(x-cx) * current_display_info.font_width + X_OFFSET;
+                u_int16_t d_y=(y-cy) * current_display_info.font_height;
+                
+                copyRectARGB1555(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
+                                bitmap.pData,bitmap.u32Width, bitmap.u32Height,
+                                s_left,s_top,s_width,s_height,
+                                d_x,d_y);
+
+               
+            }else{
+            }
+           // DEBUG_PRINT("  ");
+        }
+       // DEBUG_PRINT("\n");
+    }
+
+#ifdef _x86
+    sfRenderWindow_clear(window, sfColor_fromRGB(55, 55, 55));
+    unsigned char* rgbaData = malloc(bitmap.u32Width * bitmap.u32Height * 4);  // Allocate memory for RGBA data    
+    Convert1555ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height);    
+    sfTexture* texture = sfTexture_create(bitmap.u32Width, bitmap.u32Height);
+    if (!texture) 
+        return;
+    sfTexture_updateFromPixels(texture, rgbaData, bitmap.u32Width, bitmap.u32Height, 0, 0);
+    free(rgbaData);  
+    // Step 2: Create a sprite and set the texture
+    sfSprite* sprite = sfSprite_create();
+    sfSprite_setTexture(sprite, texture, sfTrue);
+    // Set the position where you want to draw the sprite
+    sfVector2f position = {1, 1};
+    sfSprite_setPosition(sprite, position);    
+    sfRenderWindow_drawSprite(window, sprite, NULL);
+
+    // Cleanup resources
+    sfSprite_destroy(sprite);
+    sfTexture_destroy(texture);
+#else
+   int id=0;
+    printf("set_bitmap:%d %d %d\r\n", bitmap.u32Height, bitmap.u32Width, cntr);
+    set_bitmap(osds[FAST_OVERLAY_ID].hand, &bitmap);
+
+#endif
+
+
+    free(bitmap.pData);
+}
+
+
+static unsigned long long LastDrawn=0;
+
 static void draw_screenBMP(){
         cntr++;
-    if (cntr<0 || cntr%3 != 1)
-        return ;
+    //if (cntr<0 || cntr%5 != 1)
+    //    return ;
+	if ( abs(get_time_ms()-LastDrawn) < MinTimeBetweenScreenRefresh)//Once a second max
+		return ;
+    LastDrawn=abs(get_time_ms());
 
     int s32BytesPerPix=2;//ARGB1555, 16bit
 
@@ -201,7 +313,7 @@ static void draw_screenBMP(){
                     page = 1;
                     c = c & 0xFF;
                 }
-                DEBUG_PRINT("%02X", c);
+               // DEBUG_PRINT("%02X", c);
                 //Where is the rectangle in the Font Bitmap
                 u_int16_t s_left = page*current_display_info.font_width;
                 u_int16_t s_top = current_display_info.font_height * c;
@@ -219,9 +331,9 @@ static void draw_screenBMP(){
                
             }else{
             }
-            DEBUG_PRINT("  ");
+           // DEBUG_PRINT("  ");
         }
-        DEBUG_PRINT("\n");
+       // DEBUG_PRINT("\n");
     }
 
 #ifdef _x86
@@ -271,13 +383,17 @@ static void draw_character(uint32_t x, uint32_t y, uint16_t c)
 
 static void clear_screen()
 {
-    DEBUG_PRINT("clear\n");
+    printf("clear screen\n");
     memset(character_map, 0, sizeof(character_map));
+    LastDrawn=abs(get_time_ms())+100;//give 120ms more to load data 
 }
 
 static void draw_complete()
 {
     draw_screenBMP();
+
+    //draw_screenCenter();
+
 #ifdef _x86
     sfRenderWindow_display(window);
 #endif    
@@ -308,18 +424,35 @@ static void InitMSPHook(){
 
     snprintf(font_load_name, 255, "%s.bmp", font_name);
  
-    font_name = "/font_inav.bmp";
-    if (load_font(font_name,&bitmapFnt)<-1)// must clean up after free(bitmap.pData);
-        printf("Can't load font %s",font_name);
-    
 
+    font_name = "/usr/bin/font_inav.bmp";
+    #ifdef _x86
+    font_name = "font_inav.bmp";
+    #endif
+    if (load_font(font_name,&bitmapFnt)<0)// must clean up after free(bitmap.pData);
+        printf("Can't load font %s \r\n",font_name);
+    
+    if (bitmapFnt.u32Width==0)
+        printf("Error in font %s \r\n !!!",font_name);
     current_display_info.font_width = bitmapFnt.u32Width/2;
     current_display_info.font_height = bitmapFnt.u32Height/256;
     printf("Font %s character size:%d:%d",font_name,current_display_info.font_width,current_display_info.font_height);
+    int rgn=0;   
 
+    osds = mmap(NULL, sizeof(*osds) * MAX_OSD,
+                PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
+    for (int id = 0; id < MAX_OSD; id++){
+        osds[id].hand = id;
+        osds[id].size = DEF_SIZE;
+        osds[id].posx = DEF_POSX;
+        osds[id].posy = DEF_POSY;
+        osds[id].updt = 0;
+        strcpy(osds[id].font, DEF_FONT);
+        osds[id].text[0] = '\0';
+    }  
 
     #ifdef _x86
-        sfVideoMode videoMode = {1440, 810, 32};
+        sfVideoMode videoMode = {OVERLAY_WIDTH+20, OVERLAY_HEIGHT+20, 32};
         window = sfRenderWindow_create(videoMode, "MSP OSD", 0, NULL);
         sfRenderWindow_display(window);
     #else
@@ -334,30 +467,20 @@ static void InitMSPHook(){
                 fprintf(stderr, "[%s:%d]RGN_Init failed with %#x!\n", __func__, __LINE__, s32Ret);
         #endif
 
-            osds = mmap(NULL, sizeof(*osds) * MAX_OSD,
-                PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
-            for (int id = 0; id < MAX_OSD; id++)
-            {
-                osds[id].hand = id;
-                osds[id].size = DEF_SIZE;
-                osds[id].posx = DEF_POSX;
-                osds[id].posy = DEF_POSY;
-                osds[id].updt = 0;
-                strcpy(osds[id].font, DEF_FONT);
-                osds[id].text[0] = '\0';
-            }  
-            int rgn=0;
+           
+            
+            
             if (true)
                 rgn=create_region(&osds[FULL_OVERLAY_ID].hand, osds[FULL_OVERLAY_ID].posx, osds[FULL_OVERLAY_ID].posy, OVERLAY_WIDTH, OVERLAY_HEIGHT);
 
+            
+
             //LOGO
-            char img[32];
+            char img[32];//test to show a simple files
             sprintf(img, "/tmp/osd%d.bmp", FULL_OVERLAY_ID);
-            if (!access(img, F_OK)){
-                    
-                BITMAP bitmap;
-                                
-                int prepared =!(prepare_bitmap(img, &bitmap, 1, TRANSPARENT_COLOR, PIXEL_FORMAT_1555));                                    
+            if (!access(img, F_OK)){                    
+                BITMAP bitmap;                                
+                int prepared =!(prepare_bitmap(img, &bitmap, 2, TRANSPARENT_COLOR, PIXEL_FORMAT_1555));                                    
                     //create_region(&osds[id].hand, osds[id].posx, osds[id].posy, bitmap.u32Width, bitmap.u32Height);
 
                 //prepared =!(prepare_bitmap(img, &bitmap, 1, 0x8000, PIXEL_FORMAT_1555));                                    
@@ -367,17 +490,7 @@ static void InitMSPHook(){
                  
                 if (prepared){
                     printf("set_bitmap at %d tick\n");
-
-                    //Draw a line
-                    /*
-                    unsigned short *pu16Temp;
-                    pu16Temp = (unsigned short *)bitmap.pData;
-                    pu16Temp+= bitmap.u32Height * counter;                 
-                    for (int j = 0; j < bitmap.u32Width; j++){                            
-                        *pu16Temp = 0x80FF;                                                            
-                        pu16Temp++;
-                    }                                       
-                    */
+                   
                     set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);
                     free(bitmap.pData);
                 }
@@ -388,6 +501,17 @@ static void InitMSPHook(){
 
 
     #endif
+
+     if (false){ //fast_overlay           
+        printf("%d\r",osds[FULL_OVERLAY_ID].posx);      
+        osds[FAST_OVERLAY_ID].width=OVERLAY_WIDTH/3; 
+        osds[FAST_OVERLAY_ID].height = OVERLAY_HEIGHT/3;
+        
+        osds[FAST_OVERLAY_ID].posx=(OVERLAY_WIDTH-osds[FAST_OVERLAY_ID].width)/2;
+        osds[FAST_OVERLAY_ID].posy=(OVERLAY_HEIGHT-osds[FAST_OVERLAY_ID].height)/2;
+
+        rgn=create_region(&osds[FAST_OVERLAY_ID].hand, osds[FAST_OVERLAY_ID].posx, osds[FAST_OVERLAY_ID].posy, osds[FAST_OVERLAY_ID].width, osds[FAST_OVERLAY_ID].height);
+    }
     
     display_driver = calloc(1, sizeof(displayport_vtable_t));
     display_driver->draw_character = &draw_character;

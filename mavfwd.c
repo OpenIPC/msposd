@@ -70,6 +70,7 @@ int minAggPckts=3;
 
 static bool monitor_wfb=false;
 static int temp = false;
+ 
 
 static void print_usage()
 {
@@ -81,12 +82,14 @@ static void print_usage()
 	       "  -i --in          Remote input port (%s by default)\n"
 	       "  -c --channels    RC Channel to listen for commands (0 by default) and call channels.sh\n"
 	       "  -w --wait        Delay after each command received(2000ms default)\n"
+		   "  -r --fps         Max MSP refresh rate\n"
 		   "  -p --persist     How long a channel value must persist to generate a command - for multiposition switches (0ms default)\n"
 	       "  -a --aggregate   Aggregate packets in frames (1 no aggregation, 0 no parsing only raw data forward) (%d by default) \n"
 	       "  -f --folder      Folder for file mavlink.msg (default is current folder)\n"	       	    
 	       "  -t --temp        Inject SoC temperature into telemetry\n"
 		   "  -d --wfb         Monitors wfb.log file and reports errors via mavlink HUD messages\n"
 		   "  -s --osd         Parse MSP and draw OSD over the video"
+
 	       "  -v --verbose     Display each packet, default not\n"	       
 	       "  --help         Display this help\n",
 	       default_master, default_baudrate, defualt_out_addr,
@@ -986,6 +989,7 @@ int main(int argc, char **argv)
 		{ "in", required_argument, NULL, 'i' },
 		{ "channels", required_argument, NULL, 'c' },
 		{ "wait_time", required_argument, NULL, 'w' },				
+		{ "refreshrate", required_argument, NULL, 'r' },				
 		{ "folder", required_argument, NULL, 'f' },						
 		{ "persist", required_argument, NULL, 'p' },
 		{ "osd", no_argument, NULL, 'd' },	
@@ -1000,7 +1004,7 @@ int main(int argc, char **argv)
 	int baudrate = default_baudrate;
 	const char *out_addr = defualt_out_addr;
 	const char *in_addr = default_in_addr;
-	
+	MinTimeBetweenScreenRefresh=100;
 	last_board_temp=-100;
 
 	int opt;
@@ -1058,6 +1062,11 @@ int main(int argc, char **argv)
 			break;
 		case 'w':
 			wait_after_bash = atoi(optarg);			
+			LastStart=get_current_time_ms();
+			break;
+
+		case 'r':
+			MinTimeBetweenScreenRefresh = 1000/atoi(optarg);			
 			LastStart=get_current_time_ms();
 			break;
 

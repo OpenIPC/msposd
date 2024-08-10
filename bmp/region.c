@@ -238,17 +238,18 @@ int prepare_bitmap(const char *filename, BITMAP *bitmap, int bFil, unsigned int 
     {
         unsigned short *pu16Temp;
         pu16Temp = (unsigned short *)bitmap->pData;
-        if (bFil)
+        if (bFil>0)
         {
              
             for (i = 0; i < bitmap->u32Height; i++)
             {
                 for (j = 0; j < bitmap->u32Width; j++)
-                {
-                    if (u16FilColor == *pu16Temp)
-                    {
-                        *pu16Temp &= 0x7FFF;
-                        
+                {//64478 = 0xFBDE R:245,G:245,B:245
+                    if (bFil==2 && i==0 && j==0)//take transparent color from first pixel
+                        u16FilColor = *pu16Temp; 
+
+                    if (u16FilColor == *pu16Temp){
+                        *pu16Temp &= 0x7FFF;                        
                     }                    
                     pu16Temp++;
                 }

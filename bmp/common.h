@@ -87,6 +87,7 @@ extern "C"
         char updt;
         char font[32];
         char text[80];
+        short width, height;
     } OSD;
 
     typedef struct bitmap
