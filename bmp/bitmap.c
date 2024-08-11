@@ -766,8 +766,8 @@ void copyRectARGB1555(
     }
 }
 
-
-void copyRectI8(
+/*
+void copyRectI8Slow(
     uint8_t* srcBitmap, uint32_t srcWidth, uint32_t srcHeight,
     uint8_t* destBitmap, uint32_t destWidth, uint32_t destHeight,
     uint32_t srcX, uint32_t srcY, uint32_t width, uint32_t height,
@@ -794,6 +794,35 @@ void copyRectI8(
         }
     }
 }
+*/
+ 
+void copyRectI8(
+    uint8_t* srcBitmap, uint32_t srcWidth, uint32_t srcHeight,
+    uint8_t* destBitmap, uint32_t destWidth, uint32_t destHeight,
+    uint32_t srcX, uint32_t srcY, uint32_t width, uint32_t height,
+    uint32_t destX, uint32_t destY)
+{
+    // Bounds checking
+    if (srcX + width > srcWidth || srcY + height > srcHeight ||
+        destX + width > destWidth || destY + height > destHeight) {
+        // Handle error: the rectangle is out of bounds
+        printf("Error copyRectI8 to %d : %d\r\n", destX, destY);
+        return;
+    }
+
+    // Calculate the starting indices once
+    uint32_t srcStartIndex = srcY * srcWidth + srcX;
+    uint32_t destStartIndex = destY * destWidth + destX;
+
+    // Copy each row in one operation using memcpy
+    for (uint32_t y = 0; y < height; ++y) {
+        memcpy(&destBitmap[destStartIndex + y * destWidth],
+               &srcBitmap[srcStartIndex + y * srcWidth],
+               width);
+    }
+}
+
+
 
 void ConvertI8ToRGBA(uint8_t* bitmapI8, uint8_t* rgbaData, uint32_t width, uint32_t height, MI_RGN_PaletteElement_t* palette) {
     for (uint32_t i = 0; i < width * height; ++i) {

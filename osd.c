@@ -27,10 +27,12 @@
 
 #define PORT 7654
 
-
-
 #define CLOCK_MONOTONIC 1
 
+/*----------------------------------------------------------------------------------------------------*/
+/*------------CONFIGURE SWITCHES ----------------------------------------------------------------*/
+static int enable_fast_layout = 0;
+static int Use_Fast_Font = 0;
 
 void *io_map;
 struct osd *osds;
@@ -91,9 +93,6 @@ int fcX= 12; int fcW=10; int fcY= 5 ; int fcH=8;
     sfRenderWindow *window;
 #endif
 
-
-static int enable_fast_layout = 0;
-static int Use_Fast_Font = 1;
 
 static int load_font(const char *filename, BITMAP *bitmap){
     if (access(filename, F_OK))
@@ -236,7 +235,7 @@ static void draw_screenCenter(){
     free(bitmap.pData);
 }
 
- 
+ BITMAP bmpBuff;
 
 static void draw_screenBMP(){
         
@@ -258,15 +257,15 @@ static void draw_screenBMP(){
     if (PIXEL_FORMAT_DEFAULT==4)
          s32BytesPerPix=1;//I8, 8bit
 
-    BITMAP bitmap;
+    if (bmpBuff.pData==NULL)
 
-    bitmap.u32Height=OVERLAY_HEIGHT;
-    bitmap.u32Width=OVERLAY_WIDTH;
-    bitmap.pData = malloc(s32BytesPerPix * bitmap.u32Height * bitmap.u32Width);
-    bitmap.enPixelFormat =  PIXEL_FORMAT_DEFAULT;//  PIXEL_FORMAT_DEFAULT ;//PIXEL_FORMAT_1555;
+    bmpBuff.u32Height=OVERLAY_HEIGHT;
+    bmpBuff.u32Width=OVERLAY_WIDTH;
+    if (bmpBuff.pData==NULL)
+        bmpBuff.pData = malloc(s32BytesPerPix * bmpBuff.u32Height * bmpBuff.u32Width);
+    bmpBuff.enPixelFormat =  PIXEL_FORMAT_DEFAULT;//  PIXEL_FORMAT_DEFAULT ;//PIXEL_FORMAT_1555;
 
-    //test blink
-    //memset( bitmap.pData, 0x7111 + (cntr%0x200) ,bitmap.u32Width * bitmap.u32Height*2);
+    
     current_display_info.font_width = bitmapFnt.u32Width/2;
     current_display_info.font_height = bitmapFnt.u32Height/256;
  
@@ -295,12 +294,12 @@ static void draw_screenBMP(){
 
                 if (PIXEL_FORMAT_DEFAULT==0)                
                  copyRectARGB1555(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
-                                 bitmap.pData,bitmap.u32Width, bitmap.u32Height,
+                                 bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
                                  s_left,s_top,s_width,s_height,
                                  d_x,d_y);
                 else
                 copyRectI8(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
-                                bitmap.pData,bitmap.u32Width, bitmap.u32Height,
+                                bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
                                 s_left,s_top,s_width,s_height,
                                 d_x,d_y);
 
@@ -314,16 +313,16 @@ static void draw_screenBMP(){
 #ifdef _x86
     uint64_t step2=get_time_ms();  
     sfRenderWindow_clear(window, sfColor_fromRGB(55, 55, 55));
-    unsigned char* rgbaData = malloc(bitmap.u32Width * bitmap.u32Height * 4);  // Allocate memory for RGBA data    
+    unsigned char* rgbaData = malloc(bmpBuff.u32Width * bmpBuff.u32Height * 4);  // Allocate memory for RGBA data    
 
     if (PIXEL_FORMAT_DEFAULT==0)          
-        Convert1555ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height);    
+        Convert1555ToRGBA( bmpBuff.pData, rgbaData, bmpBuff.u32Width, bmpBuff.u32Height);    
     else
-        ConvertI8ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height,&g_stPaletteTable);    
-    sfTexture* texture = sfTexture_create(bitmap.u32Width, bitmap.u32Height);
+        ConvertI8ToRGBA( bmpBuff.pData, rgbaData, bmpBuff.u32Width, bmpBuff.u32Height,&g_stPaletteTable);    
+    sfTexture* texture = sfTexture_create(bmpBuff.u32Width, bmpBuff.u32Height);
     if (!texture) 
         return;
-    sfTexture_updateFromPixels(texture, rgbaData, bitmap.u32Width, bitmap.u32Height, 0, 0);
+    sfTexture_updateFromPixels(texture, rgbaData, bmpBuff.u32Width, bmpBuff.u32Height, 0, 0);
     free(rgbaData);  
     // Step 2: Create a sprite and set the texture
     sfSprite* sprite = sfSprite_create();
@@ -342,13 +341,13 @@ static void draw_screenBMP(){
    int id=0;
    // printf("%lu set_bitmapB for:%d | %d ms\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn));
     uint64_t step2=get_time_ms();
-    set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);
+    set_bitmap(osds[FULL_OVERLAY_ID].hand, &bmpBuff);
     printf("%lu set_bitmapB for:%u | %u  ms\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn) , (uint32_t)(get_time_ms() - step2));
 
 #endif
 
 
-    free(bitmap.pData);
+    //free(bitmap.pData);
 }
 
 // ---------------------------------------------------
