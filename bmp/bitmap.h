@@ -93,8 +93,49 @@ extern "C"
         int blen;
     } OSD_COMP_INFO;
 
+#ifndef __SIGMASTAR__
+typedef struct MI_RGN_PaletteElement_s
+{
+    unsigned char u8Alpha;
+    unsigned char u8Red;
+    unsigned char u8Green;
+    unsigned char u8Blue;
+}MI_RGN_PaletteElement_t;
+
+typedef struct MI_RGN_PaletteTable_s
+{
+    MI_RGN_PaletteElement_t astElement[256];
+}MI_RGN_PaletteTable_t;
+
+#endif
+
     int parse_bitmap(const char *filename, OSD_BITMAPFILEHEADER *pBmpFileHeader, OSD_BITMAPINFO *pBmpInfo);
     int CreateSurfaceByBitMap(const char *pszFileName, OSD_SURFACE_S *pstSurface, unsigned char *pu8Virt);
+
+    uint32_t colorDistance8(uint8_t r1, uint8_t g1, uint8_t b1, uint8_t r2, uint8_t g2, uint8_t b2) ;
+    uint8_t findClosestPaletteIndex8(uint16_t color, MI_RGN_PaletteTable_t* paletteTable);
+
+    void convertBitmap1555ToI8(
+        uint16_t* srcBitmap, uint32_t width, uint32_t height, 
+        uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable);
+    void Convert1555ToRGBA(unsigned short* bitmap1555, unsigned char* rgbaData, unsigned int width, unsigned int height);
+    
+    void ConvertI8ToRGBA(uint8_t* bitmapI8, uint8_t* rgbaData, uint32_t width, uint32_t height, MI_RGN_PaletteElement_t* palette);
+
+    void copyRectARGB1555(
+        uint16_t* srcBitmap, uint32_t srcWidth, uint32_t srcHeight,
+        uint16_t* destBitmap, uint32_t destWidth, uint32_t destHeight,
+        uint32_t srcX, uint32_t srcY, uint32_t width, uint32_t height,
+        uint32_t destX, uint32_t destY);
+
+    void copyRectI8(
+        uint8_t* srcBitmap, uint32_t srcWidth, uint32_t srcHeight,
+        uint8_t* destBitmap, uint32_t destWidth, uint32_t destHeight,
+        uint32_t srcX, uint32_t srcY, uint32_t width, uint32_t height,
+        uint32_t destX, uint32_t destY);
+
+    // Declaration of global palette table
+    extern MI_RGN_PaletteTable_t g_stPaletteTable;
 
 #ifdef __cplusplus
 #if __cplusplus

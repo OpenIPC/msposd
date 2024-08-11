@@ -104,87 +104,6 @@ static int load_font(const char *filename, BITMAP *bitmap){
       
 }
 
-void Convert1555ToRGBA(unsigned short* bitmap1555, unsigned char* rgbaData, unsigned int width, unsigned int height) {
-    for (unsigned int i = 0; i < width * height; ++i) {
-        unsigned short pixel1555 = bitmap1555[i];
-
-        // Extract components
-        unsigned char alpha = (pixel1555 & 0x8000) ? 255 : 0;  // 1-bit alpha, 0x8000 is the alpha bit mask
-        unsigned char red = (pixel1555 & 0x7C00) >> 10;        // 5-bit red, shift right to align
-        unsigned char green = (pixel1555 & 0x03E0) >> 5;       // 5-bit green
-        unsigned char blue = (pixel1555 & 0x001F);             // 5-bit blue
-
-        // Scale 5-bit colors to 8-bit
-        red = (red << 3) | (red >> 2);     // Scale from 5-bit to 8-bit
-        green = (green << 3) | (green >> 2); // Scale from 5-bit to 8-bit
-        blue = (blue << 3) | (blue >> 2);   // Scale from 5-bit to 8-bit
-
-        // Combine into RGBA
-        rgbaData[i * 4 + 0] = red;
-        rgbaData[i * 4 + 1] = green;
-        rgbaData[i * 4 + 2] = blue;
-        rgbaData[i * 4 + 3] = alpha;
-    }
-}
-
-
-void copyRectARGB1555(
-    uint16_t* srcBitmap, uint32_t srcWidth, uint32_t srcHeight,
-    uint16_t* destBitmap, uint32_t destWidth, uint32_t destHeight,
-    uint32_t srcX, uint32_t srcY, uint32_t width, uint32_t height,
-    uint32_t destX, uint32_t destY)
-{
-    // Bounds checking
-    if (srcX + width > srcWidth || srcY + height > srcHeight ||
-        destX + width > destWidth || destY + height > destHeight){
-        // Handle error: the rectangle is out of bounds
-        printf("Error copyRectARGB1555 to %d : %d\r\n", destX, destY);
-        return;
-    }
-
-    for (uint32_t y = 0; y < height; ++y) {
-        for (uint32_t x = 0; x < width; ++x) {
-            // Calculate the source and destination indices
-            uint32_t srcIndex = (srcY + y) * srcWidth + (srcX + x);
-            uint32_t destIndex = (destY + y) * destWidth + (destX + x);
-
-            //if (srcBitmap[srcIndex]==TRANSPARENT_COLOR)
-             //   srcBitmap[srcIndex]=0x7FFF;
-            // Copy the pixel
-            destBitmap[destIndex] = srcBitmap[srcIndex];
-        }
-    }
-}
-
-
-void copyRectI8(
-    uint8_t* srcBitmap, uint32_t srcWidth, uint32_t srcHeight,
-    uint8_t* destBitmap, uint32_t destWidth, uint32_t destHeight,
-    uint32_t srcX, uint32_t srcY, uint32_t width, uint32_t height,
-    uint32_t destX, uint32_t destY)
-{
-    // Bounds checking
-    if (srcX + width > srcWidth || srcY + height > srcHeight ||
-        destX + width > destWidth || destY + height > destHeight){
-        // Handle error: the rectangle is out of bounds
-        printf("Error copyRectARGB1555 to %d : %d\r\n", destX, destY);
-        return;
-    }
-
-    for (uint32_t y = 0; y < height; ++y) {
-        for (uint32_t x = 0; x < width; ++x) {
-            // Calculate the source and destination indices
-            uint32_t srcIndex = (srcY + y) * srcWidth + (srcX + x);
-            uint32_t destIndex = (destY + y) * destWidth + (destX + x);
-
-            //if (srcBitmap[srcIndex]==TRANSPARENT_COLOR)
-             //   srcBitmap[srcIndex]=0x7FFF;
-            // Copy the pixel
-            destBitmap[destIndex] = srcBitmap[srcIndex];
-        }
-    }
-}
-
 
 // Function to move the cursor to a specific position
 void move_cursor(int row, int col) {
@@ -243,11 +162,7 @@ static void draw_screenCenter(){
     
     current_display_info.font_width = bitmapFnt.u32Width/2;
     current_display_info.font_height = bitmapFnt.u32Height/256;
-    //int yy= (OVERLAY_HEIGHT - osds[FAST_OVERLAY_ID].height)/2;
-    //int xx=(OVERLAY_WIDTH - osds[FAST_OVERLAY_ID].width)/2;
 
-    //int cy= current_display_info.char_height * yy/OVERLAY_HEIGHT;
-    //int cx= current_display_info.char_width * xx/OVERLAY_WIDTH;
 
     for (int y = fcY; y < current_display_info.char_height-fcH; y++)
     {
@@ -284,6 +199,7 @@ static void draw_screenCenter(){
     }
 
 #ifdef _x86
+    uint64_t step2=get_time_ms();  
     sfRenderWindow_clear(window, sfColor_fromRGB(55, 55, 55));
     unsigned char* rgbaData = malloc(bitmap.u32Width * bitmap.u32Height * 4);  // Allocate memory for RGBA data    
     Convert1555ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height);    
@@ -303,6 +219,10 @@ static void draw_screenCenter(){
     // Cleanup resources
     sfSprite_destroy(sprite);
     sfTexture_destroy(texture);
+
+    
+    printf("%lu set_bitmapC for:%u | %u  ms\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn) , (uint32_t)(get_time_ms() - step2));
+
 #else
     int id=0;
     uint64_t step2=get_time_ms();  
@@ -334,8 +254,9 @@ static void draw_screenBMP(){
 
     LastDrawn= get_time_ms();
 
-    //int s32BytesPerPix=2;//ARGB1555, 16bit
-    int s32BytesPerPix=1;//I8, 8bit
+    int s32BytesPerPix=2;//ARGB1555, 16bit
+    if (PIXEL_FORMAT_DEFAULT==4)
+         s32BytesPerPix=1;//I8, 8bit
 
     BITMAP bitmap;
 
@@ -371,21 +292,18 @@ static void draw_screenBMP(){
                 //the location in the screen bmp where we will place the character glyph
                 u_int16_t d_x=x * current_display_info.font_width + X_OFFSET;
                 u_int16_t d_y=y * current_display_info.font_height;
-                
-                // copyRectARGB1555(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
-                //                 bitmap.pData,bitmap.u32Width, bitmap.u32Height,
-                //                 s_left,s_top,s_width,s_height,
-                //                 d_x,d_y);
 
+                if (PIXEL_FORMAT_DEFAULT==0)                
+                 copyRectARGB1555(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
+                                 bitmap.pData,bitmap.u32Width, bitmap.u32Height,
+                                 s_left,s_top,s_width,s_height,
+                                 d_x,d_y);
+                else
                 copyRectI8(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
                                 bitmap.pData,bitmap.u32Width, bitmap.u32Height,
                                 s_left,s_top,s_width,s_height,
                                 d_x,d_y);
 
-
-                                             
-
-               
             }else{
             }
            // DEBUG_PRINT("  ");
@@ -394,9 +312,14 @@ static void draw_screenBMP(){
     }
 
 #ifdef _x86
+    uint64_t step2=get_time_ms();  
     sfRenderWindow_clear(window, sfColor_fromRGB(55, 55, 55));
     unsigned char* rgbaData = malloc(bitmap.u32Width * bitmap.u32Height * 4);  // Allocate memory for RGBA data    
-    Convert1555ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height);    
+
+    if (PIXEL_FORMAT_DEFAULT==0)          
+        Convert1555ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height);    
+    else
+        ConvertI8ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height,&g_stPaletteTable);    
     sfTexture* texture = sfTexture_create(bitmap.u32Width, bitmap.u32Height);
     if (!texture) 
         return;
@@ -413,6 +336,8 @@ static void draw_screenBMP(){
     // Cleanup resources
     sfSprite_destroy(sprite);
     sfTexture_destroy(texture);
+    printf("%lu set_bitmapC for:%u | %u  ms\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn) , (uint32_t)(get_time_ms() - step2));
+
 #else
    int id=0;
    // printf("%lu set_bitmapB for:%d | %d ms\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn));
@@ -543,154 +468,6 @@ void convertBitmap1555ToI4(
     }
 }
 
-#ifdef __SIGMASTAR__
-
-
-// Function to calculate the squared difference between two colors in ARGB1555 format
-uint32_t colorDistance8(uint8_t r1, uint8_t g1, uint8_t b1, uint8_t r2, uint8_t g2, uint8_t b2) {
-    return (r1 - r2) * (r1 - r2) + (g1 - g2) * (g1 - g2) + (b1 - b2) * (b1 - b2);
-}
-
-// Function to find the closest color in the palette
-uint8_t findClosestPaletteIndex8(uint16_t color, MI_RGN_PaletteTable_t* paletteTable) {
-    uint32_t minDistance = 65535;
-    uint8_t bestIndex = 0;
-
-    // Extract RGB components from ARGB1555 color
-    uint8_t r = ((color >> 10) & 0x1F) << 3;  // Convert 5-bit to 8-bit
-    uint8_t g = ((color >> 5) & 0x1F) << 3;   // Convert 5-bit to 8-bit
-    uint8_t b = (color & 0x1F) << 3;          // Convert 5-bit to 8-bit
-     
-    for (uint8_t i = 1; i < 17; ++i) {// only 16 searched
-        MI_RGN_PaletteElement_t* element = &paletteTable->astElement[i];
-        uint32_t distance = colorDistance8(r, g, b, element->u8Red, element->u8Green, element->u8Blue);
-        if (distance < minDistance) {
-            minDistance = distance;
-            bestIndex = i;
-        }
-    }
-
-    return bestIndex;
-}
-
-void convertBitmap1555ToI8(
-    uint16_t* srcBitmap, uint32_t width, uint32_t height, 
-    uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable)
-{
-    uint32_t numPixels = width * height;
-
-    for (uint32_t i = 0; i < numPixels; ++i) {
-        // Find the closest palette index for each ARGB1555 pixel
-        uint8_t paletteIndex = findClosestPaletteIndex8(srcBitmap[i], paletteTable)+1;
-
-        // Store the palette index in the I8 bitmap
-        destBitmap[i] = paletteIndex;
-    }
-}
-
-//static MI_RGN_PaletteTable_t g_stPaletteTable ;//= {{{0, 0, 0, 0}}};
-MI_RGN_PaletteTable_t g_stPaletteTable =
-{
-    { //index0 ~ index15
-        {255,   0,   0,   0}, // reserved
-      
-        {0xFF, 0xF8, 0x00, 0x00}, // 0x7C00 -> Red
-        {0xFF, 0x00, 0xF8, 0x00}, // 0x03E0 -> Green
-        {0xFF, 0x00, 0x00, 0xF8}, // 0x001F -> Blue
-        {0xFF, 0xF8, 0xF8, 0x00}, // 0x7FE0 -> Yellow
-        {0xFF, 0xF8, 0x00, 0xF8}, // 0x7C1F -> Magenta
-        {0xFF, 0x00, 0xF8, 0xF8}, // 0x03FF -> Cyan
-        {0xFF, 0xF8, 0xF8, 0xF8}, // 0x7FFF -> White
-        {0x00, 0x00, 0x00, 0x00}, // 0x0000 -> Black
-        {0xFF, 0x84, 0x10, 0x10}, // 0x4210 -> Gray (Darker)
-        {0xFF, 0x42, 0x08, 0x08}, // 0x2108 -> Gray (Even Darker)
-        {0xFF, 0x63, 0x18, 0xC6}, // 0x318C -> Gray (Medium)
-        {0xFF, 0xAD, 0x52, 0xD6}, // 0x5AD6 -> Gray (Lighter)
-        {0xFF, 0xCE, 0x73, 0x9C}, // 0x739C -> Gray (Light)
-        {0xFF, 0x31, 0x8C, 0x6C}, // 0x18C6 -> Gray (Dark)
-        {0xFF, 0x52, 0x52, 0x29}, // 0x2529 -> Gray (Medium Dark)
-        {0xFF, 0xDE, 0x7B, 0xDE},  // 0x7BDE -> Gray (Lightest)
- 
-         //index17 ~ index31
-         {  0,   0,   0,  30}, {  0,   0, 255,  60}, {  0, 128,   0,  90},
-         {255,   0,   0, 120}, {  0, 255, 255, 150}, {255, 255,   0, 180}, {  0, 255,   0, 210},
-         {255,   0, 255, 240}, {192, 192, 192, 255}, {128, 128, 128,  10}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         //index32 ~ index47
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         //index48 ~ index63
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         //index64 ~ index79
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         //index80 ~ index95
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         //index96 ~ index111
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         //index112 ~ index127
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         //index128 ~ index143
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         //index144 ~ index159
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         //index160 ~ index175
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         //index176 ~ index191
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         //index192 ~ index207
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         //index208 ~ index223
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         //index224 ~ index239
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         // (index236 :192,160,224 defalut colorkey)
-         {192, 160, 224, 255}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         //index240 ~ index255
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
-         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {192, 160, 224, 255}
-    }
-};
-#endif
-
 
 
 int fd_mem;
@@ -719,7 +496,8 @@ static void InitMSPHook(){
     int rgn=0;   
 
 
-     // Convert font to i8 format
+     // Convert icons font to i8 format
+     // This will speed up a little... :)
      if (Use_Fast_Font){
         PIXEL_FORMAT_DEFAULT=4;//E_MI_RGN_PIXEL_FORMAT_I8
         uint8_t* destBitmap =  (uint8_t*)malloc((bitmapFnt.u32Width * bitmapFnt.u32Height));     
@@ -727,7 +505,8 @@ static void InitMSPHook(){
         free(bitmapFnt.pData);
         bitmapFnt.pData=(void *)destBitmap;
         bitmapFnt.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
-     }
+     }else
+        PIXEL_FORMAT_DEFAULT=0;//1555 PIXEL_FORMAT_1555
 
     osds = mmap(NULL, sizeof(*osds) * MAX_OSD,
                 PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
@@ -750,18 +529,16 @@ static void InitMSPHook(){
 
         #ifdef __SIGMASTAR__            
             int s32Ret = MI_RGN_Init(&g_stPaletteTable);
-
             printf("MI_RGN_Init results: %d \r\n", s32Ret);
             if (s32Ret)
                 fprintf(stderr, "[%s:%d]RGN_Init failed with %#x!\n", __func__, __LINE__, s32Ret);
         #endif
 
-
-            //if (!enable_fast_layout) //alway create this region
+            //THIS IS NEEDED, the main 
             rgn=create_region(&osds[FULL_OVERLAY_ID].hand, osds[FULL_OVERLAY_ID].posx, osds[FULL_OVERLAY_ID].posy, OVERLAY_WIDTH, OVERLAY_HEIGHT);
             printf("Create_region results: %d %s\r\n", rgn);
     
-            //LOGO
+            //LOGO TEST, for TEST ONLY, loads a file for several seconds as overlay
             char img[32];//test to show a simple files
             sprintf(img, "/osd%d.bmp", FULL_OVERLAY_ID);
             if (!access(img, F_OK)){    
@@ -780,7 +557,6 @@ static void InitMSPHook(){
                   // Destination bitmap in I8 format (8 bits per pixel)
                     uint8_t* destBitmap =  (uint8_t*)malloc((bitmap.u32Width * bitmap.u32Height));     
                     convertBitmap1555ToI8(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable);
-
 
                     // Free allocated memory
                     //memset( bitmap.pData, 0x7111 ,bitmap.u32Width * bitmap.u32Height*2);
@@ -805,7 +581,7 @@ static void InitMSPHook(){
                  printf("No logo file %s \n",img);
     #endif
 
-     if (enable_fast_layout){ //fast_overlay     
+     if (enable_fast_layout){ //fast_overlay , can be smaller     
         fcX= 18; fcW=16;
         fcY= 6 ; fcH=8;  
         int fY=54;
@@ -839,8 +615,9 @@ static void CloseMSP(){
     #ifdef __SIGMASTAR__
     int s32Ret = MI_RGN_DeInit();
     if (s32Ret)
-        printf("[%s:%d]RGN_DeInit failed with %#x!\n", __func__, __LINE__, s32Ret);
+        printf("[%s:%d]RGN_DeInit failed with %#x!\n", __func__, __LINE__, s32Ret);        
     #endif
-
+    if (bitmapFnt.pData!=NULL)
+        free(bitmapFnt.pData);
 
 }

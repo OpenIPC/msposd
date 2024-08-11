@@ -440,7 +440,9 @@ int prepare_bitmapOld(const char *filename, BITMAP *bitmap, int bFil, unsigned i
 
 int set_bitmap(int handle, BITMAP *bitmap)
 {
+
     int s32Ret=0;
+#ifndef _x86    
 #ifdef __SIGMASTAR__
      s32Ret = MI_RGN_SetBitMap(handle, (MI_RGN_Bitmap_t *)(bitmap));
 #elif __GOKE__
@@ -453,6 +455,7 @@ int set_bitmap(int handle, BITMAP *bitmap)
         fprintf(stderr, "RGN_SetBitMap failed with %#x  %d!\n", s32Ret, (s32Ret & 0xFFF) );
         return -1;
     }
+#endif
     return s32Ret;
 }
 

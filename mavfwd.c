@@ -971,6 +971,7 @@ err:
 		event_base_free(base);
 
 	libevent_global_shutdown();
+	
 	CloseMSP();
 
 	return ret;
