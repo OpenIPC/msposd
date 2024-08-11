@@ -69,8 +69,8 @@ static const display_info_t hd_display_info = {
 
 #define TRANSPARENT_COLOR 0xFBDE
 
-#define FULL_OVERLAY_ID 3
-#define FAST_OVERLAY_ID 4
+#define FULL_OVERLAY_ID 1
+#define FAST_OVERLAY_ID 2
 
 char font_2_name[256];
 
@@ -93,6 +93,7 @@ int fcX= 12; int fcW=10; int fcY= 5 ; int fcH=8;
 
 
 static int enable_fast_layout = 0;
+static int Use_Fast_Font = 1;
 
 static int load_font(const char *filename, BITMAP *bitmap){
     if (access(filename, F_OK))
@@ -156,6 +157,35 @@ void copyRectARGB1555(
 }
 
 
+void copyRectI8(
+    uint8_t* srcBitmap, uint32_t srcWidth, uint32_t srcHeight,
+    uint8_t* destBitmap, uint32_t destWidth, uint32_t destHeight,
+    uint32_t srcX, uint32_t srcY, uint32_t width, uint32_t height,
+    uint32_t destX, uint32_t destY)
+{
+    // Bounds checking
+    if (srcX + width > srcWidth || srcY + height > srcHeight ||
+        destX + width > destWidth || destY + height > destHeight){
+        // Handle error: the rectangle is out of bounds
+        printf("Error copyRectARGB1555 to %d : %d\r\n", destX, destY);
+        return;
+    }
+
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+            // Calculate the source and destination indices
+            uint32_t srcIndex = (srcY + y) * srcWidth + (srcX + x);
+            uint32_t destIndex = (destY + y) * destWidth + (destX + x);
+
+            //if (srcBitmap[srcIndex]==TRANSPARENT_COLOR)
+             //   srcBitmap[srcIndex]=0x7FFF;
+            // Copy the pixel
+            destBitmap[destIndex] = srcBitmap[srcIndex];
+        }
+    }
+}
+
+
 // Function to move the cursor to a specific position
 void move_cursor(int row, int col) {
     printf("\033[%d;%dH", row, col);
@@ -181,7 +211,7 @@ uint16_t character_map[MAX_OSD_WIDTH][MAX_OSD_HEIGHT];
 
 struct osd *osds;//regions over the overlay
 
-static int cntr=-100;
+static long cntr=-10;
 
 int center_refresh=0;
 //static int center_x=3,center_y=0, center_width=0,center_height=0;
@@ -289,9 +319,9 @@ static void draw_screenCenter(){
  
 
 static void draw_screenBMP(){
-        cntr++;
-    //if (cntr<0 || cntr%5 != 1)
-    //    return ;
+        
+    if (cntr++<0 )
+        return ;
 	if ( (get_time_ms() - LastDrawn  ) < MinTimeBetweenScreenRefresh){//Once a second max{
         // printf("%lu DrawSkipped LastDrawn:%lu\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)LastDrawn);
 		return ;
@@ -304,14 +334,15 @@ static void draw_screenBMP(){
 
     LastDrawn= get_time_ms();
 
-    int s32BytesPerPix=2;//ARGB1555, 16bit
+    //int s32BytesPerPix=2;//ARGB1555, 16bit
+    int s32BytesPerPix=1;//I8, 8bit
 
     BITMAP bitmap;
 
     bitmap.u32Height=OVERLAY_HEIGHT;
     bitmap.u32Width=OVERLAY_WIDTH;
     bitmap.pData = malloc(s32BytesPerPix * bitmap.u32Height * bitmap.u32Width);
-    bitmap.enPixelFormat = PIXEL_FORMAT_1555;
+    bitmap.enPixelFormat =  PIXEL_FORMAT_DEFAULT;//  PIXEL_FORMAT_DEFAULT ;//PIXEL_FORMAT_1555;
 
     //test blink
     //memset( bitmap.pData, 0x7111 + (cntr%0x200) ,bitmap.u32Width * bitmap.u32Height*2);
@@ -341,10 +372,18 @@ static void draw_screenBMP(){
                 u_int16_t d_x=x * current_display_info.font_width + X_OFFSET;
                 u_int16_t d_y=y * current_display_info.font_height;
                 
-                copyRectARGB1555(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
+                // copyRectARGB1555(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
+                //                 bitmap.pData,bitmap.u32Width, bitmap.u32Height,
+                //                 s_left,s_top,s_width,s_height,
+                //                 d_x,d_y);
+
+                copyRectI8(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
                                 bitmap.pData,bitmap.u32Width, bitmap.u32Height,
                                 s_left,s_top,s_width,s_height,
                                 d_x,d_y);
+
+
+                                             
 
                
             }else{
@@ -446,6 +485,214 @@ static void set_options(uint8_t font, uint8_t is_hd) {
     }
 }
 
+//------------------------------------------------------------------
+//-----------------------bitmap conversion --------------
+//------------------------------------------------------------------
+#define PALETTE_SIZE 16
+// Function to calculate the squared difference between two colors
+uint32_t colorDistance(uint16_t color1, uint16_t color2) {
+    int r1 = (color1 >> 10) & 0x1F;
+    int g1 = (color1 >> 5) & 0x1F;
+    int b1 = color1 & 0x1F;
+
+    int r2 = (color2 >> 10) & 0x1F;
+    int g2 = (color2 >> 5) & 0x1F;
+    int b2 = color2 & 0x1F;
+
+    return (r1 - r2) * (r1 - r2) + (g1 - g2) * (g1 - g2) + (b1 - b2) * (b1 - b2);
+}
+
+// Function to find the closest color in the palette
+uint8_t findClosestPaletteIndex(uint16_t color, uint16_t* palette) {
+    uint32_t minDistance = 65535;
+    uint8_t bestIndex = 0;
+
+    for (uint8_t i = 0; i < PALETTE_SIZE; ++i) {
+        uint32_t distance = colorDistance(color, palette[i]);
+        if (distance < minDistance) {
+            minDistance = distance;
+            bestIndex = i;
+        }
+    }
+
+    return bestIndex;
+}
+
+
+void convertBitmap1555ToI4(
+    uint16_t* srcBitmap, uint32_t width, uint32_t height, 
+    uint8_t* destBitmap, uint16_t* palette)
+{
+    uint32_t numPixels = width * height;
+
+    for (uint32_t i = 0; i < numPixels; ++i) {
+        // Find the closest palette index for each ARGB1555 pixel
+        uint8_t paletteIndex = findClosestPaletteIndex(srcBitmap[i], palette);
+
+        if (paletteIndex<=0)
+            paletteIndex=1;
+        if (paletteIndex>4)
+            paletteIndex=4;
+        // Store the palette index in the I4 bitmap
+        if (i % 2 == 0) {
+            destBitmap[i / 2] = (paletteIndex << 4);  // Store in the upper 4 bits
+        } else {
+            destBitmap[i / 2] |= paletteIndex;  // Store in the lower 4 bits
+        }
+        
+    }
+}
+
+#ifdef __SIGMASTAR__
+
+
+// Function to calculate the squared difference between two colors in ARGB1555 format
+uint32_t colorDistance8(uint8_t r1, uint8_t g1, uint8_t b1, uint8_t r2, uint8_t g2, uint8_t b2) {
+    return (r1 - r2) * (r1 - r2) + (g1 - g2) * (g1 - g2) + (b1 - b2) * (b1 - b2);
+}
+
+// Function to find the closest color in the palette
+uint8_t findClosestPaletteIndex8(uint16_t color, MI_RGN_PaletteTable_t* paletteTable) {
+    uint32_t minDistance = 65535;
+    uint8_t bestIndex = 0;
+
+    // Extract RGB components from ARGB1555 color
+    uint8_t r = ((color >> 10) & 0x1F) << 3;  // Convert 5-bit to 8-bit
+    uint8_t g = ((color >> 5) & 0x1F) << 3;   // Convert 5-bit to 8-bit
+    uint8_t b = (color & 0x1F) << 3;          // Convert 5-bit to 8-bit
+     
+    for (uint8_t i = 1; i < 17; ++i) {// only 16 searched
+        MI_RGN_PaletteElement_t* element = &paletteTable->astElement[i];
+        uint32_t distance = colorDistance8(r, g, b, element->u8Red, element->u8Green, element->u8Blue);
+        if (distance < minDistance) {
+            minDistance = distance;
+            bestIndex = i;
+        }
+    }
+
+    return bestIndex;
+}
+
+void convertBitmap1555ToI8(
+    uint16_t* srcBitmap, uint32_t width, uint32_t height, 
+    uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable)
+{
+    uint32_t numPixels = width * height;
+
+    for (uint32_t i = 0; i < numPixels; ++i) {
+        // Find the closest palette index for each ARGB1555 pixel
+        uint8_t paletteIndex = findClosestPaletteIndex8(srcBitmap[i], paletteTable)+1;
+
+        // Store the palette index in the I8 bitmap
+        destBitmap[i] = paletteIndex;
+    }
+}
+
+//static MI_RGN_PaletteTable_t g_stPaletteTable ;//= {{{0, 0, 0, 0}}};
+MI_RGN_PaletteTable_t g_stPaletteTable =
+{
+    { //index0 ~ index15
+        {255,   0,   0,   0}, // reserved
+      
+        {0xFF, 0xF8, 0x00, 0x00}, // 0x7C00 -> Red
+        {0xFF, 0x00, 0xF8, 0x00}, // 0x03E0 -> Green
+        {0xFF, 0x00, 0x00, 0xF8}, // 0x001F -> Blue
+        {0xFF, 0xF8, 0xF8, 0x00}, // 0x7FE0 -> Yellow
+        {0xFF, 0xF8, 0x00, 0xF8}, // 0x7C1F -> Magenta
+        {0xFF, 0x00, 0xF8, 0xF8}, // 0x03FF -> Cyan
+        {0xFF, 0xF8, 0xF8, 0xF8}, // 0x7FFF -> White
+        {0x00, 0x00, 0x00, 0x00}, // 0x0000 -> Black
+        {0xFF, 0x84, 0x10, 0x10}, // 0x4210 -> Gray (Darker)
+        {0xFF, 0x42, 0x08, 0x08}, // 0x2108 -> Gray (Even Darker)
+        {0xFF, 0x63, 0x18, 0xC6}, // 0x318C -> Gray (Medium)
+        {0xFF, 0xAD, 0x52, 0xD6}, // 0x5AD6 -> Gray (Lighter)
+        {0xFF, 0xCE, 0x73, 0x9C}, // 0x739C -> Gray (Light)
+        {0xFF, 0x31, 0x8C, 0x6C}, // 0x18C6 -> Gray (Dark)
+        {0xFF, 0x52, 0x52, 0x29}, // 0x2529 -> Gray (Medium Dark)
+        {0xFF, 0xDE, 0x7B, 0xDE},  // 0x7BDE -> Gray (Lightest)
+ 
+         //index17 ~ index31
+         {  0,   0,   0,  30}, {  0,   0, 255,  60}, {  0, 128,   0,  90},
+         {255,   0,   0, 120}, {  0, 255, 255, 150}, {255, 255,   0, 180}, {  0, 255,   0, 210},
+         {255,   0, 255, 240}, {192, 192, 192, 255}, {128, 128, 128,  10}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         //index32 ~ index47
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         //index48 ~ index63
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         //index64 ~ index79
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         //index80 ~ index95
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         //index96 ~ index111
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         //index112 ~ index127
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         //index128 ~ index143
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         //index144 ~ index159
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         //index160 ~ index175
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         //index176 ~ index191
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         //index192 ~ index207
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         //index208 ~ index223
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         //index224 ~ index239
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         // (index236 :192,160,224 defalut colorkey)
+         {192, 160, 224, 255}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         //index240 ~ index255
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
+         {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {192, 160, 224, 255}
+    }
+};
+#endif
+
+
+
 int fd_mem;
 static void InitMSPHook(){
     memset(character_map, 0, sizeof(character_map));
@@ -468,8 +715,19 @@ static void InitMSPHook(){
         printf("Error in font %s \r\n !!!",font_name);
     current_display_info.font_width = bitmapFnt.u32Width/2;
     current_display_info.font_height = bitmapFnt.u32Height/256;
-    printf("Font %s character size:%d:%d",font_name,current_display_info.font_width,current_display_info.font_height);
+    printf("Font %s character size:%d:%d \r\n",font_name,current_display_info.font_width,current_display_info.font_height);
     int rgn=0;   
+
+
+     // Convert font to i8 format
+     if (Use_Fast_Font){
+        PIXEL_FORMAT_DEFAULT=4;//E_MI_RGN_PIXEL_FORMAT_I8
+        uint8_t* destBitmap =  (uint8_t*)malloc((bitmapFnt.u32Width * bitmapFnt.u32Height));     
+        convertBitmap1555ToI8(bitmapFnt.pData, bitmapFnt.u32Width , bitmapFnt.u32Height, destBitmap, &g_stPaletteTable);        
+        free(bitmapFnt.pData);
+        bitmapFnt.pData=(void *)destBitmap;
+        bitmapFnt.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
+     }
 
     osds = mmap(NULL, sizeof(*osds) * MAX_OSD,
                 PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
@@ -488,13 +746,12 @@ static void InitMSPHook(){
         window = sfRenderWindow_create(videoMode, "MSP OSD", 0, NULL);
         sfRenderWindow_display(window);
     #else
-            //register overlays
-//        fd_mem = open("/dev/mem", O_RDWR);
-//        io_map = mmap(NULL, IO_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd_mem, IO_BASE);
 
-        #ifdef __SIGMASTAR__
-            static MI_RGN_PaletteTable_t g_stPaletteTable = {{{0, 0, 0, 0}}};
+
+        #ifdef __SIGMASTAR__            
             int s32Ret = MI_RGN_Init(&g_stPaletteTable);
+
+            printf("MI_RGN_Init results: %d \r\n", s32Ret);
             if (s32Ret)
                 fprintf(stderr, "[%s:%d]RGN_Init failed with %#x!\n", __func__, __LINE__, s32Ret);
         #endif
@@ -502,19 +759,46 @@ static void InitMSPHook(){
 
             //if (!enable_fast_layout) //alway create this region
             rgn=create_region(&osds[FULL_OVERLAY_ID].hand, osds[FULL_OVERLAY_ID].posx, osds[FULL_OVERLAY_ID].posy, OVERLAY_WIDTH, OVERLAY_HEIGHT);
-
+            printf("Create_region results: %d %s\r\n", rgn);
     
             //LOGO
             char img[32];//test to show a simple files
-            sprintf(img, "/tmp/osd%d.bmp", FULL_OVERLAY_ID);
-            if (!access(img, F_OK)){                    
+            sprintf(img, "/osd%d.bmp", FULL_OVERLAY_ID);
+            if (!access(img, F_OK)){    
+                cntr=-200;                
                 BITMAP bitmap;                                
                 int prepared =!(prepare_bitmap(img, &bitmap, 2, TRANSPARENT_COLOR, PIXEL_FORMAT_1555));                                                                        
                 //rgn=create_region(&osds[FULL_OVERLAY_ID].hand, osds[FULL_OVERLAY_ID].posx, osds[FULL_OVERLAY_ID].posy, bitmap.u32Width, bitmap.u32Height);
-                printf("Loaded bmp  %d x %d success:%d\n",bitmap.u32Height, bitmap.u32Width,rgn);                 
+                printf("Loaded LOGO bmp  %d x %d success:%d\n",bitmap.u32Height, bitmap.u32Width,rgn);                 
+
+                if (true){//test to convert to 4 bits!
+
+                    // Destination bitmap in I4 format (4 bits per pixel)
+                    //uint8_t* destBitmap = (uint8_t*)malloc((bitmap.u32Width * bitmap.u32Height) / 2);                                     
+                    //convertBitmap1555ToI4(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, palette);
+                
+                  // Destination bitmap in I8 format (8 bits per pixel)
+                    uint8_t* destBitmap =  (uint8_t*)malloc((bitmap.u32Width * bitmap.u32Height));     
+                    convertBitmap1555ToI8(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable);
+
+
+                    // Free allocated memory
+                    //memset( bitmap.pData, 0x7111 ,bitmap.u32Width * bitmap.u32Height*2);
+                    free(bitmap.pData);
+
+                    bitmap.pData=(void *)destBitmap;//to thenew structure data only
+                    ///E_MI_RGN_PIXEL_FORMAT_I4 DOEAS NOT WORK!!!
+                    #ifdef __SIGMASTAR__
+                    bitmap.enPixelFormat = E_MI_RGN_PIXEL_FORMAT_I8; // E_MI_RGN_PIXEL_FORMAT_I4; //0
+                    #endif
+                    
+                }
+
                 if (prepared){
-                    printf("set_bitmap at %d tick\n");                   
-                    set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);
+                    printf("set_LOGO with u32Height:%d enPixelFormat %d\n",bitmap.u32Height, bitmap.enPixelFormat);                   
+                    int s32Ret=set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);
+                    if(s32Ret!=0)
+                        printf("ERROR set_bitmap%d \n",s32Ret);                   
                     free(bitmap.pData);
                 }               
             }else
@@ -545,6 +829,7 @@ static void InitMSPHook(){
 
     msp_state_t *msp_state = calloc(1, sizeof(msp_state_t));
     msp_state->cb = &msp_callback;
+
     printf("\r\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",font_name);
 
 }
@@ -556,7 +841,6 @@ static void CloseMSP(){
     if (s32Ret)
         printf("[%s:%d]RGN_DeInit failed with %#x!\n", __func__, __LINE__, s32Ret);
     #endif
-//    munmap(io_map, IO_SIZE);
-//    close(fd_mem);
+
 
 }

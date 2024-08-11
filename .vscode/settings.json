@@ -16,6 +16,8 @@
         "mi_common.h": "c",
         "bitmap.h": "c",
         "random": "c",
-        "format": "c"
+        "format": "c",
+        "compare": "c",
+        "cstdint": "c"
     }
 }

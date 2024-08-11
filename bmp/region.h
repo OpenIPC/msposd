@@ -8,6 +8,7 @@ extern "C"
 #endif
 #endif
 
+//#define PIXEL_FORMAT_DEFAULT E_MI_RGN_PIXEL_FORMAT_I8
 #include "common.h"
 #include "bitmap.h"
 

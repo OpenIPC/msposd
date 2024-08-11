@@ -1,5 +1,8 @@
 #include "region.h"
 
+
+PIXEL_FORMAT_DEFAULT=0;
+
 const double inv16 = 1.0 / 16.0;
 
 int create_region(int *handle, int x, int y, int width, int height)
@@ -22,7 +25,8 @@ int create_region(int *handle, int x, int y, int width, int height)
     stRegion.eType = E_MI_RGN_TYPE_OSD;
     stRegion.stOsdInitParam.stSize.u32Height = height;
     stRegion.stOsdInitParam.stSize.u32Width = width;
-    stRegion.stOsdInitParam.ePixelFmt = PIXEL_FORMAT_1555;
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!    
+    stRegion.stOsdInitParam.ePixelFmt = PIXEL_FORMAT_DEFAULT ;//PIXEL_FORMAT_1555;// E_MI_RGN_PIXEL_FORMAT_I4; //;PIXEL_FORMAT_1555;//E_MI_RGN_PIXEL_FORMAT_I4;//PIXEL_FORMAT_1555
 
     s32Ret = MI_RGN_GetAttr(*handle, &stRegionCurrent);
 #else
@@ -132,9 +136,9 @@ int create_region(int *handle, int x, int y, int width, int height)
     */
 
     stChn.s32OutputPortId = 0;
-    MI_RGN_AttachToChn(*handle, &stChn, &stChnAttr);
+    s32Ret =MI_RGN_AttachToChn(*handle, &stChn, &stChnAttr);
     stChn.s32OutputPortId = 1;
-    MI_RGN_AttachToChn(*handle, &stChn, &stChnAttr);
+    s32Ret = MI_RGN_AttachToChn(*handle, &stChn, &stChnAttr);
 #else
     memset(&stChnAttr, 0, sizeof(RGN_CHN_ATTR_S));
     stChnAttr.bShow = 1;
@@ -444,7 +448,9 @@ int set_bitmap(int handle, BITMAP *bitmap)
 #endif
     if (s32Ret)
     {
-        fprintf(stderr, "RGN_SetBitMap failed with %#x!\n", s32Ret);
+        if (s32Ret==E_MI_ERR_ILLEGAL_PARAM)
+            fprintf(stderr, "RGN_SetBitMap failed E_MI_ERR_ILLEGAL_PARAM %#x!\n", s32Ret);
+        fprintf(stderr, "RGN_SetBitMap failed with %#x  %d!\n", s32Ret, (s32Ret & 0xFFF) );
         return -1;
     }
     return s32Ret;

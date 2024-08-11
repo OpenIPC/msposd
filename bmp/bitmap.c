@@ -11,6 +11,7 @@ OSD_COMP_INFO s_OSDCompInfo[OSD_COLOR_FMT_BUTT] = {
     {8, 8, 8, 8}  /*ARGB8888*/
 };
 
+
 static inline unsigned short convert_2bpp(unsigned char r, unsigned char g, unsigned char b, OSD_COMP_INFO compinfo)
 {
     unsigned short pixel = 0;
@@ -564,3 +565,5 @@ int CreateSurfaceByCanvas(const char *pszFileName, OSD_SURFACE_S *pstSurface, un
 
     return 0;
 }
+
+
