@@ -1066,6 +1066,11 @@ int main(int argc, char **argv)
 			break;
 
 		case 'r':
+			int r=atoi(optarg);
+			if (r>100){
+				enable_fast_layout=true;
+				r=r%100;
+			}
 			MinTimeBetweenScreenRefresh = 1000/atoi(optarg);			
 			LastStart=get_current_time_ms();
 			break;

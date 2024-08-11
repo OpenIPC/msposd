@@ -80,6 +80,9 @@ static display_info_t current_display_info = SD_DISPLAY_INFO;
 
 static int  MinTimeBetweenScreenRefresh;
 
+//bounderies as characters of fast area. Fast Character
+int fcX= 12; int fcW=10; int fcY= 5 ; int fcH=8;
+
 #ifdef _x86
     sfTexture *font_1;
     sfTexture *font_2;
@@ -88,6 +91,8 @@ static int  MinTimeBetweenScreenRefresh;
     sfRenderWindow *window;
 #endif
 
+
+static int enable_fast_layout = 0;
 
 static int load_font(const char *filename, BITMAP *bitmap){
     if (access(filename, F_OK))
@@ -181,16 +186,26 @@ static int cntr=-100;
 int center_refresh=0;
 //static int center_x=3,center_y=0, center_width=0,center_height=0;
 
+
+static unsigned long long LastCleared=0;
+static unsigned long long LastDrawn=0;
+
 static void draw_screenCenter(){
 
     cntr++;
-    //if (cntr<0 || cntr%30 != 1)
-    //    return ;
-
     int s32BytesPerPix=2;//ARGB1555, 16bit
 
-    BITMAP bitmap;
+	if ( (get_time_ms() - LastDrawn  ) < MinTimeBetweenScreenRefresh){//Once a second max{        
+		return ;
+    }
 
+    if ( (get_time_ms() - LastCleared  ) < 150){//at least 200ms to reload data
+        printf("%lu DrawCenter skipped after clear LastDrawn:%lu | %lu%\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)LastDrawn%10000 , (uint32_t) LastCleared%10000);
+		return ;
+    }
+
+    BITMAP bitmap;
+    LastDrawn = get_time_ms();
     bitmap.u32Height= osds[FAST_OVERLAY_ID].height;
     bitmap.u32Width= osds[FAST_OVERLAY_ID].width;
     bitmap.pData = malloc(s32BytesPerPix * bitmap.u32Height * bitmap.u32Width);
@@ -198,15 +213,15 @@ static void draw_screenCenter(){
     
     current_display_info.font_width = bitmapFnt.u32Width/2;
     current_display_info.font_height = bitmapFnt.u32Height/256;
-    int yy= (OVERLAY_HEIGHT - osds[FAST_OVERLAY_ID].height)/2;
-    int xx=(OVERLAY_WIDTH - osds[FAST_OVERLAY_ID].width)/2;
+    //int yy= (OVERLAY_HEIGHT - osds[FAST_OVERLAY_ID].height)/2;
+    //int xx=(OVERLAY_WIDTH - osds[FAST_OVERLAY_ID].width)/2;
 
-    int cy= current_display_info.char_height * yy/OVERLAY_HEIGHT;
-    int cx= current_display_info.char_width * xx/OVERLAY_WIDTH;
+    //int cy= current_display_info.char_height * yy/OVERLAY_HEIGHT;
+    //int cx= current_display_info.char_width * xx/OVERLAY_WIDTH;
 
-    for (int y = cy; y < current_display_info.char_height-cy; y++)
+    for (int y = fcY; y < current_display_info.char_height-fcH; y++)
     {
-        for (int x = cx; x < current_display_info.char_width-cx; x++)
+        for (int x = fcX; x < current_display_info.char_width-fcW; x++)
         {
             uint16_t c = character_map[x][y];
             if (c != 0)
@@ -223,14 +238,13 @@ static void draw_screenCenter(){
                 u_int16_t s_width = current_display_info.font_width;
                 u_int16_t s_height = current_display_info.font_height;                                
                 //the location in the screen bmp where we will place the character glyph
-                u_int16_t d_x=(x-cx) * current_display_info.font_width + X_OFFSET;
-                u_int16_t d_y=(y-cy) * current_display_info.font_height;
+                u_int16_t d_x=(x-fcX) * current_display_info.font_width + X_OFFSET;
+                u_int16_t d_y=(y-fcY) * current_display_info.font_height;
                 
                 copyRectARGB1555(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
                                 bitmap.pData,bitmap.u32Width, bitmap.u32Height,
                                 s_left,s_top,s_width,s_height,
                                 d_x,d_y);
-
                
             }else{
             }
@@ -260,9 +274,11 @@ static void draw_screenCenter(){
     sfSprite_destroy(sprite);
     sfTexture_destroy(texture);
 #else
-   int id=0;
-    printf("set_bitmap:%d %d %d\r\n", bitmap.u32Height, bitmap.u32Width, cntr);
+    int id=0;
+    uint64_t step2=get_time_ms();  
     set_bitmap(osds[FAST_OVERLAY_ID].hand, &bitmap);
+    printf("%lu set_bitmapC for:%u | %u  ms\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn) , (uint32_t)(get_time_ms() - step2));
+
 
 #endif
 
@@ -270,16 +286,23 @@ static void draw_screenCenter(){
     free(bitmap.pData);
 }
 
-
-static unsigned long long LastDrawn=0;
+ 
 
 static void draw_screenBMP(){
         cntr++;
     //if (cntr<0 || cntr%5 != 1)
     //    return ;
-	if ( abs(get_time_ms()-LastDrawn) < MinTimeBetweenScreenRefresh)//Once a second max
+	if ( (get_time_ms() - LastDrawn  ) < MinTimeBetweenScreenRefresh){//Once a second max{
+        // printf("%lu DrawSkipped LastDrawn:%lu\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)LastDrawn);
 		return ;
-    LastDrawn=abs(get_time_ms());
+    }
+
+    if ( (get_time_ms() - LastCleared  ) < 200){//at least 200ms to reload data
+        printf("%lu DrawSkipped after clear LastDrawn:%lu | %lu%\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)LastDrawn%10000 , (uint32_t) LastCleared%10000);
+		return ;
+    }
+
+    LastDrawn= get_time_ms();
 
     int s32BytesPerPix=2;//ARGB1555, 16bit
 
@@ -295,11 +318,6 @@ static void draw_screenBMP(){
     current_display_info.font_width = bitmapFnt.u32Width/2;
     current_display_info.font_height = bitmapFnt.u32Height/256;
  
-    
-    if (cntr>current_display_info.char_height*current_display_info.char_width){
-        cntr=0;
-        printf("RESET testes\r\n");
-    }
 
     for (int y = 0; y < current_display_info.char_height; y++)
     {
@@ -358,8 +376,10 @@ static void draw_screenBMP(){
     sfTexture_destroy(texture);
 #else
    int id=0;
-    printf("set_bitmap:%d %d %d\r\n", bitmap.u32Height, bitmap.u32Width, cntr);
+   // printf("%lu set_bitmapB for:%d | %d ms\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn));
+    uint64_t step2=get_time_ms();
     set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);
+    printf("%lu set_bitmapB for:%u | %u  ms\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn) , (uint32_t)(get_time_ms() - step2));
 
 #endif
 
@@ -383,16 +403,28 @@ static void draw_character(uint32_t x, uint32_t y, uint16_t c)
 
 static void clear_screen()
 {
-    printf("clear screen\n");
-    memset(character_map, 0, sizeof(character_map));
-    LastDrawn=abs(get_time_ms())+100;//give 120ms more to load data 
+    
+    if (get_time_ms() - LastCleared>1500) {//no faster than 1 per second
+        memset(character_map, 0, sizeof(character_map));
+        LastCleared=(get_time_ms());
+        printf("%lu Clear screen\n",(uint32_t)(LastCleared%10000));
+        //LastDrawn=(get_time_ms())+500;///give 200ms no refresh  to load data in buffer 
+    }else
+         printf("%lu Clear screen skipped\n",(uint32_t)((uint32_t)get_time_ms())%10000 );
+    //LastDrawn=(get_time_ms())+200;//give 120ms more to load data 
 }
-
+static int draws=0;
 static void draw_complete()
 {
-    draw_screenBMP();
-
-    //draw_screenCenter();
+    //draw_screenBMP();
+    if (enable_fast_layout){
+        draws++;
+        if(draws%5==1)
+            draw_screenBMP();
+        else
+            draw_screenCenter();
+    }else
+        draw_screenBMP();
 
 #ifdef _x86
     sfRenderWindow_display(window);
@@ -467,48 +499,40 @@ static void InitMSPHook(){
                 fprintf(stderr, "[%s:%d]RGN_Init failed with %#x!\n", __func__, __LINE__, s32Ret);
         #endif
 
-           
-            
-            
-            if (true)
-                rgn=create_region(&osds[FULL_OVERLAY_ID].hand, osds[FULL_OVERLAY_ID].posx, osds[FULL_OVERLAY_ID].posy, OVERLAY_WIDTH, OVERLAY_HEIGHT);
 
-            
+            //if (!enable_fast_layout) //alway create this region
+            rgn=create_region(&osds[FULL_OVERLAY_ID].hand, osds[FULL_OVERLAY_ID].posx, osds[FULL_OVERLAY_ID].posy, OVERLAY_WIDTH, OVERLAY_HEIGHT);
 
+    
             //LOGO
             char img[32];//test to show a simple files
             sprintf(img, "/tmp/osd%d.bmp", FULL_OVERLAY_ID);
             if (!access(img, F_OK)){                    
                 BITMAP bitmap;                                
-                int prepared =!(prepare_bitmap(img, &bitmap, 2, TRANSPARENT_COLOR, PIXEL_FORMAT_1555));                                    
-                    //create_region(&osds[id].hand, osds[id].posx, osds[id].posy, bitmap.u32Width, bitmap.u32Height);
-
-                //prepared =!(prepare_bitmap(img, &bitmap, 1, 0x8000, PIXEL_FORMAT_1555));                                    
+                int prepared =!(prepare_bitmap(img, &bitmap, 2, TRANSPARENT_COLOR, PIXEL_FORMAT_1555));                                                                        
                 //rgn=create_region(&osds[FULL_OVERLAY_ID].hand, osds[FULL_OVERLAY_ID].posx, osds[FULL_OVERLAY_ID].posy, bitmap.u32Width, bitmap.u32Height);
-
-                printf("Loaded bmp  %d x %d success:%d\n",bitmap.u32Height, bitmap.u32Width,rgn);
-                 
+                printf("Loaded bmp  %d x %d success:%d\n",bitmap.u32Height, bitmap.u32Width,rgn);                 
                 if (prepared){
-                    printf("set_bitmap at %d tick\n");
-                   
+                    printf("set_bitmap at %d tick\n");                   
                     set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);
                     free(bitmap.pData);
-                }
-               
+                }               
             }else
                  printf("No logo file %s \n",img);
-
-
-
     #endif
 
-     if (false){ //fast_overlay           
+     if (enable_fast_layout){ //fast_overlay     
+        fcX= 18; fcW=16;
+        fcY= 6 ; fcH=8;  
+        int fY=54;
+        int fX=36;
+
         printf("%d\r",osds[FULL_OVERLAY_ID].posx);      
-        osds[FAST_OVERLAY_ID].width=OVERLAY_WIDTH/3; 
-        osds[FAST_OVERLAY_ID].height = OVERLAY_HEIGHT/3;
+        osds[FAST_OVERLAY_ID].width=fcW * fX; //  OVERLAY_WIDTH/3; 
+        osds[FAST_OVERLAY_ID].height = fcH*fY;
         
-        osds[FAST_OVERLAY_ID].posx=(OVERLAY_WIDTH-osds[FAST_OVERLAY_ID].width)/2;
-        osds[FAST_OVERLAY_ID].posy=(OVERLAY_HEIGHT-osds[FAST_OVERLAY_ID].height)/2;
+        osds[FAST_OVERLAY_ID].posx=  fcX*fX;  //( OVERLAY_WIDTH-osds[FAST_OVERLAY_ID].width)/2;
+        osds[FAST_OVERLAY_ID].posy=  fcY*fY; //( OVERLAY_HEIGHT-osds[FAST_OVERLAY_ID].height)/2;
 
         rgn=create_region(&osds[FAST_OVERLAY_ID].hand, osds[FAST_OVERLAY_ID].posx, osds[FAST_OVERLAY_ID].posy, osds[FAST_OVERLAY_ID].width, osds[FAST_OVERLAY_ID].height);
     }
