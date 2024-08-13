@@ -32,11 +32,12 @@
 /*----------------------------------------------------------------------------------------------------*/
 /*------------CONFIGURE SWITCHES ----------------------------------------------------------------*/
 static int enable_fast_layout = 0;
-static int Use_Fast_Font = 0;
+static int Use_Fast_Font = 3;
 
 void *io_map;
 struct osd *osds;
 char timefmt[32] = DEF_TIMEFMT;
+float PIXEL_FORMAT_BytesPerPixel = 1.0F;
 
 
 typedef struct display_info_s {
@@ -238,7 +239,7 @@ static void draw_screenCenter(){
  BITMAP bmpBuff;
 
 static void draw_screenBMP(){
-        
+    
     if (cntr++<0 )
         return ;
 	if ( (get_time_ms() - LastDrawn  ) < MinTimeBetweenScreenRefresh){//Once a second max{
@@ -253,9 +254,7 @@ static void draw_screenBMP(){
 
     LastDrawn= get_time_ms();
 
-    int s32BytesPerPix=2;//ARGB1555, 16bit
-    if (PIXEL_FORMAT_DEFAULT==4)
-         s32BytesPerPix=1;//I8, 8bit
+    float s32BytesPerPix=PIXEL_FORMAT_BytesPerPixel;//ARGB1555, 16bit
 
     if (bmpBuff.pData==NULL)
 
@@ -297,11 +296,17 @@ static void draw_screenBMP(){
                                  bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
                                  s_left,s_top,s_width,s_height,
                                  d_x,d_y);
-                else
+                else if (PIXEL_FORMAT_DEFAULT==3)   
+                copyRectI4(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
+                                bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
+                                s_left,s_top,s_width,s_height,
+                                d_x,d_y);
+                else                                
                 copyRectI8(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
                                 bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
                                 s_left,s_top,s_width,s_height,
                                 d_x,d_y);
+
 
             }else{
             }
@@ -311,6 +316,7 @@ static void draw_screenBMP(){
     }
 
 #ifdef _x86
+    
     uint64_t step2=get_time_ms();  
     sfRenderWindow_clear(window, sfColor_fromRGB(55, 55, 55));
     unsigned char* rgbaData = malloc(bmpBuff.u32Width * bmpBuff.u32Height * 4);  // Allocate memory for RGBA data    
@@ -329,7 +335,8 @@ static void draw_screenBMP(){
     sfSprite_setTexture(sprite, texture, sfTrue);
     // Set the position where you want to draw the sprite
     sfVector2f position = {1, 1};
-    sfSprite_setPosition(sprite, position);    
+    sfSprite_setPosition(sprite, position); 
+
     sfRenderWindow_drawSprite(window, sprite, NULL);
 
     // Cleanup resources
@@ -427,45 +434,7 @@ uint32_t colorDistance(uint16_t color1, uint16_t color2) {
 }
 
 // Function to find the closest color in the palette
-uint8_t findClosestPaletteIndex(uint16_t color, uint16_t* palette) {
-    uint32_t minDistance = 65535;
-    uint8_t bestIndex = 0;
-
-    for (uint8_t i = 0; i < PALETTE_SIZE; ++i) {
-        uint32_t distance = colorDistance(color, palette[i]);
-        if (distance < minDistance) {
-            minDistance = distance;
-            bestIndex = i;
-        }
-    }
-
-    return bestIndex;
-}
-
-
-void convertBitmap1555ToI4(
-    uint16_t* srcBitmap, uint32_t width, uint32_t height, 
-    uint8_t* destBitmap, uint16_t* palette)
-{
-    uint32_t numPixels = width * height;
-
-    for (uint32_t i = 0; i < numPixels; ++i) {
-        // Find the closest palette index for each ARGB1555 pixel
-        uint8_t paletteIndex = findClosestPaletteIndex(srcBitmap[i], palette);
-
-        if (paletteIndex<=0)
-            paletteIndex=1;
-        if (paletteIndex>4)
-            paletteIndex=4;
-        // Store the palette index in the I4 bitmap
-        if (i % 2 == 0) {
-            destBitmap[i / 2] = (paletteIndex << 4);  // Store in the upper 4 bits
-        } else {
-            destBitmap[i / 2] |= paletteIndex;  // Store in the lower 4 bits
-        }
-        
-    }
-}
+ 
 
 
 
@@ -498,14 +467,28 @@ static void InitMSPHook(){
      // Convert icons font to i8 format
      // This will speed up a little... :)
      if (Use_Fast_Font){
-        PIXEL_FORMAT_DEFAULT=4;//E_MI_RGN_PIXEL_FORMAT_I8
-        uint8_t* destBitmap =  (uint8_t*)malloc((bitmapFnt.u32Width * bitmapFnt.u32Height));     
-        convertBitmap1555ToI8(bitmapFnt.pData, bitmapFnt.u32Width , bitmapFnt.u32Height, destBitmap, &g_stPaletteTable);        
+        //PIXEL_FORMAT_DEFAULT=4;//E_MI_RGN_PIXEL_FORMAT_I8
+        //PIXEL_FORMAT_BytesPerPixel=1;
+        //TESTTING, not working with SetBitmap?!??!
+        PIXEL_FORMAT_DEFAULT=3;//E_MI_RGN_PIXEL_FORMAT_I4
+        PIXEL_FORMAT_BytesPerPixel=0.52;
+
+        uint8_t* destBitmap =  (uint8_t*)malloc(((bitmapFnt.u32Width + 1) * bitmapFnt.u32Height)*PIXEL_FORMAT_BytesPerPixel);  
+
+        if  (PIXEL_FORMAT_DEFAULT==4)
+            convertBitmap1555ToI8(bitmapFnt.pData, bitmapFnt.u32Width , bitmapFnt.u32Height, destBitmap, &g_stPaletteTable);        
+                   
+        if  (PIXEL_FORMAT_DEFAULT==3)
+             convertBitmap1555ToI4(bitmapFnt.pData, bitmapFnt.u32Width , bitmapFnt.u32Height, destBitmap, &g_stPaletteTable);      
+             
+        
         free(bitmapFnt.pData);
         bitmapFnt.pData=(void *)destBitmap;
         bitmapFnt.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
-     }else
+     }else{
         PIXEL_FORMAT_DEFAULT=0;//1555 PIXEL_FORMAT_1555
+        PIXEL_FORMAT_BytesPerPixel = 2;
+     }
 
     osds = mmap(NULL, sizeof(*osds) * MAX_OSD,
                 PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
@@ -523,7 +506,7 @@ static void InitMSPHook(){
         sfVideoMode videoMode = {OVERLAY_WIDTH+20, OVERLAY_HEIGHT+20, 32};
         window = sfRenderWindow_create(videoMode, "MSP OSD", 0, NULL);
         sfRenderWindow_display(window);
-    #else
+    #endif
 
 
         #ifdef __SIGMASTAR__            
@@ -535,11 +518,15 @@ static void InitMSPHook(){
 
             //THIS IS NEEDED, the main 
             rgn=create_region(&osds[FULL_OVERLAY_ID].hand, osds[FULL_OVERLAY_ID].posx, osds[FULL_OVERLAY_ID].posy, OVERLAY_WIDTH, OVERLAY_HEIGHT);
-            printf("Create_region results: %d %s\r\n", rgn);
+            printf("Create_region PixelFormat:%d results: %d \r\n", PIXEL_FORMAT_DEFAULT, rgn);
     
             //LOGO TEST, for TEST ONLY, loads a file for several seconds as overlay
             char img[32];//test to show a simple files
+            #ifdef __SIGMASTAR__ 
             sprintf(img, "/osd%d.bmp", FULL_OVERLAY_ID);
+            #else
+            sprintf(img, "osd%d.bmp", FULL_OVERLAY_ID);
+            #endif
             if (!access(img, F_OK)){    
                 cntr=-200;                
                 BITMAP bitmap;                                
@@ -547,7 +534,7 @@ static void InitMSPHook(){
                 //rgn=create_region(&osds[FULL_OVERLAY_ID].hand, osds[FULL_OVERLAY_ID].posx, osds[FULL_OVERLAY_ID].posy, bitmap.u32Width, bitmap.u32Height);
                 printf("Loaded LOGO bmp  %d x %d success:%d\n",bitmap.u32Height, bitmap.u32Width,rgn);                 
 
-                if (true){//test to convert to 4 bits!
+                if (false){//Load a BITMAP and show it on the screen
 
                     // Destination bitmap in I4 format (4 bits per pixel)
                     //uint8_t* destBitmap = (uint8_t*)malloc((bitmap.u32Width * bitmap.u32Height) / 2);                                     
@@ -556,29 +543,104 @@ static void InitMSPHook(){
                   // Destination bitmap in I8 format (8 bits per pixel)
                     uint8_t* destBitmap =  (uint8_t*)malloc((bitmap.u32Width * bitmap.u32Height));     
                     convertBitmap1555ToI8(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable);
-
-                    // Free allocated memory
-                    //memset( bitmap.pData, 0x7111 ,bitmap.u32Width * bitmap.u32Height*2);
                     free(bitmap.pData);
 
                     bitmap.pData=(void *)destBitmap;//to thenew structure data only
                     ///E_MI_RGN_PIXEL_FORMAT_I4 DOEAS NOT WORK!!!
                     #ifdef __SIGMASTAR__
-                    bitmap.enPixelFormat = E_MI_RGN_PIXEL_FORMAT_I8; // E_MI_RGN_PIXEL_FORMAT_I4; //0
+                    bitmap.enPixelFormat = PIXEL_FORMAT_DEFAULT; // E_MI_RGN_PIXEL_FORMAT_I4; //0
                     #endif
                     
+                }
+                //TEST how bitmaps conversions work
+                if (true){//LOAD a bitmap and show it on the screen using canvas, works directly into display memory, faster!
+                    
+                    //uint8_t buff[10000];
+                  
+                    float bytesperpixel=PIXEL_FORMAT_BytesPerPixel;                                                        
+
+                    uint8_t* destBitmap =  (uint8_t*)malloc((bitmap.u32Width * bitmap.u32Height)*bytesperpixel);   
+                    if (PIXEL_FORMAT_DEFAULT==4)  
+                        convertBitmap1555ToI8(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable);
+                    if (PIXEL_FORMAT_DEFAULT==3)  
+                        convertBitmap1555ToI4(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable);
+
+                    free(bitmap.pData);
+                    
+                    bitmap.pData=(void *)destBitmap;//to thenew structure data only
+                    bitmap.enPixelFormat = PIXEL_FORMAT_DEFAULT; // E_MI_RGN_PIXEL_FORMAT_I4; //0
+                    printf("convertBitmap1555ToI%d  success. FULL_OVERLAY_ID.hand= %d\n",(PIXEL_FORMAT_DEFAULT==4)?8:4,osds[FULL_OVERLAY_ID].hand);                 
+
+#ifdef __SIGMASTAR__   
+                    MI_RGN_CanvasInfo_t stCanvasInfo; 
+                    memset(&stCanvasInfo,0,sizeof(stCanvasInfo));                     
+                    //memset(&stCanvasInfo,0,sizeof(stCanvasInfo));
+                    s32Ret =  GetCanvas(osds[FULL_OVERLAY_ID].hand, &stCanvasInfo);                    
+                    printf("stCanvasInfo  u32Stride: %d  Size: %d:%d \r\n", stCanvasInfo.u32Stride,bitmap.u32Width,bitmap.u32Height);
+                    int byteWidth =  bitmap.u32Width ; // Each row's width in bytes (I4 = 4 bits per pixel)
+                    if (PIXEL_FORMAT_DEFAULT==4)
+                        byteWidth =  (bitmap.u32Width) * bytesperpixel;
+                    if (PIXEL_FORMAT_DEFAULT==3){ //I4
+                        bytesperpixel=0.5F;
+                        byteWidth = (uint16_t)(bitmap.u32Width + 1) * bytesperpixel ; // Each row's width in bytes (I4 = 4 bits per pixel)
+                        
+                    }
+
+                    for (int i = 0; i < bitmap.u32Height; i++)                    
+                        memcpy((void *)(stCanvasInfo.virtAddr + i * (stCanvasInfo.u32Stride)), bitmap.pData + i * byteWidth, byteWidth);
+                                            
+                    s32Ret = MI_RGN_UpdateCanvas(osds[FULL_OVERLAY_ID].hand);
+                    printf("MI_RGN_UpdateCanvas completed byteWidth:%d!\n",byteWidth);
+                    if  (s32Ret!= MI_RGN_OK)    
+                        fprintf(stderr, "MI_RGN_UpdateCanvas failed with %#x!\n", __func__, __LINE__, s32Ret);                 
+#elif _x86 
+                    //TEST ON x86
+                    
+                        sfRenderWindow_clear(window, sfColor_fromRGB(255, 255, 255));
+                        bmpBuff=bitmap;
+                        unsigned char* rgbaData = malloc(bmpBuff.u32Width * bmpBuff.u32Height * 4);  // Allocate memory for RGBA data    
+
+                        if (PIXEL_FORMAT_DEFAULT==0)          
+                            Convert1555ToRGBA( bmpBuff.pData, rgbaData, bmpBuff.u32Width, bmpBuff.u32Height);    
+                        if (PIXEL_FORMAT_DEFAULT==4)          
+                            ConvertI8ToRGBA( bmpBuff.pData, rgbaData, bmpBuff.u32Width, bmpBuff.u32Height,&g_stPaletteTable);    
+                        if (PIXEL_FORMAT_DEFAULT==3)          
+                            ConvertI4ToRGBA( bmpBuff.pData, rgbaData, bmpBuff.u32Width, bmpBuff.u32Height,&g_stPaletteTable);    
+
+                        sfTexture* texture = sfTexture_create(bmpBuff.u32Width, bmpBuff.u32Height);
+                        if (!texture) 
+                            return;
+                        sfTexture_updateFromPixels(texture, rgbaData, bmpBuff.u32Width, bmpBuff.u32Height, 0, 0);
+                        free(rgbaData);  
+                        
+                        sfSprite* sprite = sfSprite_create();
+                        sfSprite_setTexture(sprite, texture, sfTrue);
+                        // Set the position where you want to draw the sprite
+                        sfVector2f position = {1, 1};
+                        sfSprite_setPosition(sprite, position);    
+                        sfRenderWindow_drawSprite(window, sprite, NULL);
+
+                        // Cleanup resources
+                        sfSprite_destroy(sprite);
+                        sfTexture_destroy(texture);
+                        printf("Test show bitmap s\r\n");
+                        sfRenderWindow_display(window);
+
+#endif
+                    prepared=false;
                 }
 
                 if (prepared){
                     printf("set_LOGO with u32Height:%d enPixelFormat %d\n",bitmap.u32Height, bitmap.enPixelFormat);                   
                     int s32Ret=set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);
                     if(s32Ret!=0)
-                        printf("ERROR set_bitmap%d \n",s32Ret);                   
+                        printf("ERROR set_bitmap%d \n",s32Ret);  
+
                     free(bitmap.pData);
                 }               
             }else
                  printf("No logo file %s \n",img);
-    #endif
+    
 
      if (enable_fast_layout){ //fast_overlay , can be smaller     
         fcX= 18; fcW=16;

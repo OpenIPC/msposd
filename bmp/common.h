@@ -168,6 +168,7 @@ extern "C"
 
 extern int PIXEL_FORMAT_DEFAULT;
 
+
 #ifdef __cplusplus
 #if __cplusplus
 }

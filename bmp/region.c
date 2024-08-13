@@ -1,7 +1,13 @@
 #include "region.h"
 
+//https://wx.comake.online/doc/ds82ff82j7jsd9-SSD220/customer/development/mi/en/exclude/mi_rgn.html
 
-PIXEL_FORMAT_DEFAULT=0;
+
+#ifdef __SIGMASTAR__
+PIXEL_FORMAT_DEFAULT=E_MI_RGN_PIXEL_FORMAT_I4; //0 for PIXEL_FORMAT_1555 , 4 for E_MI_RGN_PIXEL_FORMAT_I8
+#else
+ PIXEL_FORMAT_DEFAULT=3;   //0 for PIXEL_FORMAT_1555 , 4 for E_MI_RGN_PIXEL_FORMAT_I8
+#endif
 
 const double inv16 = 1.0 / 16.0;
 
@@ -487,3 +493,18 @@ void unload_region(int *handle)
 #endif
     
 }
+#ifdef __SIGMASTAR__
+
+ int GetCanvas(int handle, MI_RGN_CanvasInfo_t *stCanvasInfo){       
+     int s32Result = MI_RGN_GetCanvasInfo(handle, stCanvasInfo);
+     if (s32Result != MI_RGN_OK)    
+         return s32Result;
+    printf("MI_RGN_GetCanvas stride:%d  stSize:%d:%d  ePixelFmt:%d !\n", 
+    stCanvasInfo->u32Stride, stCanvasInfo->stSize.u32Width , stCanvasInfo->stSize.u32Height , stCanvasInfo->ePixelFmt);
+    return 0;     
+ }
+#endif        
+//     //if (MI_RGN_UpdateCanvas(hHandle) != MI_RGN_OK)
+//      //   return s32Result;
+
+// }

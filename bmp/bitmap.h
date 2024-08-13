@@ -9,6 +9,7 @@ extern "C"
 #endif
 
 #include "common.h"
+#include <stdbool.h>
 
     typedef enum osd_color_fmt
     {
@@ -119,8 +120,13 @@ typedef struct MI_RGN_PaletteTable_s
         uint16_t* srcBitmap, uint32_t width, uint32_t height, 
         uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable);
     void Convert1555ToRGBA(unsigned short* bitmap1555, unsigned char* rgbaData, unsigned int width, unsigned int height);
-    
+    void convertBitmap1555ToI4(
+    uint16_t* srcBitmap, uint32_t width, uint32_t height, 
+    uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable);
+
     void ConvertI8ToRGBA(uint8_t* bitmapI8, uint8_t* rgbaData, uint32_t width, uint32_t height, MI_RGN_PaletteElement_t* palette);
+
+    void ConvertI4ToRGBA(uint8_t* bitmapI4, uint8_t* rgbaData, uint32_t width, uint32_t height, MI_RGN_PaletteElement_t* palette) ;
 
     void copyRectARGB1555(
         uint16_t* srcBitmap, uint32_t srcWidth, uint32_t srcHeight,
@@ -133,6 +139,12 @@ typedef struct MI_RGN_PaletteTable_s
         uint8_t* destBitmap, uint32_t destWidth, uint32_t destHeight,
         uint32_t srcX, uint32_t srcY, uint32_t width, uint32_t height,
         uint32_t destX, uint32_t destY);
+
+    void copyRectI4(
+        uint8_t* srcBitmap, uint32_t srcWidth, uint32_t srcHeight,
+        uint8_t* destBitmap, uint32_t destWidth, uint32_t destHeight,
+        uint32_t srcX, uint32_t srcY, uint32_t width, uint32_t height,
+        uint32_t destX, uint32_t destY) ;     
 
     // Declaration of global palette table
     extern MI_RGN_PaletteTable_t g_stPaletteTable;

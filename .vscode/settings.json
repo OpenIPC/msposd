@@ -18,6 +18,10 @@
         "random": "c",
         "format": "c",
         "compare": "c",
-        "cstdint": "c"
+        "cstdint": "c",
+        "functional": "c",
+        "rope": "c",
+        "ranges": "c",
+        "variant": "c"
     }
 }

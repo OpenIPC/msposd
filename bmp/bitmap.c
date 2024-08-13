@@ -573,6 +573,21 @@ uint32_t colorDistance8(uint8_t r1, uint8_t g1, uint8_t b1, uint8_t r2, uint8_t 
     return (r1 - r2) * (r1 - r2) + (g1 - g2) * (g1 - g2) + (b1 - b2) * (b1 - b2);
 }
 
+uint8_t findClosestPaletteIndex(uint16_t color, uint16_t* palette) {
+    uint32_t minDistance = 65535;
+    uint8_t bestIndex = 0;
+
+    for (uint8_t i = 0; i < 16/*PALETTE_SIZE*/; ++i) {
+        uint32_t distance = colorDistance(color, palette[i]);
+        if (distance < minDistance) {
+            minDistance = distance;
+            bestIndex = i;
+        }
+    }
+
+    return bestIndex;
+}
+
 // Function to find the closest color in the palette
 uint8_t findClosestPaletteIndex8(uint16_t color, MI_RGN_PaletteTable_t* paletteTable) {
     uint32_t minDistance = 65535;
@@ -583,7 +598,7 @@ uint8_t findClosestPaletteIndex8(uint16_t color, MI_RGN_PaletteTable_t* paletteT
     uint8_t g = ((color >> 5) & 0x1F) << 3;   // Convert 5-bit to 8-bit
     uint8_t b = (color & 0x1F) << 3;          // Convert 5-bit to 8-bit
      
-    for (uint8_t i = 1; i < 17; ++i) {// only 16 searched
+    for (uint8_t i = 0; i < 18; ++i) {// only 16 searched
         MI_RGN_PaletteElement_t* element = &paletteTable->astElement[i];
         uint32_t distance = colorDistance8(r, g, b, element->u8Red, element->u8Green, element->u8Blue);
         if (distance < minDistance) {
@@ -623,18 +638,19 @@ MI_RGN_PaletteTable_t g_stPaletteTable =
         {0xFF, 0xF8, 0x00, 0xF8}, // 0x7C1F -> Magenta
         {0xFF, 0x00, 0xF8, 0xF8}, // 0x03FF -> Cyan
         {0xFF, 0xF8, 0xF8, 0xF8}, // 0x7FFF -> White
-        {0x00, 0x00, 0x00, 0x00}, // 0x0000 -> Black
+        {0xFF, 0x00, 0x00, 0x00}, // 0x0000 -> Black  index 8
         {0xFF, 0x84, 0x10, 0x10}, // 0x4210 -> Gray (Darker)
         {0xFF, 0x42, 0x08, 0x08}, // 0x2108 -> Gray (Even Darker)
         {0xFF, 0x63, 0x18, 0xC6}, // 0x318C -> Gray (Medium)
         {0xFF, 0xAD, 0x52, 0xD6}, // 0x5AD6 -> Gray (Lighter)
         {0xFF, 0xCE, 0x73, 0x9C}, // 0x739C -> Gray (Light)
         {0xFF, 0x31, 0x8C, 0x6C}, // 0x18C6 -> Gray (Dark)
-        {0xFF, 0x52, 0x52, 0x29}, // 0x2529 -> Gray (Medium Dark)
-        {0xFF, 0xDE, 0x7B, 0xDE},  // 0x7BDE -> Gray (Lightest)
+        {0x00,   0,   0,   0}, // transparent  index 15, 0x0A
+        {0x00,   0,   0,   0},  // 0x7BDE -> transparent
  
          //index17 ~ index31
-         {  0,   0,   0,  30}, {  0,   0, 255,  60}, {  0, 128,   0,  90},
+         {0xFF, 0xF0, 0xF0, 0xF0}, //this is the predefined TRANSARANT Color index17
+         {  0,   0, 255,  60}, {  0, 128,   0,  90},
          {255,   0,   0, 120}, {  0, 255, 255, 150}, {255, 255,   0, 180}, {  0, 255,   0, 210},
          {255,   0, 255, 240}, {192, 192, 192, 255}, {128, 128, 128,  10}, {  0,   0,   0,   0},
          {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0}, {  0,   0,   0,   0},
@@ -737,8 +753,8 @@ void Convert1555ToRGBA(unsigned short* bitmap1555, unsigned char* rgbaData, unsi
     }
 }
 
-
-void copyRectARGB1555(
+/*
+void copyRectARGB1555Slow(
     uint16_t* srcBitmap, uint32_t srcWidth, uint32_t srcHeight,
     uint16_t* destBitmap, uint32_t destWidth, uint32_t destHeight,
     uint32_t srcX, uint32_t srcY, uint32_t width, uint32_t height,
@@ -763,6 +779,37 @@ void copyRectARGB1555(
             // Copy the pixel
             destBitmap[destIndex] = srcBitmap[srcIndex];
         }
+    }
+}
+*/
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>  // for memcpy
+
+void copyRectARGB1555(
+    uint16_t* srcBitmap, uint32_t srcWidth, uint32_t srcHeight,
+    uint16_t* destBitmap, uint32_t destWidth, uint32_t destHeight,
+    uint32_t srcX, uint32_t srcY, uint32_t width, uint32_t height,
+    uint32_t destX, uint32_t destY)
+{
+    // Bounds checking
+    if (srcX + width > srcWidth || srcY + height > srcHeight ||
+        destX + width > destWidth || destY + height > destHeight) {
+        // Handle error: the rectangle is out of bounds
+        printf("Error copyRectARGB1555 to %d : %d\r\n", destX, destY);
+        return;
+    }
+
+    // Calculate the width of the rectangle in bytes
+    uint32_t rowSizeInBytes = width * sizeof(uint16_t);
+
+    for (uint32_t y = 0; y < height; ++y) {
+        // Calculate the source and destination pointers for the current row
+        uint16_t* srcPtr = srcBitmap + (srcY + y) * srcWidth + srcX;
+        uint16_t* destPtr = destBitmap + (destY + y) * destWidth + destX;
+
+        // Use memcpy to copy the entire row
+        memcpy(destPtr, srcPtr, rowSizeInBytes);
     }
 }
 
@@ -822,6 +869,65 @@ void copyRectI8(
     }
 }
 
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>  // For memcpy
+
+void copyRectI4(
+    uint8_t* srcBitmap, uint32_t srcWidth, uint32_t srcHeight,
+    uint8_t* destBitmap, uint32_t destWidth, uint32_t destHeight,
+    uint32_t srcX, uint32_t srcY, uint32_t width, uint32_t height,
+    uint32_t destX, uint32_t destY)
+{
+    // Bounds checking
+    if (srcX + width > srcWidth || srcY + height > srcHeight ||
+        destX + width > destWidth || destY + height > destHeight) {
+        // Handle error: the rectangle is out of bounds
+        printf("Error copyRectI4 to %d : %d\r\n", destX, destY);
+        return;
+    }
+
+    // Determine byte and pixel offsets
+    uint32_t srcByteOffset = srcX / 2;
+    uint32_t destByteOffset = destX / 2;
+    uint32_t srcPixelOffset = srcX % 2;
+    uint32_t destPixelOffset = destX % 2;
+
+    // Fast path: both srcX and destX align on byte boundaries
+    if (srcPixelOffset == 0 && destPixelOffset == 0 && width % 2 == 0) {
+        uint32_t byteWidth = width / 2;  // Number of bytes to copy per row
+        for (uint32_t y = 0; y < height; ++y) {
+            uint8_t* srcRow = srcBitmap + (srcY + y) * (srcWidth / 2) + srcByteOffset;
+            uint8_t* destRow = destBitmap + (destY + y) * (destWidth / 2) + destByteOffset;
+            memcpy(destRow, srcRow, byteWidth);
+        }
+    } else {
+        // Handle cases where srcX or destX are not byte-aligned
+        for (uint32_t y = 0; y < height; ++y) {
+            for (uint32_t x = 0; x < width; ++x) {
+                uint32_t srcIndex = (srcY + y) * (srcWidth / 2) + (srcByteOffset + (x / 2));
+                uint32_t destIndex = (destY + y) * (destWidth / 2) + (destByteOffset + (x / 2));
+
+                uint8_t srcPixel;
+                if ((srcPixelOffset + x) % 2 == 0) {
+                    srcPixel = (srcBitmap[srcIndex] & 0xF0) >> 4; // High nibble
+                } else {
+                    srcPixel = srcBitmap[srcIndex] & 0x0F; // Low nibble
+                }
+
+                if ((destPixelOffset + x) % 2 == 0) {
+                    // Write to high nibble
+                    destBitmap[destIndex] = (destBitmap[destIndex] & 0x0F) | (srcPixel << 4);
+                } else {
+                    // Write to low nibble
+                    destBitmap[destIndex] = (destBitmap[destIndex] & 0xF0) | srcPixel;
+                }
+            }
+        }
+    }
+}
+
+
 
 
 void ConvertI8ToRGBA(uint8_t* bitmapI8, uint8_t* rgbaData, uint32_t width, uint32_t height, MI_RGN_PaletteElement_t* palette) {
@@ -838,3 +944,120 @@ void ConvertI8ToRGBA(uint8_t* bitmapI8, uint8_t* rgbaData, uint32_t width, uint3
         rgbaData[i * 4 + 3] = color.u8Alpha;
     }
 }
+
+void ConvertI4ToRGBA(uint8_t* bitmapI4, uint8_t* rgbaData, uint32_t width, uint32_t height, MI_RGN_PaletteElement_t* palette) {
+    uint32_t pixelIndex = 0;
+
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; x += 2) {
+            // Each byte in the I4 bitmap contains two pixels
+            uint8_t byte = bitmapI4[(y * (width + 1) / 2) + (x / 2)];
+
+            // Extract the first (high) pixel
+            uint8_t index1 = (byte & 0xF0) >> 4;
+            MI_RGN_PaletteElement_t color1 = palette[index1];
+            rgbaData[pixelIndex * 4 + 0] = color1.u8Red;
+            rgbaData[pixelIndex * 4 + 1] = color1.u8Green;
+            rgbaData[pixelIndex * 4 + 2] = color1.u8Blue;
+            rgbaData[pixelIndex * 4 + 3] = color1.u8Alpha;
+            pixelIndex++;
+
+            if (x + 1 < width) {
+                // Extract the second (low) pixel
+                uint8_t index2 = byte & 0x0F;
+                MI_RGN_PaletteElement_t color2 = palette[index2];
+                rgbaData[pixelIndex * 4 + 0] = color2.u8Red;
+                rgbaData[pixelIndex * 4 + 1] = color2.u8Green;
+                rgbaData[pixelIndex * 4 + 2] = color2.u8Blue;
+                rgbaData[pixelIndex * 4 + 3] = color2.u8Alpha;
+                pixelIndex++;
+            }
+        }
+    }
+}
+
+
+/*
+void convertBitmap1555ToI4(
+    uint16_t* srcBitmap, uint32_t width, uint32_t height, 
+    uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable)
+{
+    uint32_t numPixels = width * height;
+
+    for (uint32_t i = 0; i < numPixels; ++i) {
+        // Find the closest palette index for each ARGB1555 pixel
+        uint8_t paletteIndex = findClosestPaletteIndex8(srcBitmap[i], paletteTable);
+
+        if (paletteIndex<=0)
+            paletteIndex=1;
+        if (paletteIndex>4)
+            paletteIndex=4;
+        // Store the palette index in the I4 bitmap
+        if (i % 2 == 0) {
+            destBitmap[i / 2] = (paletteIndex << 4);  // Store in the upper 4 bits
+        } else {
+            destBitmap[i / 2] |= paletteIndex;  // Store in the lower 4 bits
+        }
+        
+    }
+}
+*/
+static uint32_t black_cntr=0;
+void convertBitmap1555ToI4(
+    uint16_t* srcBitmap, uint32_t width, uint32_t height, 
+    uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable)
+{
+    // Calculate the number of bytes required per line without padding
+    uint32_t bytesPerLine = (width + 1) / 2;  // +1 to handle odd width
+
+    for (uint32_t y = 0; y < height; ++y) {
+        // Add a 4-bit offset for each row
+        // No Fucking idea why this is different for x86 and Sigmastar
+        // Maybe the routines the copy the BMP later are incorrect, no time to investigate
+#ifdef _x86
+        uint32_t destOffset = y * bytesPerLine + (y / 2);  // Adjusted to add 4-bit offset for each row
+#else        
+        uint32_t destOffset = y * bytesPerLine ;  //  
+#endif
+        for (uint32_t x = 0; x < width; ++x) {
+            uint32_t srcIndex = y * width + x;  // Calculate the source index
+            uint8_t paletteIndex = findClosestPaletteIndex8(srcBitmap[srcIndex], paletteTable);
+
+            // Clamp paletteIndex within the valid range for I4 (0 to 15)
+            if (paletteIndex == 17)//Transparent color
+                paletteIndex=15;
+
+            if (paletteIndex == 10)//black color
+                black_cntr++;
+            if (paletteIndex == 8)//black color
+                black_cntr++;
+
+            if (paletteIndex > 15) 
+                paletteIndex = 15;
+
+            
+            
+#ifdef __SIGMASTAR__
+            //Users cannot set the index 0 of the color palette. The index 0 of these formats is used as the color key by the underlying driver. That means this color is not recognized by hardware, so when all 0 data is covered on the channel, no color is displayed.
+            if (paletteIndex == 0 ) 
+                paletteIndex = 16;
+#endif            
+
+            // Calculate the destination byte and bit position
+            uint32_t destByteIndex = destOffset + x / 2;
+            if (x % 2 == 0) {
+                // Even index: Store in the upper 4 bits
+                destBitmap[destByteIndex] = (paletteIndex << 4);
+            } else {
+                // Odd index: Store in the lower 4 bits
+                destBitmap[destByteIndex] |= paletteIndex;
+            }
+        }
+    }
+}
+
+
+
+
+
+
