@@ -618,8 +618,12 @@ void convertBitmap1555ToI8(
 
     for (uint32_t i = 0; i < numPixels; ++i) {
         // Find the closest palette index for each ARGB1555 pixel
-        uint8_t paletteIndex = findClosestPaletteIndex8(srcBitmap[i], paletteTable)+1;
+        uint8_t paletteIndex = findClosestPaletteIndex8(srcBitmap[i], paletteTable);
 
+        if (paletteIndex == 0)//Sigmastar reserver
+            paletteIndex=8;//black
+        if (paletteIndex == 17)//Transparent color
+            paletteIndex=15;
         // Store the palette index in the I8 bitmap
         destBitmap[i] = paletteIndex;
     }
@@ -977,33 +981,10 @@ void ConvertI4ToRGBA(uint8_t* bitmapI4, uint8_t* rgbaData, uint32_t width, uint3
 }
 
 
-/*
-void convertBitmap1555ToI4(
-    uint16_t* srcBitmap, uint32_t width, uint32_t height, 
-    uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable)
-{
-    uint32_t numPixels = width * height;
-
-    for (uint32_t i = 0; i < numPixels; ++i) {
-        // Find the closest palette index for each ARGB1555 pixel
-        uint8_t paletteIndex = findClosestPaletteIndex8(srcBitmap[i], paletteTable);
-
-        if (paletteIndex<=0)
-            paletteIndex=1;
-        if (paletteIndex>4)
-            paletteIndex=4;
-        // Store the palette index in the I4 bitmap
-        if (i % 2 == 0) {
-            destBitmap[i / 2] = (paletteIndex << 4);  // Store in the upper 4 bits
-        } else {
-            destBitmap[i / 2] |= paletteIndex;  // Store in the lower 4 bits
-        }
-        
-    }
-}
-*/
+ 
 static uint32_t black_cntr=0;
-void convertBitmap1555ToI4(
+
+void convertBitmap1555ToI4_Works_blurry(
     uint16_t* srcBitmap, uint32_t width, uint32_t height, 
     uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable)
 {
@@ -1013,34 +994,30 @@ void convertBitmap1555ToI4(
     for (uint32_t y = 0; y < height; ++y) {
         // Add a 4-bit offset for each row
         // No Fucking idea why this is different for x86 and Sigmastar
-        // Maybe the routines the copy the BMP later are incorrect, no time to investigate
+        // Maybe the routines that copy the BMP later are incorrect, no time to investigate
 #ifdef _x86
         uint32_t destOffset = y * bytesPerLine + (y / 2);  // Adjusted to add 4-bit offset for each row
 #else        
-        uint32_t destOffset = y * bytesPerLine ;  //  
+        uint32_t destOffset = y * bytesPerLine ;  // Works for sigmastar 
+        
 #endif
         for (uint32_t x = 0; x < width; ++x) {
             uint32_t srcIndex = y * width + x;  // Calculate the source index
             uint8_t paletteIndex = findClosestPaletteIndex8(srcBitmap[srcIndex], paletteTable);
 
             // Clamp paletteIndex within the valid range for I4 (0 to 15)
+            
+            if (paletteIndex == 0)//Sigmastar reserver
+                paletteIndex=8;//black
             if (paletteIndex == 17)//Transparent color
                 paletteIndex=15;
-
-            if (paletteIndex == 10)//black color
-                black_cntr++;
-            if (paletteIndex == 8)//black color
-                black_cntr++;
-
-            if (paletteIndex > 15) 
-                paletteIndex = 15;
 
             
             
 #ifdef __SIGMASTAR__
             //Users cannot set the index 0 of the color palette. The index 0 of these formats is used as the color key by the underlying driver. That means this color is not recognized by hardware, so when all 0 data is covered on the channel, no color is displayed.
             if (paletteIndex == 0 ) 
-                paletteIndex = 16;
+                paletteIndex = 8;//black
 #endif            
 
             // Calculate the destination byte and bit position
@@ -1055,6 +1032,48 @@ void convertBitmap1555ToI4(
         }
     }
 }
+
+typedef unsigned char   MI_U8;
+void convertBitmap1555ToI4(
+    uint16_t* srcBitmap, uint32_t width, uint32_t height, 
+    uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable)
+{
+    // Calculate the number of bytes required per line without padding
+     
+    unsigned char  u8Value = 0;
+    uint32_t  u32Stride =   (width + 1) / 2; 
+    //u32Stride++;
+   // if (u32Stride>300)
+    //    u32Stride=912;
+
+    for (uint32_t u32Y = 0; u32Y < height; ++u32Y) {
+ 
+        for (int32_t u32X = 0; u32X < width; ++u32X) {
+            uint32_t srcIndex = u32Y * width + u32X;  // Calculate the source index
+            uint8_t paletteIndex = findClosestPaletteIndex8(srcBitmap[srcIndex], paletteTable); 
+            
+            if (paletteIndex == 0)//Sigmastar reserver
+                paletteIndex=8;//black
+            if (paletteIndex == 17)//Transparent color
+                paletteIndex=15;
+
+            if (u32X % 2)
+            {
+                u8Value = (*((MI_U8 *)destBitmap + (u32Stride * u32Y) + u32X / 2) & 0x0F) | ((paletteIndex & 0x0f) << 4);
+                *((MI_U8 *)destBitmap + (u32Stride * u32Y) + u32X / 2) = u8Value;
+            }
+            else
+            {
+                u8Value = (*((MI_U8 *)destBitmap + (u32Stride * u32Y) + u32X / 2) & 0xF0) | (paletteIndex & 0x0f);
+                *((MI_U8 *)destBitmap + (u32Stride * u32Y) + u32X / 2) = u8Value;
+            }
+        }
+    }
+}
+
+ 
+
+ 
 
 
 

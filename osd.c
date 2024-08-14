@@ -561,7 +561,8 @@ static void InitMSPHook(){
 
                     uint8_t* destBitmap =  (uint8_t*)malloc((bitmap.u32Width * bitmap.u32Height)*bytesperpixel);   
                     if (PIXEL_FORMAT_DEFAULT==4)  
-                        convertBitmap1555ToI8(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable);
+                       convertBitmap1555ToI8(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable);
+                    
                     if (PIXEL_FORMAT_DEFAULT==3)  
                         convertBitmap1555ToI4(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable);
 
@@ -582,13 +583,20 @@ static void InitMSPHook(){
                         byteWidth =  (bitmap.u32Width) * bytesperpixel;
                     if (PIXEL_FORMAT_DEFAULT==3){ //I4
                         bytesperpixel=0.5F;
-                        byteWidth = (uint16_t)(bitmap.u32Width + 1) * bytesperpixel ; // Each row's width in bytes (I4 = 4 bits per pixel)
-                        
+                        byteWidth = (uint16_t)(bitmap.u32Width + 1) * bytesperpixel ; // Each row's width in bytes (I4 = 4 bits per pixel)                        
                     }
 
                     for (int i = 0; i < bitmap.u32Height; i++)                    
                         memcpy((void *)(stCanvasInfo.virtAddr + i * (stCanvasInfo.u32Stride)), bitmap.pData + i * byteWidth, byteWidth);
-                                            
+
+                    //This tests direct copy to overlay
+                    //DrawBitmap1555ToI4(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable, (void *)stCanvasInfo.virtAddr,stCanvasInfo.u32Stride);
+                    /*
+                    for (int y = 0; y < bitmap.u32Height/2; y++)                           
+                        for (int x = 0; x < 5; x+=2)
+                            ST_OSD_DrawPoint((void *)stCanvasInfo.virtAddr,stCanvasInfo.u32Stride, x,y, 3 );//y%14+1
+                    */
+
                     s32Ret = MI_RGN_UpdateCanvas(osds[FULL_OVERLAY_ID].hand);
                     printf("MI_RGN_UpdateCanvas completed byteWidth:%d!\n",byteWidth);
                     if  (s32Ret!= MI_RGN_OK)    
@@ -596,7 +604,7 @@ static void InitMSPHook(){
 #elif _x86 
                     //TEST ON x86
                     
-                        sfRenderWindow_clear(window, sfColor_fromRGB(255, 255, 255));
+                        sfRenderWindow_clear(window, sfColor_fromRGB(255, 255, 0));
                         bmpBuff=bitmap;
                         unsigned char* rgbaData = malloc(bmpBuff.u32Width * bmpBuff.u32Height * 4);  // Allocate memory for RGBA data    
 

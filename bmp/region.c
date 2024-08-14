@@ -503,6 +503,60 @@ void unload_region(int *handle)
     stCanvasInfo->u32Stride, stCanvasInfo->stSize.u32Width , stCanvasInfo->stSize.u32Height , stCanvasInfo->ePixelFmt);
     return 0;     
  }
+
+ 
+ uint32_t ST_OSD_DrawPoint(MI_U16 *pDst , MI_U32 u32Stride , uint32_t u32X, uint32_t  u32Y , MI_U32 u32Color)
+{
+
+    MI_U8 u8Value = 0;
+
+
+    // ST_DBG("pDst:%p, u32Stride:%d, point(%d,%d)\n", pDst, u32Stride, u32X, u32Y);
+
+ if (/*g_stRgnInfo[hHandle].ePixelFmt == E_MI_RGN_PIXEL_FORMAT_I4*/ true)
+    {
+ 
+        if (u32X % 2)
+        {
+            u8Value = (*((MI_U8 *)pDst + (u32Stride * u32Y) + u32X / 2) & 0x0F) | ((u32Color & 0x0f) << 4);
+            *((MI_U8 *)pDst + (u32Stride * u32Y) + u32X / 2) = u8Value;
+        }
+        else
+        {
+            u8Value = (*((MI_U8 *)pDst + (u32Stride * u32Y) + u32X / 2) & 0xF0) | (u32Color & 0x0f);
+            *((MI_U8 *)pDst + (u32Stride * u32Y) + u32X / 2) = u8Value;
+        }
+    }
+
+    return MI_RGN_OK;
+}
+
+
+ 
+void DrawBitmap1555ToI4(
+    uint16_t* srcBitmap, uint32_t width, uint32_t height, 
+    uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable , 
+    MI_U16 *pDst , MI_U32 u32Stride
+    )
+{
+    
+    for (uint32_t y = 0; y < height; ++y) {
+
+        for (uint32_t x = 0; x < width; ++x) {
+            uint32_t srcIndex = y * width + x; 
+            uint8_t paletteIndex = findClosestPaletteIndex8(srcBitmap[srcIndex], paletteTable);
+ 
+            if (paletteIndex == 0)//Sigmastar reserver
+                paletteIndex=8;//black
+            if (paletteIndex == 17)//Transparent color
+                paletteIndex=15;
+
+             ST_OSD_DrawPoint(pDst , u32Stride , x, y , paletteIndex);
+        }
+    }
+}
+   
+
 #endif        
 //     //if (MI_RGN_UpdateCanvas(hHandle) != MI_RGN_OK)
 //      //   return s32Result;
