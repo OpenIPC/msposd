@@ -256,8 +256,7 @@ static void draw_screenBMP(){
 
     float s32BytesPerPix=PIXEL_FORMAT_BytesPerPixel;//ARGB1555, 16bit
 
-    if (bmpBuff.pData==NULL)
-
+    if (bmpBuff.pData==NULL)//????
     bmpBuff.u32Height=OVERLAY_HEIGHT;
     bmpBuff.u32Width=OVERLAY_WIDTH;
     if (bmpBuff.pData==NULL)
@@ -376,6 +375,9 @@ static void clear_screen()
     
     if (get_time_ms() - LastCleared>1500) {//no faster than 1 per second
         memset(character_map, 0, sizeof(character_map));
+        if (bmpBuff.pData!=NULL)//Set whole BMP as transparant
+            bmpBuff.pData = memset(bmpBuff.pData, 0xFF , (PIXEL_FORMAT_BytesPerPixel * bmpBuff.u32Height * bmpBuff.u32Width) );
+
         LastCleared=(get_time_ms());
         printf("%lu Clear screen\n",(uint32_t)(LastCleared%10000));
         //LastDrawn=(get_time_ms())+500;///give 200ms no refresh  to load data in buffer 
@@ -528,7 +530,7 @@ static void InitMSPHook(){
             sprintf(img, "osd%d.bmp", FULL_OVERLAY_ID);
             #endif
             if (!access(img, F_OK)){    
-                cntr=-200;                
+                cntr= - 200;                
                 BITMAP bitmap;                                
                 int prepared =!(prepare_bitmap(img, &bitmap, 2, TRANSPARENT_COLOR, PIXEL_FORMAT_1555));                                                                        
                 //rgn=create_region(&osds[FULL_OVERLAY_ID].hand, osds[FULL_OVERLAY_ID].posx, osds[FULL_OVERLAY_ID].posy, bitmap.u32Width, bitmap.u32Height);
@@ -589,7 +591,7 @@ static void InitMSPHook(){
                     for (int i = 0; i < bitmap.u32Height; i++)                    
                         memcpy((void *)(stCanvasInfo.virtAddr + i * (stCanvasInfo.u32Stride)), bitmap.pData + i * byteWidth, byteWidth);
 
-                    //This tests direct copy to overlay
+                    //This tests direct copy to overlay - will further speed up!
                     //DrawBitmap1555ToI4(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable, (void *)stCanvasInfo.virtAddr,stCanvasInfo.u32Stride);
                     /*
                     for (int y = 0; y < bitmap.u32Height/2; y++)                           
