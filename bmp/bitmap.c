@@ -951,7 +951,7 @@ void ConvertI8ToRGBA(uint8_t* bitmapI8, uint8_t* rgbaData, uint32_t width, uint3
 
 void ConvertI4ToRGBA(uint8_t* bitmapI4, uint8_t* rgbaData, uint32_t width, uint32_t height, MI_RGN_PaletteElement_t* palette) {
     uint32_t pixelIndex = 0;
-    int RowLength = getRowStride(width,4);
+    int RowLength = getRowStride(width,4);//the length of one row, it is rounded up to 4 bytes
     for (uint32_t y = 0; y < height; ++y) {
         for (uint32_t x = 0; x < width; x += 2) {
             // Each byte in the I4 bitmap contains two pixels
@@ -982,27 +982,56 @@ void ConvertI4ToRGBA(uint8_t* bitmapI4, uint8_t* rgbaData, uint32_t width, uint3
     }
 }
 
+void ConvertI4ToRGBA2(uint8_t* bitmapI4, uint8_t* rgbaData, uint32_t width, uint32_t height, MI_RGN_PaletteElement_t* palette) {
+    uint32_t pixelIndex = 0;
+    int RowLength = getRowStride(width, 4); // The length of one row, rounded up to 4 bytes
+    
+    for (uint32_t y = 0; y < height; ++y) {
+        // Calculate the starting position of the current row
+        uint32_t rowStart = y * RowLength;
+        
+        for (uint32_t x = 0; x < width; x += 2) {
+            // Each byte in the I4 bitmap contains two pixels
+            uint8_t byte = bitmapI4[rowStart + (x / 2)];
 
- 
+            // Extract the first (high) pixel
+            uint8_t index1 = (byte & 0xF0) >> 4;
+            MI_RGN_PaletteElement_t color1 = palette[index1];
+            rgbaData[pixelIndex * 4 + 0] = color1.u8Red;
+            rgbaData[pixelIndex * 4 + 1] = color1.u8Green;
+            rgbaData[pixelIndex * 4 + 2] = color1.u8Blue;
+            rgbaData[pixelIndex * 4 + 3] = color1.u8Alpha;
+            pixelIndex++;
+
+            if (x + 1 < width) {
+                // Extract the second (low) pixel
+                uint8_t index2 = byte & 0x0F;
+                MI_RGN_PaletteElement_t color2 = palette[index2];
+                rgbaData[pixelIndex * 4 + 0] = color2.u8Red;
+                rgbaData[pixelIndex * 4 + 1] = color2.u8Green;
+                rgbaData[pixelIndex * 4 + 2] = color2.u8Blue;
+                rgbaData[pixelIndex * 4 + 3] = color2.u8Alpha;
+                pixelIndex++;
+            }
+        }
+    }
+}
+
 static uint32_t black_cntr=0;
 
-void convertBitmap1555ToI4_Works_blurry(
+void convertBitmap1555ToI4x86(
     uint16_t* srcBitmap, uint32_t width, uint32_t height, 
     uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable)
 {
     // Calculate the number of bytes required per line without padding
-    uint32_t bytesPerLine = (width + 1) / 2;  // +1 to handle odd width
+    uint32_t bytesPerLine = getRowStride(width,4);// (width + 1) / 2;  // +1 to handle odd width
 
     for (uint32_t y = 0; y < height; ++y) {
         // Add a 4-bit offset for each row
         // No Fucking idea why this is different for x86 and Sigmastar
         // Maybe the routines that copy the BMP later are incorrect, no time to investigate
-#ifdef _x86
-        uint32_t destOffset = y * bytesPerLine + (y / 2);  // Adjusted to add 4-bit offset for each row
-#else        
-        uint32_t destOffset = y * bytesPerLine ;  // Works for sigmastar 
+        uint32_t destOffset = y * bytesPerLine ;//+ (y / 2);  // Adjusted to add 4-bit offset for each row
         
-#endif
         for (uint32_t x = 0; x < width; ++x) {
             uint32_t srcIndex = y * width + x;  // Calculate the source index
             uint8_t paletteIndex = findClosestPaletteIndex8(srcBitmap[srcIndex], paletteTable);
@@ -1013,20 +1042,13 @@ void convertBitmap1555ToI4_Works_blurry(
                 paletteIndex=8;//black
             if (paletteIndex == 17)//Transparent color
                 paletteIndex=15;
-
-            
-            
-#ifdef __SIGMASTAR__
-            //Users cannot set the index 0 of the color palette. The index 0 of these formats is used as the color key by the underlying driver. That means this color is not recognized by hardware, so when all 0 data is covered on the channel, no color is displayed.
-            if (paletteIndex == 0 ) 
-                paletteIndex = 8;//black
-#endif            
+                   
 
             // Calculate the destination byte and bit position
             uint32_t destByteIndex = destOffset + x / 2;
             if (x % 2 == 0) {
                 // Even index: Store in the upper 4 bits
-                destBitmap[destByteIndex] = (paletteIndex << 4);
+                destBitmap[destByteIndex] =  (paletteIndex << 4);
             } else {
                 // Odd index: Store in the lower 4 bits
                 destBitmap[destByteIndex] |= paletteIndex;
@@ -1048,13 +1070,9 @@ void convertBitmap1555ToI4(
     // Calculate the number of bytes required per line without padding
      
     unsigned char  u8Value = 0;
-    uint32_t  u32Stride =   (width + 1) / 2; 
+    uint32_t  u32Stride =   (width + 1) / 2;     
 
-    int  u32Stride2 ;
-    int bitperpixel = 4;
-    int rowLength = width * bitperpixel;
-
-    u32Stride2  = (rowLength + 32 - ((rowLength-1) % 32)) >> 3;        
+    int u32Stride2  = getRowStride(width,4);//  rowLength + 32 - ((rowLength-1) % 32)) >> 3;        
 
     printf("I4 %d:%d Stride1:%d  Stride2:%d \n",width,height,u32Stride , u32Stride2 );
 
@@ -1071,13 +1089,16 @@ void convertBitmap1555ToI4(
             if (paletteIndex == 17)//Transparent color
                 paletteIndex=15;
 
-            if (u32X % 2)
-            {
+            // No Fucking idea why this is different for x86 and Sigmastar, BUT !!!
+            //SigmaStar I4 format needs it reversit 4bit pairs.   0x0A, 0x0B needs to be 0XBA
+#ifdef __SIGMASTAR__           
+            if (u32X % 2){   //this is the secret of distorted image !!!
+#else
+            if (u32X % 2==0){
+#endif                
                 u8Value = (*((MI_U8 *)destBitmap + (u32Stride * u32Y) + u32X / 2) & 0x0F) | ((paletteIndex & 0x0f) << 4);
                 *((MI_U8 *)destBitmap + (u32Stride * u32Y) + u32X / 2) = u8Value;
-            }
-            else
-            {
+            }else{
                 u8Value = (*((MI_U8 *)destBitmap + (u32Stride * u32Y) + u32X / 2) & 0xF0) | (paletteIndex & 0x0f);
                 *((MI_U8 *)destBitmap + (u32Stride * u32Y) + u32X / 2) = u8Value;
             }

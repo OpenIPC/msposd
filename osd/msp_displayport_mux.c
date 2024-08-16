@@ -113,6 +113,19 @@ static void rx_msp_callback(msp_msg_t *msp_message)
     // Process a received MSP message from FC and decide whether to send it to the PTY (DJI) or UDP port (MSP-OSD on Goggles)
     DEBUG_PRINT("FC->AU MSP msg %d with data len %d \n", msp_message->cmd, msp_message->size);
     switch(msp_message->cmd) {
+         case MSP_ATTITUDE: {
+
+            uint16_t pitch = (uint16_t*) msp_message->payload[0];
+            uint16_t roll = (uint16_t*) msp_message->payload[2];
+
+           printf("\n Got MSG_ATTITUDE            pitch:%d  roll:%d\n", pitch, roll);
+           break;
+         }
+        case MSP_RC: {
+                printf("Got MSP_RC \n");
+              break;
+         }
+         
         case MSP_CMD_DISPLAYPORT: {
 //TEST CHANGE            
             if (true) {

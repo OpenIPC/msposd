@@ -829,8 +829,21 @@ static void temp_read(evutil_socket_t sock, short event, void *arg)
 
 static void send_variant_request2(int serial_fd) {
     uint8_t buffer[6];
+	int res=0;
+	construct_msp_command(buffer, MSP_ATTITUDE, NULL, 0, MSP_OUTBOUND);
+    res = write(serial_fd, &buffer, sizeof(buffer));
+
+	usleep(20*1000);
     construct_msp_command(buffer, MSP_CMD_FC_VARIANT, NULL, 0, MSP_OUTBOUND);
-    int  res = write(serial_fd, &buffer, sizeof(buffer));
+    res = write(serial_fd, &buffer, sizeof(buffer));
+	usleep(20*1000);
+
+	//construct_msp_command(buffer, MSP_CMD_BATTERY_STATE, NULL, 0, MSP_OUTBOUND);
+    //res = write(serial_fd, &buffer, sizeof(buffer));
+
+	construct_msp_command(buffer, MSP_RC, NULL, 0, MSP_OUTBOUND);
+    res = write(serial_fd, &buffer, sizeof(buffer));
+
 	//printf("Sent %d\n", res);
 }
 

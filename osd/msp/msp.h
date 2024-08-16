@@ -9,6 +9,10 @@
 #define MSP_CMD_PID_ADVANCED 94
 #define MSP_CMD_STATUS 101
 #define MSP_CMD_RC 105
+
+#define MSP_ATTITUDE  108
+#define MSP_RC  105
+
 #define MSP_CMD_ANALOG 110
 #define MSP_CMD_RC_TUNING 111
 #define MSP_CMD_PID 112
@@ -16,6 +20,7 @@
 #define MSP_CMD_STATUS_EX 150
 #define MSP_CMD_DISPLAYPORT 182
 #define MSP_CMD_SET_OSD_CANVAS 188
+
 
 typedef enum {
     MSP_ERR_NONE,
