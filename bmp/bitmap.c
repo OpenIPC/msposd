@@ -567,6 +567,18 @@ int CreateSurfaceByCanvas(const char *pszFileName, OSD_SURFACE_S *pstSurface, un
 }
 
 
+// Function to calculate the squared difference between two colors
+uint32_t colorDistance(uint16_t color1, uint16_t color2) {
+    int r1 = (color1 >> 10) & 0x1F;
+    int g1 = (color1 >> 5) & 0x1F;
+    int b1 = color1 & 0x1F;
+
+    int r2 = (color2 >> 10) & 0x1F;
+    int g2 = (color2 >> 5) & 0x1F;
+    int b2 = color2 & 0x1F;
+
+    return (r1 - r2) * (r1 - r2) + (g1 - g2) * (g1 - g2) + (b1 - b2) * (b1 - b2);
+}
 
 // Function to calculate the squared difference between two colors in ARGB1555 format
 uint32_t colorDistance8(uint8_t r1, uint8_t g1, uint8_t b1, uint8_t r2, uint8_t g2, uint8_t b2) {
@@ -597,6 +609,36 @@ uint8_t findClosestPaletteIndex8(uint16_t color, MI_RGN_PaletteTable_t* paletteT
     uint8_t r = ((color >> 10) & 0x1F) << 3;  // Convert 5-bit to 8-bit
     uint8_t g = ((color >> 5) & 0x1F) << 3;   // Convert 5-bit to 8-bit
     uint8_t b = (color & 0x1F) << 3;          // Convert 5-bit to 8-bit
+     
+    for (uint8_t i = 0; i < 18; ++i) {// only 16 searched
+        MI_RGN_PaletteElement_t* element = &paletteTable->astElement[i];
+        uint32_t distance = colorDistance8(r, g, b, element->u8Red, element->u8Green, element->u8Blue);
+        if (distance < minDistance) {
+            minDistance = distance;
+            bestIndex = i;
+        }
+    }
+
+    return bestIndex;
+}
+
+uint8_t findClosestPaletteIndexRGBA(uint8_t *color, MI_RGN_PaletteTable_t* paletteTable) {
+    uint32_t minDistance = 65535;
+    uint8_t bestIndex = 0;
+
+    // Extract RGB components from ARGB1555 color
+            // Extract RGBA values
+    uint8_t r = *(color+0);
+    uint8_t g = *(color+1);
+    uint8_t b = *(color+2);
+    uint8_t a = *(color+3);
+    if (a==0)
+        return 15;//transparent
+    else if (r>77)
+        bestIndex = 0;
+    else
+        bestIndex = 0;
+
      
     for (uint8_t i = 0; i < 18; ++i) {// only 16 searched
         MI_RGN_PaletteElement_t* element = &paletteTable->astElement[i];
@@ -1063,6 +1105,7 @@ int getRowStride(int width, int BitsPerPixel){
     int rowLength = width * BitsPerPixel;
     return  (rowLength + 32 - ((rowLength-1) % 32)) >> 3;
 }
+
 void convertBitmap1555ToI4(
     uint16_t* srcBitmap, uint32_t width, uint32_t height, 
     uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable)
@@ -1107,6 +1150,57 @@ void convertBitmap1555ToI4(
 }
 
  
+
+// Assuming MI_RGN_PaletteTable_t and findClosestPaletteIndex8 are defined elsewhere
+
+void convertRGBAToI4(
+    uint8_t* srcBitmap, uint32_t width, uint32_t height, 
+    uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable)
+{
+    unsigned char u8Value = 0;
+    int u32Stride = getRowStride(width, 4);
+
+    printf("I4 %d:%d Stride:%d\n", width, height, u32Stride);
+
+    for (uint32_t u32Y = 0; u32Y < height; ++u32Y) {
+        for (int32_t u32X = 0; u32X < width; ++u32X) {
+            uint32_t srcIndex = (u32Y * width + u32X) * 4;  // Calculate the source index (4 bytes per pixel)
+            
+            // Extract RGBA values
+            uint8_t r = srcBitmap[srcIndex + 0];
+            uint8_t g = srcBitmap[srcIndex + 1];
+            uint8_t b = srcBitmap[srcIndex + 2];
+            uint8_t a = srcBitmap[srcIndex + 3];
+
+            if (a!=0 && r>0)
+                u8Value=0;
+            
+            // Find the closest palette index for the RGBA color
+            //uint8_t paletteIndex = findClosestPaletteIndex8(r, g, b, a, paletteTable); 
+            uint8_t paletteIndex = findClosestPaletteIndexRGBA(&srcBitmap[srcIndex], paletteTable); 
+            
+            // Handle specific palette indices as per SigmaStar requirements
+            if (paletteIndex == 0) // Sigmastar reserved
+                paletteIndex = 8;  // Black
+            if (paletteIndex == 17) // Transparent color
+                paletteIndex = 15;
+
+            // Handle SigmaStar-specific bit manipulation
+#ifdef __SIGMASTAR__           
+            if (u32X % 2) {   // SigmaStar I4 format needs reversed 4-bit pairs
+#else
+            if (u32X % 2 == 0) { // Other platforms (non-SigmaStar)
+#endif                
+                u8Value = (*(destBitmap + (u32Stride * u32Y) + u32X / 2) & 0x0F) | ((paletteIndex & 0x0F) << 4);
+                *(destBitmap + (u32Stride * u32Y) + u32X / 2) = u8Value;
+            } else {
+                u8Value = (*(destBitmap + (u32Stride * u32Y) + u32X / 2) & 0xF0) | (paletteIndex & 0x0F);
+                *(destBitmap + (u32Stride * u32Y) + u32X / 2) = u8Value;
+            }
+        }
+    }
+}
+
 
  
 

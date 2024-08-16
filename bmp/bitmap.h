@@ -124,6 +124,11 @@ typedef struct MI_RGN_PaletteTable_s
     uint16_t* srcBitmap, uint32_t width, uint32_t height, 
     uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable);
 
+    void convertRGBAToI4(
+    uint8_t* srcBitmap, uint32_t width, uint32_t height, 
+    uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable);
+
+
     void convertBitmap1555ToI4_Works_blurry(
     uint16_t* srcBitmap, uint32_t width, uint32_t height, 
     uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable);

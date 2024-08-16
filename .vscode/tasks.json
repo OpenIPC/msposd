@@ -11,6 +11,7 @@
                 "bmp/region.c",
                 "osd/net/network.c",
                 "osd/msp/msp.c",
+                "libpng/lodepng.c",
                 "-I",
                 "./sdk/gk7205v300/include",
                 "-L",

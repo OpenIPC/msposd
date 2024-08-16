@@ -21,6 +21,7 @@
 #endif
 #include "bmp/region.h"
 #include "bmp/bitmap.h"
+#include "libpng/lodepng.h"
 
 
 #define X_OFFSET 0
@@ -429,25 +430,37 @@ static void set_options(uint8_t font, uint8_t is_hd) {
     }
 }
 
-//------------------------------------------------------------------
-//-----------------------bitmap conversion --------------
-//------------------------------------------------------------------
-#define PALETTE_SIZE 16
-// Function to calculate the squared difference between two colors
-uint32_t colorDistance(uint16_t color1, uint16_t color2) {
-    int r1 = (color1 >> 10) & 0x1F;
-    int g1 = (color1 >> 5) & 0x1F;
-    int b1 = color1 & 0x1F;
 
-    int r2 = (color2 >> 10) & 0x1F;
-    int g2 = (color2 >> 5) & 0x1F;
-    int b2 = color2 & 0x1F;
+// Function to convert PNG to BMP format
+unsigned char* loadPngToBmpMemory(const char* filename, unsigned int* width, unsigned int* height) {
+    unsigned char* pngData;
+    unsigned int error = lodepng_decode32_file(&pngData, width, height, filename);
 
-    return (r1 - r2) * (r1 - r2) + (g1 - g2) * (g1 - g2) + (b1 - b2) * (b1 - b2);
+    if (error) {
+        printf("Error %u: %s\n", error, lodepng_error_text(error));
+        return NULL;
+    }
+
+    // Calculate BMP stride (row size aligned to 4 bytes)
+    unsigned int bmpStride = (*width * 4 + 3) & ~3;
+    bmpStride =  getRowStride(*width,4);
+
+    // Allocate memory for BMP data
+    unsigned int bmpSize = bmpStride * (*height);
+    unsigned char* bmpData = (unsigned char*)malloc(bmpSize);
+    if (!bmpData) {
+        printf("Failed to allocate memory for BMP data\n");
+        free(pngData);
+        return NULL;
+    }
+
+    convertRGBAToI4( pngData, *width , *height, bmpData, &g_stPaletteTable);
+
+    // Clean up
+    free(pngData);
+
+    return bmpData;
 }
-
-// Function to find the closest color in the palette
- 
 
 
 
@@ -476,7 +489,7 @@ static void InitMSPHook(){
     printf("Font %s character size:%d:%d \r\n",font_name,current_display_info.font_width,current_display_info.font_height);
     int rgn=0;   
 
-
+    Use_Fast_Font=false;//test PNG load
      // Convert icons font to i8 format
      // This will speed up a little... :)
      if (Use_Fast_Font){
@@ -499,8 +512,12 @@ static void InitMSPHook(){
         bitmapFnt.pData=(void *)destBitmap;
         bitmapFnt.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
      }else{
-        PIXEL_FORMAT_DEFAULT=0;//1555 PIXEL_FORMAT_1555
-        PIXEL_FORMAT_BitsPerPixel = 16;
+        //PIXEL_FORMAT_DEFAULT=0;//1555 PIXEL_FORMAT_1555
+        //PIXEL_FORMAT_BitsPerPixel = 16;
+        PIXEL_FORMAT_DEFAULT=3;//1555 PIXEL_FORMAT_1555
+        PIXEL_FORMAT_BitsPerPixel = 4;
+        bitmapFnt.pData=(void *)loadPngToBmpMemory("font_inav.png",&bitmapFnt.u32Width,&bitmapFnt.u32Height);
+        bitmapFnt.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
      }
 
     osds = mmap(NULL, sizeof(*osds) * MAX_OSD,
@@ -566,7 +583,7 @@ static void InitMSPHook(){
                     
                 }
                 //TEST how bitmaps conversions work
-                if (true){//LOAD a bitmap and show it on the screen using canvas, works directly into display memory, faster!
+                if (false){//LOAD a bitmap and show it on the screen using canvas, works directly into display memory, faster!
 
                     uint8_t* destBitmap =  (uint8_t*)malloc(bitmap.u32Height * getRowStride(bitmap.u32Width , PIXEL_FORMAT_BitsPerPixel));   
                     if (PIXEL_FORMAT_DEFAULT==4)  
@@ -648,6 +665,38 @@ static void InitMSPHook(){
 #endif
                     prepared=false;
                 }
+                //LOAD PNG TEST
+                if (true){
+                    //uint8_t* destBitmap =  (uint8_t*)malloc(bitmapFnt.u32Height*getRowStride(bitmapFnt.u32Width , PIXEL_FORMAT_BitsPerPixel));  
+                    int width,height;
+                    uint8_t* destBitmap = loadPngToBmpMemory("font_inav.png",&width,&height);
+
+
+                    sfRenderWindow_clear(window, sfColor_fromRGB(255, 255, 0));
+                    
+                    unsigned char* rgbaData = malloc(bitmap.u32Width * bitmap.u32Height * 4);  // Allocate memory for RGBA data          
+                    ConvertI4ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height,&g_stPaletteTable);    
+
+                    sfTexture* texture = sfTexture_create(bitmap.u32Width, bitmap.u32Height);
+                    if (!texture) 
+                        return;
+                    sfTexture_updateFromPixels(texture, rgbaData, bitmap.u32Width, bitmap.u32Height, 0, 0);
+                    free(rgbaData);  
+                    
+                    sfSprite* sprite = sfSprite_create();
+                    sfSprite_setTexture(sprite, texture, sfTrue);
+                    // Set the position where you want to draw the sprite
+                    sfVector2f position = {1, 1};
+                    sfSprite_setPosition(sprite, position);    
+                    sfRenderWindow_drawSprite(window, sprite, NULL);
+
+                    // Cleanup resources
+                    sfSprite_destroy(sprite);
+                    sfTexture_destroy(texture);
+                    printf("Test show bitmap s\r\n");
+                    sfRenderWindow_display(window);
+
+                }
 
                 if (prepared){
                     printf("set_LOGO with u32Height:%d enPixelFormat %d\n",bitmap.u32Height, bitmap.enPixelFormat);                   
@@ -656,7 +705,10 @@ static void InitMSPHook(){
                         printf("ERROR set_bitmap%d \n",s32Ret);  
 
                     free(bitmap.pData);
-                }               
+                }
+
+
+
             }else
                  printf("No logo file %s \n",img);
     

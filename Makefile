@@ -5,7 +5,7 @@ LDLIBS=-levent_core
 
 
 #SRCS := lib/schrift.c compat.c bitmap.c net.c region.c text.c main.c
-SRCS := mavfwd.c bmp/bitmap.c bmp/region.c osd/net/network.c osd/msp/msp.c
+SRCS := mavfwd.c bmp/bitmap.c bmp/region.c osd/net/network.c osd/msp/msp.c libpng/lodepng.c
 #BUILD = $(CC) $(SRCS) -I $(SDK)/include -L $(DRV) $(LIB) -Os -s -o $(or $(TARGET),$@)
 
 #BUILD = $(CC) $(SRCS) -I $(SDK)/include -L $(DRV) $(LIB) $(CFLAGS) $(LDFLAGS) $(LDLIBS) -o $(or $(TARGET),$@)
@@ -37,7 +37,7 @@ osd-star6e:
 	$(eval LIB = -D__SIGMASTAR__ -D__INFINITY6__ -D__INFINITY6E__ -lcam_os_wrapper -lm -lmi_rgn -lmi_sys)
 	$(BUILD)
 
-
+#gcc your_program.c lodepng.c -ansi -pedantic -Wall -Wextra -O3
 osd-x86:
 	$(eval SDK = ./sdk/gk7205v300)
 	$(eval CFLAGS += -D_x86)
