@@ -951,11 +951,13 @@ void ConvertI8ToRGBA(uint8_t* bitmapI8, uint8_t* rgbaData, uint32_t width, uint3
 
 void ConvertI4ToRGBA(uint8_t* bitmapI4, uint8_t* rgbaData, uint32_t width, uint32_t height, MI_RGN_PaletteElement_t* palette) {
     uint32_t pixelIndex = 0;
-
+    int RowLength = getRowStride(width,4);
     for (uint32_t y = 0; y < height; ++y) {
         for (uint32_t x = 0; x < width; x += 2) {
             // Each byte in the I4 bitmap contains two pixels
-            uint8_t byte = bitmapI4[(y * (width + 1) / 2) + (x / 2)];
+            //uint8_t byte = bitmapI4[(y * (width + 1) / 2) + (x / 2)];
+            
+            uint8_t byte = bitmapI4[y*RowLength + (x / 2)];
 
             // Extract the first (high) pixel
             uint8_t index1 = (byte & 0xF0) >> 4;
@@ -1034,6 +1036,11 @@ void convertBitmap1555ToI4_Works_blurry(
 }
 
 typedef unsigned char   MI_U8;
+
+int getRowStride(int width, int BitsPerPixel){
+    int rowLength = width * BitsPerPixel;
+    return  (rowLength + 32 - ((rowLength-1) % 32)) >> 3;
+}
 void convertBitmap1555ToI4(
     uint16_t* srcBitmap, uint32_t width, uint32_t height, 
     uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable)
@@ -1042,9 +1049,16 @@ void convertBitmap1555ToI4(
      
     unsigned char  u8Value = 0;
     uint32_t  u32Stride =   (width + 1) / 2; 
-    //u32Stride++;
-   // if (u32Stride>300)
-    //    u32Stride=912;
+
+    int  u32Stride2 ;
+    int bitperpixel = 4;
+    int rowLength = width * bitperpixel;
+
+    u32Stride2  = (rowLength + 32 - ((rowLength-1) % 32)) >> 3;        
+
+    printf("I4 %d:%d Stride1:%d  Stride2:%d \n",width,height,u32Stride , u32Stride2 );
+
+    u32Stride=u32Stride2;
 
     for (uint32_t u32Y = 0; u32Y < height; ++u32Y) {
  

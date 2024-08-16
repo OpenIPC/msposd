@@ -161,7 +161,7 @@ static void draw_screenCenter(){
     LastDrawn = get_time_ms();
     bitmap.u32Height= osds[FAST_OVERLAY_ID].height;
     bitmap.u32Width= osds[FAST_OVERLAY_ID].width;
-    bitmap.pData = malloc(s32BytesPerPix * bitmap.u32Height * bitmap.u32Width);
+    bitmap.pData = malloc( bitmap.u32Height * getRowStride(bitmap.u32Width , PIXEL_FORMAT_BitsPerPixel));
     bitmap.enPixelFormat = PIXEL_FORMAT_1555;
     
     current_display_info.font_width = bitmapFnt.u32Width/2;
@@ -267,7 +267,9 @@ static void draw_screenBMP(){
         bmpBuff.enPixelFormat=PIXEL_FORMAT_DEFAULT;
         bmpBuff.u32Width=current_display_info.font_width * current_display_info.char_width;
         bmpBuff.u32Height = current_display_info.font_height * current_display_info.char_height;
-        bmpBuff.pData = malloc( PIXEL_FORMAT_BitsPerPixel  * bmpBuff.u32Height * bmpBuff.u32Width / 8);
+        //bmpBuff.pData = malloc( PIXEL_FORMAT_BitsPerPixel  * bmpBuff.u32Height * bmpBuff.u32Width / 8);
+        bmpBuff.pData = malloc( PIXEL_FORMAT_BitsPerPixel  * bmpBuff.u32Height * getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));
+        
     }
     bmpBuff.enPixelFormat =  PIXEL_FORMAT_DEFAULT;//  PIXEL_FORMAT_DEFAULT ;//PIXEL_FORMAT_1555;
 
@@ -484,7 +486,7 @@ static void InitMSPHook(){
         PIXEL_FORMAT_DEFAULT=3;//E_MI_RGN_PIXEL_FORMAT_I4
         PIXEL_FORMAT_BitsPerPixel=4;
 
-        uint8_t* destBitmap =  (uint8_t*)malloc(((bitmapFnt.u32Width + 1) * bitmapFnt.u32Height)*PIXEL_FORMAT_BitsPerPixel/8);  
+        uint8_t* destBitmap =  (uint8_t*)malloc(bitmapFnt.u32Height*getRowStride(bitmapFnt.u32Width , PIXEL_FORMAT_BitsPerPixel));  
 
         if  (PIXEL_FORMAT_DEFAULT==4)
             convertBitmap1555ToI8(bitmapFnt.pData, bitmapFnt.u32Width , bitmapFnt.u32Height, destBitmap, &g_stPaletteTable);        
@@ -566,7 +568,7 @@ static void InitMSPHook(){
                 //TEST how bitmaps conversions work
                 if (true){//LOAD a bitmap and show it on the screen using canvas, works directly into display memory, faster!
 
-                    uint8_t* destBitmap =  (uint8_t*)malloc((bitmap.u32Width * bitmap.u32Height) * PIXEL_FORMAT_BitsPerPixel/8);   
+                    uint8_t* destBitmap =  (uint8_t*)malloc(bitmap.u32Height * getRowStride(bitmap.u32Width , PIXEL_FORMAT_BitsPerPixel));   
                     if (PIXEL_FORMAT_DEFAULT==4)  
                        convertBitmap1555ToI8(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable);
                     
@@ -583,14 +585,16 @@ static void InitMSPHook(){
                     MI_RGN_CanvasInfo_t stCanvasInfo; 
                     memset(&stCanvasInfo,0,sizeof(stCanvasInfo));                     
                     //memset(&stCanvasInfo,0,sizeof(stCanvasInfo));
-                    s32Ret =  GetCanvas(osds[FULL_OVERLAY_ID].hand, &stCanvasInfo);                    
-                    printf("stCanvasInfo  u32Stride: %d  Size: %d:%d \r\n", stCanvasInfo.u32Stride,bitmap.u32Width,bitmap.u32Height);
+                    s32Ret =  GetCanvas(osds[FULL_OVERLAY_ID].hand, &stCanvasInfo);                                       
+                    printf("stCanvasInfo  CanvasStride: %d , BMP_Stride:%d Size: %d:%d \r\n", 
+                        stCanvasInfo.u32Stride, getRowStride(bitmap.u32Width, PIXEL_FORMAT_BitsPerPixel), bitmap.u32Width,bitmap.u32Height);
                     int byteWidth =  bitmap.u32Width ; // Each row's width in bytes (I4 = 4 bits per pixel)
                     if (PIXEL_FORMAT_DEFAULT==4)
                         byteWidth =  (bitmap.u32Width) * PIXEL_FORMAT_BitsPerPixel / 8;
                     if (PIXEL_FORMAT_DEFAULT==3){ //I4
                         //bytesperpixel=0.5F;
                         byteWidth = (uint16_t)(bitmap.u32Width + 1) * PIXEL_FORMAT_BitsPerPixel / 8 ; // Each row's width in bytes (I4 = 4 bits per pixel)                        
+                        byteWidth = getRowStride(bitmap.u32Width,PIXEL_FORMAT_BitsPerPixel);
                     }
 
                     for (int i = 0; i < bitmap.u32Height; i++)                    

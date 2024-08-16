@@ -152,6 +152,8 @@ typedef struct MI_RGN_PaletteTable_s
         uint32_t srcX, uint32_t srcY, uint32_t width, uint32_t height,
         uint32_t destX, uint32_t destY) ;     
 
+    int getRowStride(int width, int BitsPerPixel);
+
     // Declaration of global palette table
     extern MI_RGN_PaletteTable_t g_stPaletteTable;
 
