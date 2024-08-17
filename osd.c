@@ -431,8 +431,10 @@ static void set_options(uint8_t font, uint8_t is_hd) {
 }
 
 
-// Function to convert PNG to BMP format
-unsigned char* loadPngToBmpMemory(const char* filename, unsigned int* width, unsigned int* height) {
+/**  Load and Convert PNG to BMP format, 4bit per pixel.
+ *  Allocates memory, return width and height
+ */
+unsigned char* loadPngToBMPI4(const char* filename, unsigned int* width, unsigned int* height) {
     unsigned char* pngData;
     unsigned int error = lodepng_decode32_file(&pngData, width, height, filename);
 
@@ -475,15 +477,24 @@ static void InitMSPHook(){
     snprintf(font_load_name, 255, "%s.bmp", font_name);
  
 
-    font_name = "/usr/bin/font_inav.bmp";
+    font_name = "/usr/bin/font_inav.png";
     #ifdef _x86
-    font_name = "font_inav.bmp";
+    font_name = "font_inav.png";//.bmp
     #endif
+    /* BMP Font template.
     if (load_font(font_name,&bitmapFnt)<0)// must clean up after free(bitmap.pData);
         printf("Can't load font %s \r\n",font_name);
     
     if (bitmapFnt.u32Width==0)
         printf("Error in font %s \r\n !!!",font_name);
+    */
+    PIXEL_FORMAT_DEFAULT=3;//I4 format, 4 bits per pixel. 
+    PIXEL_FORMAT_BitsPerPixel = 4;
+    if (bitmapFnt.pData!=NULL)
+        free(bitmapFnt.pData);
+    bitmapFnt.pData=(void *)loadPngToBMPI4(font_name,&bitmapFnt.u32Width,&bitmapFnt.u32Height);
+        bitmapFnt.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
+
     current_display_info.font_width = bitmapFnt.u32Width/2;
     current_display_info.font_height = bitmapFnt.u32Height/256;
     printf("Font %s character size:%d:%d \r\n",font_name,current_display_info.font_width,current_display_info.font_height);
@@ -512,12 +523,12 @@ static void InitMSPHook(){
         bitmapFnt.pData=(void *)destBitmap;
         bitmapFnt.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
      }else{
-        //PIXEL_FORMAT_DEFAULT=0;//1555 PIXEL_FORMAT_1555
-        //PIXEL_FORMAT_BitsPerPixel = 16;
+        /*
         PIXEL_FORMAT_DEFAULT=3;//1555 PIXEL_FORMAT_1555
         PIXEL_FORMAT_BitsPerPixel = 4;
         bitmapFnt.pData=(void *)loadPngToBmpMemory("font_inav.png",&bitmapFnt.u32Width,&bitmapFnt.u32Height);
         bitmapFnt.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
+        */
      }
 
     osds = mmap(NULL, sizeof(*osds) * MAX_OSD,
@@ -548,23 +559,23 @@ static void InitMSPHook(){
 
             //THIS IS NEEDED, the main 
             rgn=create_region(&osds[FULL_OVERLAY_ID].hand, osds[FULL_OVERLAY_ID].posx, osds[FULL_OVERLAY_ID].posy, OVERLAY_WIDTH, OVERLAY_HEIGHT);
-            printf("Create_region PixelFormat:%d results: %d \r\n", PIXEL_FORMAT_DEFAULT, rgn);
+            printf("Create_region PixelFormat:%d Size: %d:%d results: %d \r\n", PIXEL_FORMAT_DEFAULT, OVERLAY_WIDTH,OVERLAY_HEIGHT, rgn);
     
             //LOGO TEST, for TEST ONLY, loads a file for several seconds as overlay
             char img[32];//test to show a simple files
             #ifdef __SIGMASTAR__ 
-            sprintf(img, "/osd%d.bmp", FULL_OVERLAY_ID);
+            sprintf(img, "/osd%d.png", FULL_OVERLAY_ID);
             #else
-            sprintf(img, "osd%d.bmp", FULL_OVERLAY_ID);
+            sprintf(img, "osd%d.png", FULL_OVERLAY_ID);
             #endif
+
             if (!access(img, F_OK)){    
                 cntr= - 200;                
                 BITMAP bitmap;                                
-                int prepared =!(prepare_bitmap(img, &bitmap, 2, TRANSPARENT_COLOR, PIXEL_FORMAT_1555));                                                                        
-                //rgn=create_region(&osds[FULL_OVERLAY_ID].hand, osds[FULL_OVERLAY_ID].posx, osds[FULL_OVERLAY_ID].posy, bitmap.u32Width, bitmap.u32Height);
-                printf("Loaded LOGO bmp  %d x %d success:%d\n",bitmap.u32Height, bitmap.u32Width,rgn);                 
-
+                int prepared=0;
                 if (false){//Load a BITMAP and show it on the screen
+                    prepared =!(prepare_bitmap(img, &bitmap, 2, TRANSPARENT_COLOR, PIXEL_FORMAT_1555));                                                                                                  
+                    printf("Loaded LOGO bmp  %d x %d success:%d\n",bitmap.u32Height, bitmap.u32Width,rgn);                 
 
                     // Destination bitmap in I4 format (4 bits per pixel)
                     //uint8_t* destBitmap = (uint8_t*)malloc((bitmap.u32Width * bitmap.u32Height) / 2);                                     
@@ -667,35 +678,70 @@ static void InitMSPHook(){
                 }
                 //LOAD PNG TEST
                 if (true){
-                    //uint8_t* destBitmap =  (uint8_t*)malloc(bitmapFnt.u32Height*getRowStride(bitmapFnt.u32Width , PIXEL_FORMAT_BitsPerPixel));  
-                    int width,height;
-                    uint8_t* destBitmap = loadPngToBmpMemory("font_inav.png",&width,&height);
-
-
-                    sfRenderWindow_clear(window, sfColor_fromRGB(255, 255, 0));
+                    prepared=1;
                     
-                    unsigned char* rgbaData = malloc(bitmap.u32Width * bitmap.u32Height * 4);  // Allocate memory for RGBA data          
-                    ConvertI4ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height,&g_stPaletteTable);    
+                   // uint8_t* destBitmap = loadPngToBMPI4("font_inav.png",&width,&height);
 
-                    sfTexture* texture = sfTexture_create(bitmap.u32Width, bitmap.u32Height);
-                    if (!texture) 
-                        return;
-                    sfTexture_updateFromPixels(texture, rgbaData, bitmap.u32Width, bitmap.u32Height, 0, 0);
-                    free(rgbaData);  
+                   
+                    bitmap.enPixelFormat-PIXEL_FORMAT_DEFAULT;
+                    int cols=bitmapFnt.u32Height / OVERLAY_HEIGHT;
+                    int rows=OVERLAY_HEIGHT/    current_display_info.font_height;
+                    int fontPageHeight=rows * current_display_info.font_height;//OVERLAY_HEIGHT;;
+                    bitmap.u32Height = OVERLAY_HEIGHT;//rows * current_display_info.font_height;//OVERLAY_HEIGHT;
+                    bitmap.u32Width = OVERLAY_WIDTH;//bitmapFnt.u32Width * cols;                    
+                    bitmap.pData = (unsigned char*)malloc(PIXEL_FORMAT_BitsPerPixel * bitmap.u32Height * getRowStride(bitmap.u32Width , PIXEL_FORMAT_BitsPerPixel));
+                    memset(bitmap.pData, 0, PIXEL_FORMAT_BitsPerPixel * bitmap.u32Height * getRowStride(bitmap.u32Width , PIXEL_FORMAT_BitsPerPixel));
+                    //bmp.u32Width=current_display_info.font_width * current_display_info.char_width;
+                    //bmp.u32Height = current_display_info.font_height * current_display_info.char_height;
+                    //bmp.pData = malloc( PIXEL_FORMAT_BitsPerPixel  * bmp.u32Height * getRowStride(bmp.u32Width , PIXEL_FORMAT_BitsPerPixel));
+
+                    for (int i=0; i<cols ; i++ )
+                        copyRectI4(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
+                                    bitmap.pData,bitmap.u32Width, bitmap.u32Height,
+                                    0,i * fontPageHeight, bitmapFnt.u32Width, fontPageHeight,
+                                    i*bitmapFnt.u32Width,0);
+
+                  
+                
+                   /* Test load image
+                    bitmap.pData = loadPngToBMPI4(img, &bitmap.u32Width, &bitmap.u32Height);
+                    bitmap.enPixelFormat-PIXEL_FORMAT_DEFAULT;
+                    */
+                
                     
-                    sfSprite* sprite = sfSprite_create();
-                    sfSprite_setTexture(sprite, texture, sfTrue);
-                    // Set the position where you want to draw the sprite
-                    sfVector2f position = {1, 1};
-                    sfSprite_setPosition(sprite, position);    
-                    sfRenderWindow_drawSprite(window, sprite, NULL);
+                    #ifdef __SIGMASTAR__   
+                        printf("Set Font Review %d:%d", bitmap.u32Width, bitmap.u32Height);
+                        //For some reason this fails...?!
+                        set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);//bitmap must match region dimensions!
+                        
+                        set_bitmapEx(osds[FULL_OVERLAY_ID].hand, &bitmap, PIXEL_FORMAT_BitsPerPixel);
 
-                    // Cleanup resources
-                    sfSprite_destroy(sprite);
-                    sfTexture_destroy(texture);
-                    printf("Test show bitmap s\r\n");
-                    sfRenderWindow_display(window);
+                    #else
+                        sfRenderWindow_clear(window, sfColor_fromRGB(255, 255, 0));
+                        
+                        unsigned char* rgbaData = malloc(bitmap.u32Width * bitmap.u32Height * 4);  // Allocate memory for RGBA data          
+                        ConvertI4ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height,&g_stPaletteTable);    
 
+                        sfTexture* texture = sfTexture_create(bitmap.u32Width, bitmap.u32Height);
+                        if (!texture) 
+                            return;
+                        sfTexture_updateFromPixels(texture, rgbaData, bitmap.u32Width, bitmap.u32Height, 0, 0);
+                        free(rgbaData);  
+                        
+                        sfSprite* sprite = sfSprite_create();
+                        sfSprite_setTexture(sprite, texture, sfTrue);
+                        // Set the position where you want to draw the sprite
+                        sfVector2f position = {1, 1};
+                        sfSprite_setPosition(sprite, position);    
+                        sfRenderWindow_drawSprite(window, sprite, NULL);
+
+                        // Cleanup resources
+                        sfSprite_destroy(sprite);
+                        sfTexture_destroy(texture);
+                        printf("Test show bitmap s\r\n");
+                        sfRenderWindow_display(window);
+                #endif
+                    //free(bitmap.pData);
                 }
 
                 if (prepared){

@@ -265,7 +265,7 @@ int prepare_bitmap(const char *filename, BITMAP *bitmap, int bFil, unsigned int 
                 }
             }
         }
-        printf("enPixelFmt:%d\n",ccc);
+       // printf("enPixelFmt:%d\n",ccc);
     }
     else
     {
@@ -308,7 +308,6 @@ int prepare_bitmap(const char *filename, BITMAP *bitmap, int bFil, unsigned int 
 
 int set_bitmap(int handle, BITMAP *bitmap)
 {
-
     int s32Ret=0;
 #ifndef _x86    
 #ifdef __SIGMASTAR__
@@ -325,6 +324,36 @@ int set_bitmap(int handle, BITMAP *bitmap)
     }
 #endif
     return s32Ret;
+}
+
+int set_bitmapEx(int handle, BITMAP *bitmap, int BitsPerPixel){
+    int s32Ret=0;
+#ifdef __SIGMASTAR__
+    int byteWidth = getRowStride(bitmap->u32Width,BitsPerPixel);
+    MI_RGN_CanvasInfo_t stCanvasInfo; 
+    memset(&stCanvasInfo,0,sizeof(stCanvasInfo));                         
+    s32Ret = GetCanvas(handle, &stCanvasInfo);                                       
+    printf("OSD Handle:%d GetCanvas:%d  CanvasStride: %d , BMP_Stride:%d Size: %d:%d \r\n", handle,s32Ret,
+    stCanvasInfo.u32Stride, byteWidth, bitmap->u32Width,bitmap->u32Height);
+    
+    
+
+
+    for (int i = 0; i < bitmap->u32Height; i++)                    
+        memcpy((void *)(stCanvasInfo.virtAddr + i * (stCanvasInfo.u32Stride)), bitmap->pData + i * byteWidth, byteWidth);
+
+    //This tests direct copy to overlay - will further speed up!
+    //DrawBitmap1555ToI4(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable, (void *)stCanvasInfo.virtAddr,stCanvasInfo.u32Stride);
+    /* this draws a line directly into the OSD memory
+    for (int y = 0; y < bitmap.u32Height/2; y++)                           
+        for (int x = 0; x < 5; x+=2)
+            ST_OSD_DrawPoint((void *)stCanvasInfo.virtAddr,stCanvasInfo.u32Stride, x,y, 3 );//y%14+1
+    */
+
+    s32Ret = MI_RGN_UpdateCanvas(handle);
+    printf("MI_RGN_UpdateCanvas completed byteWidth:%d!\n",byteWidth);
+#endif
+return   s32Ret;   
 }
 
 void unload_region(int *handle)

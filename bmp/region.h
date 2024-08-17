@@ -15,6 +15,7 @@ extern "C"
     int create_region(int *handle, int x, int y, int width, int height);
     int prepare_bitmap(const char *filename, BITMAP *bitmap, int bFil, unsigned int u16FilColor, int enPixelFmt);
     int set_bitmap(int handle, BITMAP *bitmap);
+    int set_bitmapEx(int handle, BITMAP *bitmap, int BitsPerPixel);
     void unload_region(int *handle);
 #ifdef __SIGMASTAR__    
     int GetCanvas(int handle,  MI_RGN_CanvasInfo_t *stCanvasInfo);
