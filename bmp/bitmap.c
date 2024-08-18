@@ -1202,6 +1202,140 @@ void convertRGBAToI4(
 }
 
 
+void setPixelI4(uint8_t* bmpData, uint32_t width, uint32_t x, uint32_t y, uint8_t color, uint32_t rowStride) {
+    
+    // Calculate the byte index for the pixel
+    uint32_t byteIndex = y * rowStride + (x / 2);
+
+    // Determine if it's the high nibble or low nibble
+    if (x % 2 == 0) {
+        // High nibble (first pixel in the byte)
+        bmpData[byteIndex] = (bmpData[byteIndex] & 0x0F) | (color << 4);
+    } else {
+        // Low nibble (second pixel in the byte)
+        bmpData[byteIndex] = (bmpData[byteIndex] & 0xF0) | (color & 0x0F);
+    }
+}
+
+ 
+uint16_t Transform_OVERLAY_WIDTH;
+uint16_t Transform_OVERLAY_HEIGHT;
+float Transform_Roll;
+float Transform_Pitch;
+
+void rotate_point(Point original, Point img_center, double angle_degrees, Point *rotated) {
+    // Translate the point to move the center to the origin
+    int x_translated = original.x - img_center.x;
+    int y_translated = original.y - img_center.y;
+
+    // Convert the angle from degrees to radians
+    double angle_radians = angle_degrees * M_PI / 180.0;
+
+    // Compute the rotated positions using the rotation matrix
+    double cos_theta = cos(angle_radians);
+    double sin_theta = sin(angle_radians);
+
+    // Apply the rotation
+    rotated->x = (int)(x_translated * cos_theta - y_translated * sin_theta);
+    rotated->y = (int)(x_translated * sin_theta + y_translated * cos_theta);
+
+    // Translate the rotated point back to the original center
+    rotated->x += img_center.x;
+    rotated->y += img_center.y;
+}
+
+void drawRectangleI4(uint8_t* bmpData, int posX, int posY, int rectWidth, int rectHeight, uint8_t color) {
+
+    
+    uint32_t width = Transform_OVERLAY_WIDTH;
+    uint32_t height=Transform_OVERLAY_HEIGHT;
+    // Apply Transform
+    int OffsY = sin((Transform_Pitch) * (M_PI / 180.0)) * 400;
+    Point img_center = {Transform_OVERLAY_WIDTH / 2, Transform_OVERLAY_HEIGHT / 2};  // Center of the image
+
+    // Define the four corners of the rectangle before rotation
+    Point A = {posX, posY - OffsY};
+    Point B = {posX + rectWidth, posY - OffsY};
+    Point C = {posX + rectWidth, posY + rectHeight - OffsY};
+    Point D = {posX, posY + rectHeight - OffsY};
+
+    // Rotate each corner around the center
+    Point rotated_A, rotated_B, rotated_C, rotated_D;
+    rotate_point(A, img_center, Transform_Roll, &rotated_A);
+    rotate_point(B, img_center, Transform_Roll, &rotated_B);
+    rotate_point(C, img_center, Transform_Roll, &rotated_C);
+    rotate_point(D, img_center, Transform_Roll, &rotated_D);
+
+    // Draw the four sides of the rectangle
+    drawLineI4(bmpData, width, height, rotated_A.x, rotated_A.y, rotated_B.x, rotated_B.y, color); // Top side
+    drawLineI4(bmpData, width, height, rotated_B.x, rotated_B.y, rotated_C.x, rotated_C.y, color); // Right side
+    drawLineI4(bmpData, width, height, rotated_C.x, rotated_C.y, rotated_D.x, rotated_D.y, color); // Bottom side
+    drawLineI4(bmpData, width, height, rotated_D.x, rotated_D.y, rotated_A.x, rotated_A.y, color); // Left side
+}
+
+void drawLineI4Ex(uint8_t* bmpData, uint32_t width, uint32_t height, Point A, Point B, uint8_t color) {
+
+    //Apply Transform
+
+    int OffsY= sin((Transform_Pitch) * (M_PI / 180.0))*400;
+    Point img_center = {Transform_OVERLAY_WIDTH/2, Transform_OVERLAY_HEIGHT/2};  // Center of the image (example)
+    Point original_point = A;  // Example point
+    Point original_point2 = B;  // Example point
+    //original_point.y-=OffsY;
+    //original_point2.y-=OffsY;
+    Point rotated_pointA,rotated_pointB;
+
+    int x_rotated, y_rotated;
+
+    rotate_point(original_point, img_center, Transform_Roll, &rotated_pointA);
+    rotate_point(original_point2, img_center, Transform_Roll, &rotated_pointB);
+
+    drawLineI4(bmpData, width, height,rotated_pointA.x,rotated_pointA.y,
+        rotated_pointB.x, rotated_pointB.y,color );
+}
+
+void drawLineI4(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y0, int x1, int y1, uint8_t color) {
+    int dx = abs(x1 - x0);
+    int dy = abs(y1 - y0);
+    int sx = x0 < x1 ? 1 : -1;
+    int sy = y0 < y1 ? 1 : -1;
+    int err = (dx > dy ? dx : -dy) / 2;
+    int e2;
+    uint16_t rowStride=getRowStride(width,4);
+
+    while (1) {
+        // Set the pixel at (x0, y0)
+        if (x0 >= 0 && x0 < width && y0 >= 0 && y0 < height) {
+            //setPixelI4(bmpData, width, x0, y0, color);
+            // Calculate the byte index for the pixel
+            uint32_t byteIndex = y0 * rowStride + (x0 / 2);
+
+            // Determine if it's the high nibble or low nibble
+            if (x0 % 2 == 0) {
+                // High nibble (first pixel in the byte)
+                bmpData[byteIndex] = (bmpData[byteIndex] & 0x0F) | (color << 4);
+            } else {
+                // Low nibble (second pixel in the byte)
+                bmpData[byteIndex] = (bmpData[byteIndex] & 0xF0) | (color & 0x0F);
+            }
+        }
+
+        // If we've reached the end point, break out of the loop
+        if (x0 == x1 && y0 == y1) break;
+
+        e2 = err;
+        if (e2 > -dx) {
+            err -= dy;
+            x0 += sx;
+        }
+        if (e2 < dy) {
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
+
+
  
 
 

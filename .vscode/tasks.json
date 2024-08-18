@@ -11,6 +11,7 @@
                 "bmp/region.c",
                 "osd/net/network.c",
                 "osd/msp/msp.c",
+                "osd/msp/msp_displayport.c",
                 "libpng/lodepng.c",
                 "-I",
                 "./sdk/gk7205v300/include",
@@ -25,6 +26,7 @@
                 "-lcsfml-window",
                 "-lcsfml-system",
                 "-levent_core",
+                "-lm",
                 "-o",
                 "msposd"
             ],

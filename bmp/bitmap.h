@@ -110,6 +110,11 @@ typedef struct MI_RGN_PaletteTable_s
 
 #endif
 
+    typedef struct {
+        uint32_t x;
+        uint32_t y;
+    } Point;
+
     int parse_bitmap(const char *filename, OSD_BITMAPFILEHEADER *pBmpFileHeader, OSD_BITMAPINFO *pBmpInfo);
     int CreateSurfaceByBitMap(const char *pszFileName, OSD_SURFACE_S *pstSurface, unsigned char *pu8Virt);
 
@@ -137,7 +142,10 @@ typedef struct MI_RGN_PaletteTable_s
 
     void ConvertI4ToRGBA(uint8_t* bitmapI4, uint8_t* rgbaData, uint32_t width, uint32_t height, MI_RGN_PaletteElement_t* palette) ;
 
+    void drawLineI4(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y0, int x1, int y1, uint8_t color);
 
+    void drawLineI4Ex(uint8_t* bmpData, uint32_t width, uint32_t height, Point A, Point B, uint8_t color);
+    void drawRectangleI4(uint8_t* bmpData, int posX, int posY, int rectWidth, int rectHeight, uint8_t color);
 
     void copyRectARGB1555(
         uint16_t* srcBitmap, uint32_t srcWidth, uint32_t srcHeight,
@@ -161,6 +169,12 @@ typedef struct MI_RGN_PaletteTable_s
 
     // Declaration of global palette table
     extern MI_RGN_PaletteTable_t g_stPaletteTable;
+
+
+    extern uint16_t Transform_OVERLAY_WIDTH;
+    extern uint16_t Transform_OVERLAY_HEIGHT;
+    extern float Transform_Roll;
+    extern float Transform_Pitch;
 
 #ifdef __cplusplus
 #if __cplusplus

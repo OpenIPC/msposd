@@ -34,8 +34,10 @@
 
 #define MAX_MTU 9000
 
+
 bool verbose = false;
 bool ParseMSP = false;
+int MSP_PollRate=20;
 
 const char *default_master = "/dev/ttyAMA0";
 const int default_baudrate = 115200;
@@ -44,6 +46,8 @@ const char *default_in_addr =  "127.0.0.1:0";
 const int RC_CHANNELS = 65; //RC_CHANNELS ( #65 ) for regular MAVLINK RC Channels read (https://mavlink.io/en/messages/common.html#RC_CHANNELS)
 const int RC_CHANNELS_RAW = 35; //RC_CHANNELS_RAW ( #35 ) for ExpressLRS,Crossfire and other RC procotols (https://mavlink.io/en/messages/common.html#RC_CHANNELS_RAW)
 
+
+ 
 
 //if we gonna use MSP parsing
 msp_state_t *rx_msp_state;
@@ -74,22 +78,18 @@ static int temp = false;
 
 static void print_usage()
 {
-	printf("Usage: mavfwd [OPTIONS]\n"
+	printf("Usage: msposd [OPTIONS]\n"
 	       "Where:\n"
 	       "  -m --master      Local MAVLink master port (%s by default)\n"
 	       "  -b --baudrate    Serial port baudrate (%d by default)\n"
-	       "  -o --out         Remote output port (%s by default)\n"
-	       "  -i --in          Remote input port (%s by default)\n"
 	       "  -c --channels    RC Channel to listen for commands (0 by default) and call channels.sh\n"
 	       "  -w --wait        Delay after each command received(2000ms default)\n"
-		   "  -r --fps         Max MSP refresh rate\n"
+		   "  -r --fps         Max MSP Display refresh rate\n"
 		   "  -p --persist     How long a channel value must persist to generate a command - for multiposition switches (0ms default)\n"
-	       "  -a --aggregate   Aggregate packets in frames (1 no aggregation, 0 no parsing only raw data forward) (%d by default) \n"
-	       "  -f --folder      Folder for file mavlink.msg (default is current folder)\n"	       	    
-	       "  -t --temp        Inject SoC temperature into telemetry\n"
-		   "  -d --wfb         Monitors wfb.log file and reports errors via mavlink HUD messages\n"
+	       "  -t --temp        Inject SoC temperature into HUD\n"
+		   "  -d --wfb         Monitors wfb.log file and reports errors via HUD messages\n"
 		   "  -s --osd         Parse MSP and draw OSD over the video"
-
+		   "  -a --ahi         Draw graphic AHI"
 	       "  -v --verbose     Display each packet, default not\n"	       
 	       "  --help         Display this help\n",
 	       default_master, default_baudrate, defualt_out_addr,
@@ -173,84 +173,6 @@ static void signal_cb(evutil_socket_t fd, short event, void *arg)
 	event_base_loopbreak(base);
 }
 
-static void dump_mavlink_packet(unsigned char *data, const char *direction)
-{
-  uint8_t seq;
-  uint8_t sys_id;
-  uint8_t comp_id;
-  uint32_t msg_id;
-
-  if(data[0] == 0xFE) { //mavlink 1
-      seq = data[2];
-      sys_id = data[3];
-      comp_id = data[4];
-      msg_id = data[5];
-  } else { //mavlink 2
-      seq = data[4];
-      sys_id = data[5];
-      comp_id = data[6];
-      msg_id = data[7];
-  }
-
-	if (verbose) printf("%s %#02x sender %d/%d\t%d\t%d\n", direction, data[0], sys_id, comp_id, seq, msg_id);
-  
-  uint16_t val;
-  
-	if((msg_id == RC_CHANNELS || msg_id == RC_CHANNELS_RAW ) && ch_count > 0) {
-      uint8_t offset = 18; //15 = 1ch;
-      for(uint8_t i=0; i < ch_count; i++) {
-          val = data[offset] | (data[offset+1] << 8);
-          if(ch[i] != val) {
-              ch[i] = val;
-              char buff[44];
-              sprintf(buff, "channels.sh %d %d &", i+5, val);
-              system(buff);
-              if (verbose) printf("called channels.sh %d %d\n", i+5, val);
-           }
-      offset = offset + 2;
-	    } //for
-	} //msg_id
-}
-
-/* https://discuss.ardupilot.org/uploads/short-url/vS0JJd3BQfN9uF4DkY7bAeb6Svd.pdf
- * 0. Message header, always 0xFE
- * 1. Message length
- * 2. Sequence number -- rolls around from 255 to 0 (0x4e, previous was 0x4d)
- * 3. System ID - what system is sending this message
- * 4. Component ID- what component of the system is sending the message
- * 5. Message ID (e.g. 0 = heartbeat and many more! Don’t be shy, you can add too..)
- */
-static bool get_mavlink_packet(unsigned char *in_buffer, int buf_len,
-			       int *packet_len)
-{
-	if (buf_len < 6 /* header */) {
-		return false;
-	}
-	assert(in_buffer[0] == 0xFE || in_buffer[0] == 0xFD); //mavlink 1 or 2
-
-	uint8_t msg_len = in_buffer[1];
-	if (in_buffer[0] == 0xFE)
-    *packet_len = 6 /* header */ + msg_len + 2 /* crc */; //mavlink 1
-  else
-    *packet_len = 10 /* header */ + msg_len + 2 /* crc */; //mavlink 2
-	if (buf_len < *packet_len)
-		return false;
-
-	dump_mavlink_packet(in_buffer, ">>");
-
-	return true;
-}
-
-// Returns num bytes before first occurrence of 0xFE or full data length
-static size_t until_first_fe(unsigned char *data, size_t len)
-{
-	for (size_t i = 1; i < len; i++) {
-		if (data[i] == 0xFE || data[i] == 0xFD) {
-			return i;
-		}
-	}
-	return len;
-}
 
 #define MAX_BUFFER_SIZE 50 //Limited by mavlink
 
@@ -689,6 +611,10 @@ static void process_mavlink(uint8_t* buffer, int count, void *arg){
 static long ttl_packets=0;
 static long ttl_bytes=0;
 
+static long stat_bytes=0;
+static long stat_pckts=0;
+static long last_stat=0;
+
 static void serial_read_cb(struct bufferevent *bev, void *arg)
 {
 	struct evbuffer *input = bufferevent_get_input(bev);
@@ -702,7 +628,16 @@ static void serial_read_cb(struct bufferevent *bev, void *arg)
 		}
 		packet_len = in_len;
 
-		//First forward all serial input to UDP.
+		if (get_time_ms() - last_stat>1000) {//no faster than 1 per second    
+			last_stat=(get_time_ms());
+			printf("UART Events:%u MessagesTTL:%u AttitMSGs:%u Bytes:%u per second\n",stat_pckts,stat_msp_msgs,stat_msp_msg_attitude, stat_bytes);
+			stat_pckts=0;
+			stat_bytes=0;
+			stat_msp_msgs=0;
+			stat_msp_msg_attitude=0;
+    	}
+		stat_pckts++;
+		stat_bytes+=packet_len;
 		ttl_packets++;
 		ttl_bytes+=packet_len;
 		if (ParseMSP){
@@ -710,7 +645,6 @@ static void serial_read_cb(struct bufferevent *bev, void *arg)
 				msp_process_data(rx_msp_state, data[i]);
 			//continue;
 		}else{
-	
 			if (!version_shown && ttl_packets%10==3)//If garbage only, give some feedback do diagnose
 				printf("Packets:%d  Bytes:%d\n",ttl_packets,ttl_bytes);
 
@@ -754,25 +688,7 @@ static void serial_event_cb(struct bufferevent *bev, short events, void *arg)
 	}
 }
 
-static void in_read(evutil_socket_t sock, short event, void *arg)
-{
-	(void)event;
-	unsigned char buf[MAX_MTU];
-	struct event_base *base = arg;
-	ssize_t nread;
 
-	nread = recvfrom(sock, &buf, sizeof(buf) - 1, 0, NULL, NULL);
-	if (nread == -1) {
-		perror("recvfrom()");
-		event_base_loopbreak(base);
-	}
-
-	assert(nread > 6);
-
-	dump_mavlink_packet(buf, "<<");
-
-	bufferevent_write(serial_bev, buf, nread);
-}
  
 
 static void* setup_temp_mem(off_t base, size_t size)
@@ -826,6 +742,8 @@ static void temp_read(evutil_socket_t sock, short event, void *arg)
 		printf("Temp read %f C\n", tempo);
 	last_board_temp=tempo;
 }
+int VariantCounter=0;
+
 
 static void send_variant_request2(int serial_fd) {
     uint8_t buffer[6];
@@ -834,9 +752,12 @@ static void send_variant_request2(int serial_fd) {
     res = write(serial_fd, &buffer, sizeof(buffer));
 
 	usleep(20*1000);
-    construct_msp_command(buffer, MSP_CMD_FC_VARIANT, NULL, 0, MSP_OUTBOUND);
-    res = write(serial_fd, &buffer, sizeof(buffer));
-	usleep(20*1000);
+	if (MSP_PollRate <= ++VariantCounter){//poll every one second
+		construct_msp_command(buffer, MSP_CMD_FC_VARIANT, NULL, 0, MSP_OUTBOUND);
+		res = write(serial_fd, &buffer, sizeof(buffer));
+		usleep(20*1000);
+		VariantCounter=0;
+	}
 
 	//construct_msp_command(buffer, MSP_CMD_BATTERY_STATE, NULL, 0, MSP_OUTBOUND);
     //res = write(serial_fd, &buffer, sizeof(buffer));
@@ -854,7 +775,7 @@ static void poll_msp(evutil_socket_t sock, short event, void *arg)
 }
 
 static int handle_data(const char *port_name, int baudrate,
-		       const char *out_addr, const char *in_addr)
+		       const char *out_addr )
 {
 	struct event_base *base = NULL;
 	struct event *sig_int = NULL, *in_ev = NULL, *temp_tmr = NULL, *msp_tmr=NULL;
@@ -891,31 +812,14 @@ static int handle_data(const char *port_name, int baudrate,
 
 	out_sock = socket(AF_INET, SOCK_DGRAM, 0);
 
-	int in_sock = 0;
-
+ 
 
 	printf("Listening on %s...\n", port_name);
 
 	struct sockaddr_in sin_in = {
 		.sin_family = AF_INET,
 	};
-	if (!parse_host_port(in_addr, (struct in_addr *)&sin_in.sin_addr.s_addr,
-			     &sin_in.sin_port))
-		goto err;
-	if (!parse_host_port(out_addr,
-			     (struct in_addr *)&sin_out.sin_addr.s_addr,
-			     &sin_out.sin_port))
-		goto err;
-
-	if (sin_in.sin_port>0)
-		in_sock=socket(AF_INET, SOCK_DGRAM, 0);
-
-	if (in_sock>0 && bind(in_sock, (struct sockaddr *)&sin_in, sizeof(sin_in))) {// we may not need this
-		perror("bind()");
-		exit(EXIT_FAILURE);
-	}
-	if(in_sock>0)
-		printf("Listening on %s...\n", in_addr);
+ 
 
 	base = event_base_new();
 
@@ -930,12 +834,9 @@ static int handle_data(const char *port_name, int baudrate,
 	serial_bev = bufferevent_socket_new(base, serial_fd, 0);
 	bufferevent_setcb(serial_bev, serial_read_cb, NULL, serial_event_cb,
 			  base);
-	bufferevent_enable(serial_bev, EV_READ);
+	bufferevent_enable(serial_bev, EV_READ);	 
 
-	if (in_sock>0){
-		in_ev = event_new(base, in_sock, EV_READ | EV_PERSIST, in_read, NULL);
-		event_add(in_ev, NULL);
-	}
+
 	if (temp) {
 		if (GetTempSigmaStar()>-90){
 			temp=2;//SigmaStar
@@ -947,10 +848,16 @@ static int handle_data(const char *port_name, int baudrate,
 		}
 	}
 
-
+   //MSP_PollRate
 	if (ParseMSP&& msp_tmr==NULL){
 		msp_tmr = event_new(base, -1, EV_PERSIST, poll_msp, serial_fd);
-		evtimer_add(msp_tmr, &(struct timeval){.tv_sec = 1} /*&(struct timeval){.tv_usec = 5000000}*/);		
+		 // Set poll interval to 200 milliseconds
+    	struct timeval interval = {
+	        .tv_sec = 0,         // 0 seconds
+        	.tv_usec = 1000000/ MSP_PollRate   // 200 milliseconds (200,000 microseconds)
+    	};
+
+		evtimer_add(msp_tmr, &interval  /*(struct timeval){.tv_sec = 1}*/ /*&(struct timeval){.tv_usec = 5000000}*/);		
 	}
 
 	event_base_dispatch(base);
@@ -963,8 +870,7 @@ err:
 	if (out_sock>0)
 		close(out_sock);
 
-	if (in_sock>0)
-		close(in_sock);
+ 
 
 	if (serial_fd >= 0)
 		close(serial_fd);
@@ -999,7 +905,7 @@ int main(int argc, char **argv)
 		{ "master", required_argument, NULL, 'm' },
 		{ "baudrate", required_argument, NULL, 'b' },
 		{ "out", required_argument, NULL, 'o' },
-		{ "aggregate", required_argument, NULL, 'a' },		
+		{ "ahi", required_argument, NULL, 'a' },		
 		{ "in", required_argument, NULL, 'i' },
 		{ "channels", required_argument, NULL, 'c' },
 		{ "wait_time", required_argument, NULL, 'w' },				
@@ -1035,24 +941,10 @@ int main(int argc, char **argv)
 			out_addr = optarg;
 			break;
 		case 'i':
-			in_addr = optarg;
+			 
 			break;
 		case 'a':	
 			aggregate = atoi(optarg);
-			if (aggregate>100){
-				minAggPckts=aggregate/100;
-				aggregate=aggregate%100;
-
-			}else if (aggregate>2000)
-				aggregate=2000;
-
-			if(aggregate == 0) 
-				printf("No parsing, raw UART to UDP only\n");
-			else if (aggregate<2000)
-				printf("Aggregate mavlink pckts in packs of %d , AHI change msg will flush after %d packs  \n", aggregate, minAggPckts);
-			
-			else if (aggregate>2000)
-				printf("Aggregate mavlink pckts till buffer reaches %d bytes \n", aggregate);
 						
 		break;
 		
@@ -1143,7 +1035,7 @@ int main(int argc, char **argv)
 		//loadfonts    	          
 	}
 
-	return handle_data(port_name, baudrate, out_addr, in_addr);
+	return handle_data(port_name, baudrate, out_addr);
 }
 
 

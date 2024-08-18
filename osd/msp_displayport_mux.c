@@ -14,7 +14,7 @@
 
 #include "msp/msp.h"
 #include "msp/msp_displayport.h"
-#include "msp/msp_displayport.c"//Why needed to compile!
+
 
 #include "util/debug.h"
 #include "util/time_util.h"
@@ -77,6 +77,9 @@ static uint8_t serial_passthrough = 1;
 static uint8_t compress = 0;
 static uint8_t no_btfl_hd = 0;
 
+static int16_t last_pitch = 0;
+static int16_t last_roll = 0;
+
  
 
   
@@ -107,22 +110,24 @@ static void copy_to_msp_frame_buffer(void *buffer, uint16_t size) {
 
 //int displayport_process_message(displayport_vtable_t *display_driver, msp_msg_t *msg) {
 //}
-
+static int stat_msp_msgs=0;
+static int stat_msp_msg_attitude=0;
 static void rx_msp_callback(msp_msg_t *msp_message)
 {
     // Process a received MSP message from FC and decide whether to send it to the PTY (DJI) or UDP port (MSP-OSD on Goggles)
     DEBUG_PRINT("FC->AU MSP msg %d with data len %d \n", msp_message->cmd, msp_message->size);
+    stat_msp_msgs++;
     switch(msp_message->cmd) {
          case MSP_ATTITUDE: {
 
-            uint16_t pitch = (uint16_t*) msp_message->payload[0];
-            uint16_t roll = (uint16_t*) msp_message->payload[2];
-
-           printf("\n Got MSG_ATTITUDE            pitch:%d  roll:%d\n", pitch, roll);
+            last_pitch = *(int16_t*)&msp_message->payload[2];
+            last_roll = *(int16_t*)&msp_message->payload[0];
+            stat_msp_msg_attitude++;
+           //printf("\n Got MSG_ATTITUDE            pitch:%d  roll:%d\n", pitch, roll);
            break;
          }
         case MSP_RC: {
-                printf("Got MSP_RC \n");
+               // printf("Got MSP_RC \n");
               break;
          }
          
