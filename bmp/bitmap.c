@@ -671,6 +671,7 @@ void convertBitmap1555ToI8(
     }
 }
 
+ 
 //static MI_RGN_PaletteTable_t g_stPaletteTable ;//= {{{0, 0, 0, 0}}};
 MI_RGN_PaletteTable_t g_stPaletteTable =
 {

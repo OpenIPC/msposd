@@ -167,6 +167,14 @@ typedef struct MI_RGN_PaletteTable_s
 
     int getRowStride(int width, int BitsPerPixel);
 
+    #define COLOR_RED 1
+    #define COLOR_GREEN 2
+    #define COLOR_BLUE 3
+    #define COLOR_YELLOW 4
+    #define COLOR_MAGENTA 5
+    #define COLOR_CYAN 6
+    #define COLOR_WHITE 7
+    #define COLOR_BLACK 8
     // Declaration of global palette table
     extern MI_RGN_PaletteTable_t g_stPaletteTable;
 

@@ -346,6 +346,14 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
     //std::string str = std::to_string(pitch_degree);
     //qDebug()<<"Roll:"<<roll_degree<<" Pitch:"<<pitch_degree<< " : " << str.c_str();
 
+    int TiltY= - 150;//pixels, negative value means up
+    const int pos_x= OVERLAY_WIDTH/2;
+    const int pos_y= (OVERLAY_HEIGHT/2)  + TiltY;
+    const int width_ladder= 100*horizonWidth;
+
+    int px = pos_x - width_ladder / 2;
+
+
     if(/*show_center_indicator*/true){
         //painter->setPen(m_color);
         // Line always drawn in the center to have some orientation where the center is
@@ -353,19 +361,41 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
         //const auto circle_r= 100*horizonWidth * 0.05;
         //painter->drawLine(width()/2-(line_w/2),height()/2,width()/2+(line_w/2),height()/2);
         //painter->drawEllipse(QPointF(width()/2,height()/2),circle_r,circle_r);
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, 
-            OVERLAY_WIDTH/2-(line_w/2),OVERLAY_HEIGHT/2,OVERLAY_WIDTH/2+(line_w/2),OVERLAY_HEIGHT/2, 0x02);
+         //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y,px+width_ladder,pos_y, COLOR_GREEN);
+
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-5,px+20,pos_y-2, COLOR_WHITE);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-6,px+20,pos_y-3, COLOR_BLACK);    
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-7,px+20,pos_y-4, COLOR_BLACK);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-8,px+20,pos_y-5, COLOR_WHITE);
+
+
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y+5,px+20,pos_y+2, COLOR_WHITE);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y+6,px+20,pos_y+3, COLOR_BLACK);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y+7,px+20,pos_y+4, COLOR_BLACK);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y+8,px+20,pos_y+5, COLOR_WHITE);
+
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-2,px+width_ladder,pos_y-5, COLOR_WHITE);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-3,px+width_ladder,pos_y-6, COLOR_BLACK);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-4,px+width_ladder,pos_y-7, COLOR_BLACK);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-5,px+width_ladder,pos_y-8, COLOR_WHITE);
+
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+2,px+width_ladder,pos_y+5, COLOR_WHITE);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+3,px+width_ladder,pos_y+6, COLOR_BLACK);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+4,px+width_ladder,pos_y+7, COLOR_BLACK);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+5,px+width_ladder,pos_y+8, COLOR_WHITE);
+
+
+         //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder,pos_y,px+width_ladder,pos_y, COLOR_GREEN);
+         //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder,pos_y,px+width_ladder,pos_y, COLOR_GREEN);
     }
 /*
     painter->translate(width()/2,height()/2);
     painter->rotate(roll_degree*-1);
     painter->translate((width()/2)*-1,(height()/2)*-1);
 */
-    const int pos_x= OVERLAY_WIDTH/2;
-    const int pos_y= OVERLAY_HEIGHT/2;
-    const int width_ladder= 100*horizonWidth;
+ 
 
-    int px = pos_x - width_ladder / 2;
+    
 
     int ratio = horizonSpacing; //pixels per degree
     int vrange = horizonRange; //total vertical range in degrees
@@ -386,9 +416,9 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
     if (stopH>90) stopH = 90;
 
     //painter->setPen(m_color);
-
+    int m_color_def=m_color;
     for (i = startH/step; i <= stopH/step; i++) {
-
+        m_color = m_color_def;
         if (i>0 && i*ratio<30 && /*showHorizonHeadingLadder*/ true ) i=i+ 30/ratio;
 
         k = i*step;
@@ -397,13 +427,17 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
             if (i != 0) {
 
                 //fix pitch line wrap around at extreme nose up/down
-                n=k;
+                n=k;//this is the line index number relative to the main one.
                 if (n>90){
                     n=180-k;
                 }
                 if (n<-90){
                     n=-k-180;
                 }
+                if (abs(n)>20)//pitch higher than 30 degree.
+                    m_color=COLOR_MAGENTA;
+                if (abs(n)>40)//pitch higher than 30 degree.
+                    m_color=COLOR_RED;
 
                 //left numbers
                // painter->setPen(m_color);
@@ -525,8 +559,8 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
                 //painter->setPen(m_glow);
                 //painter->drawRect(QRectF(pos_x-width_ladder*2.5/2, y, width_ladder*2.5, stroke_s));
 
-                drawRectangleI4(bmpBuff.pData, pos_x-width_ladder*2.5/2, y, width_ladder*2.5, 3, m_color);
-                drawRectangleI4(bmpBuff.pData, pos_x-width_ladder*2.5/2, y+1, width_ladder*2.5, 1, 0x08);
+                drawRectangleI4(bmpBuff.pData, pos_x-width_ladder*2.5/2, y, width_ladder*2.5, 3, m_color);//main color
+                drawRectangleI4(bmpBuff.pData, pos_x-width_ladder*2.5/2, y+1, width_ladder*2.5, 1, 0x08);//Black in the middle
             }
         }
     }
