@@ -80,6 +80,8 @@ static uint8_t no_btfl_hd = 0;
 static int16_t last_pitch = 0;
 static int16_t last_roll = 0;
 
+static int16_t last_RC_Channels[16];
+
  
 
   
@@ -112,6 +114,9 @@ static void copy_to_msp_frame_buffer(void *buffer, uint16_t size) {
 //}
 static int stat_msp_msgs=0;
 static int stat_msp_msg_attitude=0;
+static int stat_screen_refresh_count=0;
+static int stat_draw_overlay_1=0, stat_draw_overlay_2=0, stat_draw_overlay_3=0;
+
 static void rx_msp_callback(msp_msg_t *msp_message)
 {
     // Process a received MSP message from FC and decide whether to send it to the PTY (DJI) or UDP port (MSP-OSD on Goggles)
@@ -127,7 +132,9 @@ static void rx_msp_callback(msp_msg_t *msp_message)
            break;
          }
         case MSP_RC: {
-               // printf("Got MSP_RC \n");
+                //printf("Got MSP_RC \n");
+              //memcpy(&channels[0], &msp_message->payload[0],32);
+              
               break;
          }
          

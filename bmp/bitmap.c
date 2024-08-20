@@ -690,8 +690,11 @@ MI_RGN_PaletteTable_t g_stPaletteTable =
         {0xFF, 0x42, 0x08, 0x08}, // 0x2108 -> Gray (Even Darker)
         {0xFF, 0x63, 0x18, 0xC6}, // 0x318C -> Gray (Medium)
         {0xFF, 0xAD, 0x52, 0xD6}, // 0x5AD6 -> Gray (Lighter)
-        {0xFF, 0xCE, 0x73, 0x9C}, // 0x739C -> Gray (Light)
-        {0xFF, 0x31, 0x8C, 0x6C}, // 0x18C6 -> Gray (Dark)
+        {0xFF, 0xDD, 0xDD, 0xDD}, // 0x739C -> Gray (Light)
+        {0xFF, 0xAA, 0xAA, 0xAA}, // 0x18C6 -> Gray (Dark)
+
+        //{0xFF, 0xCE, 0x73, 0x9C}, // 0x739C -> Gray (Light)
+        //{0xFF, 0x31, 0x8C, 0x6C}, // 0x18C6 -> Gray (Dark)
         {0x00,   0,   0,   0}, // transparent  index 15, 0x0A
         {0x00,   0,   0,   0},  // 0x7BDE -> transparent
  
@@ -1245,7 +1248,7 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
     rotated->y += img_center.y;
 }
 
-void drawRectangleI4(uint8_t* bmpData, int posX, int posY, int rectWidth, int rectHeight, uint8_t color) {
+void drawRectangleI4(uint8_t* bmpData, int posX, int posY, int rectWidth, int rectHeight, uint8_t color, int thickness) {
 
     
     uint32_t width = Transform_OVERLAY_WIDTH;
@@ -1266,12 +1269,51 @@ void drawRectangleI4(uint8_t* bmpData, int posX, int posY, int rectWidth, int re
     rotate_point(B, img_center, Transform_Roll, &rotated_B);
     rotate_point(C, img_center, Transform_Roll, &rotated_C);
     rotate_point(D, img_center, Transform_Roll, &rotated_D);
+    if (rectHeight==1){
+        if (color==COLOR_WHITE)
+            drawLineI4AA(bmpData, width, height, rotated_A.x, rotated_A.y, rotated_B.x, rotated_B.y); // Top side
+        else
+            drawLineI4(bmpData, width, height, rotated_A.x, rotated_A.y, rotated_B.x, rotated_B.y, color); // Top side    
+        return ;
+    }
+    if (rectWidth==1){
+        if (color==COLOR_WHITE)
+             drawLineI4AA(bmpData, width, height, rotated_B.x, rotated_B.y, rotated_C.x, rotated_C.y); // Right side
+        else
+            drawLineI4(bmpData, width, height, rotated_B.x, rotated_B.y, rotated_C.x, rotated_C.y, color); // Right side
+        return ;
+    }
 
     // Draw the four sides of the rectangle
-    drawLineI4(bmpData, width, height, rotated_A.x, rotated_A.y, rotated_B.x, rotated_B.y, color); // Top side
-    drawLineI4(bmpData, width, height, rotated_B.x, rotated_B.y, rotated_C.x, rotated_C.y, color); // Right side
-    drawLineI4(bmpData, width, height, rotated_C.x, rotated_C.y, rotated_D.x, rotated_D.y, color); // Bottom side
-    drawLineI4(bmpData, width, height, rotated_D.x, rotated_D.y, rotated_A.x, rotated_A.y, color); // Left side
+    if (thickness==1){
+        if (color==COLOR_WHITE){
+            drawLineI4AA(bmpData, width, height, rotated_A.x, rotated_A.y, rotated_B.x, rotated_B.y); // Top side
+            drawLineI4AA(bmpData, width, height, rotated_B.x, rotated_B.y, rotated_C.x, rotated_C.y); // Right side
+            drawLineI4AA(bmpData, width, height, rotated_C.x, rotated_C.y, rotated_D.x, rotated_D.y); // Bottom side
+            drawLineI4AA(bmpData, width, height, rotated_D.x, rotated_D.y, rotated_A.x, rotated_A.y); // Left side
+        }else{
+            drawLineI4(bmpData, width, height, rotated_A.x, rotated_A.y, rotated_B.x, rotated_B.y, color); // Top side
+            drawLineI4(bmpData, width, height, rotated_B.x, rotated_B.y, rotated_C.x, rotated_C.y, color); // Right side
+            drawLineI4(bmpData, width, height, rotated_C.x, rotated_C.y, rotated_D.x, rotated_D.y, color); // Bottom side
+            drawLineI4(bmpData, width, height, rotated_D.x, rotated_D.y, rotated_A.x, rotated_A.y, color); // Left side
+        }
+    }else if (thickness>=99){
+            fillRegionI4(bmpData, width, height,rotated_A.x, rotated_A.y, rotated_B.x, rotated_B.y,rotated_C.x, rotated_C.y, rotated_D.x, rotated_D.y,color);
+    }else{
+        drawThickLineI4(bmpData, width, height, rotated_A.x, rotated_A.y, rotated_B.x, rotated_B.y, color, thickness); // Top side
+        drawThickLineI4(bmpData, width, height, rotated_B.x, rotated_B.y, rotated_C.x, rotated_C.y, color, thickness); // Right side
+        drawThickLineI4(bmpData, width, height, rotated_C.x, rotated_C.y, rotated_D.x, rotated_D.y, color, thickness); // Bottom side
+        drawThickLineI4(bmpData, width, height, rotated_D.x, rotated_D.y, rotated_A.x, rotated_A.y, color, thickness); // Left side
+    }
+}
+
+
+void drawThickLineI4(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y0, int x1, int y1, uint8_t color, int thickness) {
+    for (int i = -thickness / 2; i <= thickness / 2; i++) {
+        for (int j = -thickness / 2; j <= thickness / 2; j++) {
+            drawLineI4(bmpData, width, height, x0 + i, y0 + j, x1 + i, y1 + j, color);
+        }
+    }
 }
 
 void drawLineI4Ex(uint8_t* bmpData, uint32_t width, uint32_t height, Point A, Point B, uint8_t color) {
@@ -1303,14 +1345,20 @@ void drawLineI4(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y
     int err = (dx > dy ? dx : -dy) / 2;
     int e2;
     uint16_t rowStride=getRowStride(width,4);
+    if (x0<0 || x0>width)
+        return;
+    if (x1<0 || x1>width || y0<0 || y0>height || y1<0 || y1>height)
+        return;
 
+//    if (color==COLOR_WHITE)
+//        return drawLineI4AA( bmpData, width, height, x0, y0,  x1,  y1);
     while (1) {
         // Set the pixel at (x0, y0)
         if (x0 >= 0 && x0 < width && y0 >= 0 && y0 < height) {
             //setPixelI4(bmpData, width, x0, y0, color);
             // Calculate the byte index for the pixel
             uint32_t byteIndex = y0 * rowStride + (x0 / 2);
-
+            
             // Determine if it's the high nibble or low nibble
             if (x0 % 2 == 0) {
                 // High nibble (first pixel in the byte)
@@ -1337,6 +1385,129 @@ void drawLineI4(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y
 }
 
 
+
+// Function to plot a pixel with a specified grayscale level
+void setPixelI4AA(uint8_t* bmpData, uint32_t width, uint32_t height, int x, int y, uint8_t color) {
+    uint16_t rowStride = getRowStride(width, 4);
+    if (x >= 0 && x < width && y >= 0 && y < height) {
+        uint32_t byteIndex = y * rowStride + (x / 2);
+        if (x % 2 == 0) {
+            bmpData[byteIndex] = (bmpData[byteIndex] & 0x0F) | (color << 4);
+        } else {
+            bmpData[byteIndex] = (bmpData[byteIndex] & 0xF0) | (color & 0x0F);
+        }
+    }
+}
+
+// Function to draw an anti-aliased line
+void drawLineI4AA(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y0, int x1, int y1) {
+    int dx = abs(x1 - x0);
+    int dy = abs(y1 - y0);
+    int sx = x0 < x1 ? 1 : -1;
+    int sy = y0 < y1 ? 1 : -1;
+    int err = dx - dy;
+
+    float ed = (dx + dy == 0) ? 1.0f : sqrtf((float)dx * dx + (float)dy * dy);
+
+    while (1) {
+        // Calculate the intensity of the color based on the distance to the actual line
+        float err2 = abs(err - dx + dy) / ed;
+        uint8_t color = COLOR_WHITE;
+
+        if (err2 > 0.9f) {           
+           
+           color = COLOR_GRAY_Dark;
+        } else if (err2 > 0.7f) {
+           // color = COLOR_GRAY_Darker;
+           color = COLOR_GRAY_Dark;
+        } else if (err2 > 0.5f) {
+            color = COLOR_GRAY_Dark;
+        } else if (err2 > 0.3f) {
+            color = COLOR_GRAY_Dark;
+        } else if (err2 > 0.1f) {
+            color = COLOR_GRAY_Light;
+        } else {
+            color = COLOR_WHITE;
+        }
+
+        // Set the pixel at the current position with the calculated color
+        setPixelI4AA(bmpData, width, height, x0, y0, color);
+
+        // If we've reached the end point, break out of the loop
+        if (x0 == x1 && y0 == y1) break;
+
+        int e2 = err;
+        if (e2 * 2 > -dy) {
+            err -= dy;
+            x0 += sx;
+        }
+        if (e2 * 2 < dx) {
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
+
+ 
+
+// Helper function to calculate bounding box
+void getBoundingBox(int x0, int y0, int x1, int y1, int x2, int y2, int x3, int y3, int *minX, int *minY, int *maxX, int *maxY) {
+    *minX = x0 < x1 ? (x0 < x2 ? (x0 < x3 ? x0 : x3) : (x2 < x3 ? x2 : x3)) : (x1 < x2 ? (x1 < x3 ? x1 : x3) : (x2 < x3 ? x2 : x3));
+    *minY = y0 < y1 ? (y0 < y2 ? (y0 < y3 ? y0 : y3) : (y2 < y3 ? y2 : y3)) : (y1 < y2 ? (y1 < y3 ? y1 : y3) : (y2 < y3 ? y2 : y3));
+    *maxX = x0 > x1 ? (x0 > x2 ? (x0 > x3 ? x0 : x3) : (x2 > x3 ? x2 : x3)) : (x1 > x2 ? (x1 > x3 ? x1 : x3) : (x2 > x3 ? x2 : x3));
+    *maxY = y0 > y1 ? (y0 > y2 ? (y0 > y3 ? y0 : y3) : (y2 > y3 ? y2 : y3)) : (y1 > y2 ? (y1 > y3 ? y1 : y3) : (y2 > y3 ? y2 : y3));
+}
+
+// Function to check if a point is inside the region using the winding number algorithm
+int isPointInPolygon(int x, int y, int* vx, int* vy) {
+    int windingNumber = 0;
+
+    for (int i = 0; i < 4; i++) {
+        int x0 = vx[i];
+        int y0 = vy[i];
+        int x1 = vx[(i + 1) % 4];
+        int y1 = vy[(i + 1) % 4];
+
+        if (y0 <= y) {
+            if (y1 > y && (x1 - x0) * (y - y0) - (y1 - y0) * (x - x0) > 0) {
+                windingNumber++;
+            }
+        } else {
+            if (y1 <= y && (x1 - x0) * (y - y0) - (y1 - y0) * (x - x0) < 0) {
+                windingNumber--;
+            }
+        }
+    }
+
+    return windingNumber != 0;
+}
+
+// Function to fill the region in the BMP
+void fillRegionI4(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y0, int x1, int y1, int x2, int y2, int x3, int y3, uint8_t color) {
+    int minX, minY, maxX, maxY;
+    getBoundingBox(x0, y0, x1, y1, x2, y2, x3, y3, &minX, &minY, &maxX, &maxY);
+
+    int vx[4] = {x0, x1, x2, x3};
+    int vy[4] = {y0, y1, y2, y3};
+
+    uint16_t rowStride = getRowStride(width, 4);
+
+    // Iterate through each pixel in the bounding box
+    for (int y = minY; y <= maxY; y++) {
+        for (int x = minX; x <= maxX; x++) {
+            if (isPointInPolygon(x, y, vx, vy)) {
+               if (x >= 0 && x < width && y >= 0 && y < height) {
+                    uint32_t byteIndex = y * rowStride + (x / 2);
+                    if (x % 2 == 0) {
+                        bmpData[byteIndex] = (bmpData[byteIndex] & 0x0F) | (color << 4);
+                    } else {
+                        bmpData[byteIndex] = (bmpData[byteIndex] & 0xF0) | (color & 0x0F);
+                    }
+                }
+            }
+        }
+    }
+}
  
 
 

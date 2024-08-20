@@ -39,6 +39,8 @@ bool verbose = false;
 bool ParseMSP = false;
 int MSP_PollRate=20;
 
+int AHI_Enabled=1;
+
 const char *default_master = "/dev/ttyAMA0";
 const int default_baudrate = 115200;
 const char *defualt_out_addr = "127.0.0.1:14600";
@@ -46,8 +48,6 @@ const char *default_in_addr =  "127.0.0.1:0";
 const int RC_CHANNELS = 65; //RC_CHANNELS ( #65 ) for regular MAVLINK RC Channels read (https://mavlink.io/en/messages/common.html#RC_CHANNELS)
 const int RC_CHANNELS_RAW = 35; //RC_CHANNELS_RAW ( #35 ) for ExpressLRS,Crossfire and other RC procotols (https://mavlink.io/en/messages/common.html#RC_CHANNELS_RAW)
 
-
- 
 
 //if we gonna use MSP parsing
 msp_state_t *rx_msp_state;
@@ -630,11 +630,18 @@ static void serial_read_cb(struct bufferevent *bev, void *arg)
 
 		if (get_time_ms() - last_stat>1000) {//no faster than 1 per second    
 			last_stat=(get_time_ms());
-			printf("UART Events:%u MessagesTTL:%u AttitMSGs:%u Bytes:%u per second\n",stat_pckts,stat_msp_msgs,stat_msp_msg_attitude, stat_bytes);
+			if (stat_screen_refresh_count==0)
+				stat_screen_refresh_count++;
+			printf("UART Events:%u MessagesTTL:%u AttitMSGs:%u Bytes/Sec:%u FPS:%u, avg time per frame ms:%d | %d | %d | \n",stat_pckts,stat_msp_msgs,stat_msp_msg_attitude, 
+				stat_bytes, stat_screen_refresh_count,stat_draw_overlay_1/stat_screen_refresh_count,stat_draw_overlay_2/stat_screen_refresh_count,stat_draw_overlay_3/stat_screen_refresh_count);
+			stat_screen_refresh_count=0;
 			stat_pckts=0;
 			stat_bytes=0;
 			stat_msp_msgs=0;
 			stat_msp_msg_attitude=0;
+			stat_draw_overlay_1=0;
+			stat_draw_overlay_2=0;
+			stat_draw_overlay_3=0;
     	}
 		stat_pckts++;
 		stat_bytes+=packet_len;
@@ -748,22 +755,26 @@ int VariantCounter=0;
 static void send_variant_request2(int serial_fd) {
     uint8_t buffer[6];
 	int res=0;
-	construct_msp_command(buffer, MSP_ATTITUDE, NULL, 0, MSP_OUTBOUND);
-    res = write(serial_fd, &buffer, sizeof(buffer));
 
-	usleep(20*1000);
+
+	if (ch_count>0 && VariantCounter%5==1){//once every 5 cycles, 4 times per second
+		construct_msp_command(buffer, MSP_RC, NULL, 0, MSP_OUTBOUND);
+    	res = write(serial_fd, &buffer, sizeof(buffer));
+	}else if (AHI_Enabled){
+		construct_msp_command(buffer, MSP_ATTITUDE, NULL, 0, MSP_OUTBOUND);
+    	res = write(serial_fd, &buffer, sizeof(buffer));
+	}
+
+	
 	if (MSP_PollRate <= ++VariantCounter){//poll every one second
 		construct_msp_command(buffer, MSP_CMD_FC_VARIANT, NULL, 0, MSP_OUTBOUND);
 		res = write(serial_fd, &buffer, sizeof(buffer));
-		usleep(20*1000);
+		//usleep(20*1000);
 		VariantCounter=0;
 	}
 
 	//construct_msp_command(buffer, MSP_CMD_BATTERY_STATE, NULL, 0, MSP_OUTBOUND);
     //res = write(serial_fd, &buffer, sizeof(buffer));
-
-	construct_msp_command(buffer, MSP_RC, NULL, 0, MSP_OUTBOUND);
-    res = write(serial_fd, &buffer, sizeof(buffer));
 
 	//printf("Sent %d\n", res);
 }
@@ -851,7 +862,7 @@ static int handle_data(const char *port_name, int baudrate,
    //MSP_PollRate
 	if (ParseMSP&& msp_tmr==NULL){
 		msp_tmr = event_new(base, -1, EV_PERSIST, poll_msp, serial_fd);
-		 // Set poll interval to 200 milliseconds
+		 // Set poll interval to 50 milliseconds if pollrate is 20
     	struct timeval interval = {
 	        .tv_sec = 0,         // 0 seconds
         	.tv_usec = 1000000/ MSP_PollRate   // 200 milliseconds (200,000 microseconds)
@@ -924,7 +935,7 @@ int main(int argc, char **argv)
 	int baudrate = default_baudrate;
 	const char *out_addr = defualt_out_addr;
 	const char *in_addr = default_in_addr;
-	MinTimeBetweenScreenRefresh=100;
+	MinTimeBetweenScreenRefresh=50;
 	last_board_temp=-100;
 
 	int opt;
@@ -944,7 +955,7 @@ int main(int argc, char **argv)
 			 
 			break;
 		case 'a':	
-			aggregate = atoi(optarg);
+			AHI_Enabled = atoi(optarg);
 						
 		break;
 		

@@ -207,7 +207,7 @@ static void draw_screenCenter(){
 
 #ifdef _x86
     uint64_t step2=get_time_ms();  
-    sfRenderWindow_clear(window, sfColor_fromRGB(55, 55, 55));
+    sfRenderWindow_clear(window, sfColor_fromRGB(255, 255, 255));
     unsigned char* rgbaData = malloc(bitmap.u32Width * bitmap.u32Height * 4);  // Allocate memory for RGBA data    
     Convert1555ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height);    
     sfTexture* texture = sfTexture_create(bitmap.u32Width, bitmap.u32Height);
@@ -301,7 +301,7 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
     original_point = (Point){1300, 480}; original_point2 = (Point){1300, 520};
     drawLineI4Ex(bmpBuff.pData, bmpBuff.u32Width, bmpBuff.u32Height, original_point,original_point2, 7);
 
-     drawRectangleI4(bmpBuff.pData, 600 , 400 , 700 , 6, 3);
+     drawRectangleI4(bmpBuff.pData, 600 , 400 , 700 , 6, COLOR_GREEN, 1);
 
  }
 
@@ -318,7 +318,7 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
 
 
      
-
+    
     const bool horizonInvertPitch = false;
     const bool horizonInvertRoll = false;
     const double horizonWidth = 3;
@@ -328,7 +328,8 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
     const int horizonStep = 10;//????//degrees per line
     const bool show_center_indicator = false;////m_show_center_indicator;
     // we use fillRect for the ladder lines, this adjust how big the linesize is (e.g. how strong the stroke)
-    const double ladder_stroke_faktor=0.5;
+    const double ladder_stroke_faktor=0.1;
+    const int subline_thickness=2;
 
     double roll_degree = ((double)last_roll)/10;
     double pitch_degree = ((double)last_pitch)/10;
@@ -355,6 +356,15 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
 
 
     if(/*show_center_indicator*/true){
+
+/*
+        drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-50, px+100,pos_y-60, COLOR_WHITE);
+        drawLineI4AA(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-48, px+100,pos_y-58);
+        drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-46, px+100,pos_y-56, COLOR_WHITE);
+        drawLineI4AA(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-45, px+100,pos_y-55);
+        drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-40, px+100,pos_y-50, COLOR_BLACK);
+*/
+
         //painter->setPen(m_color);
         // Line always drawn in the center to have some orientation where the center is
         const auto line_w= 100*horizonWidth * 0.2;
@@ -362,27 +372,27 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
         //painter->drawLine(width()/2-(line_w/2),height()/2,width()/2+(line_w/2),height()/2);
         //painter->drawEllipse(QPointF(width()/2,height()/2),circle_r,circle_r);
          //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y,px+width_ladder,pos_y, COLOR_GREEN);
+        
+         //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-2,px+20,pos_y-2, COLOR_WHITE);         
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px-20,pos_y-3,px+20,pos_y-3, COLOR_GRAY_Light);    
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px-20,pos_y-4,px+20,pos_y-4, COLOR_GRAY_Light);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-5,px+20,pos_y-5, COLOR_WHITE);
+        
 
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-5,px+20,pos_y-2, COLOR_WHITE);
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-6,px+20,pos_y-3, COLOR_BLACK);    
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-7,px+20,pos_y-4, COLOR_BLACK);
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-8,px+20,pos_y-5, COLOR_WHITE);
+         //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y+2,px+20,pos_y+2, COLOR_WHITE);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px-20,pos_y+3,px+20,pos_y+3, COLOR_GRAY_Light);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px-20,pos_y+4,px+20,pos_y+4, COLOR_GRAY_Light);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y+5,px+20,pos_y+5, COLOR_WHITE);
 
+         //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-2,px+width_ladder,pos_y-2, COLOR_WHITE);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-3,px+width_ladder+20,pos_y-3, COLOR_GRAY_Light);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-4,px+width_ladder+20,pos_y-4, COLOR_GRAY_Light);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-5,px+width_ladder,pos_y-5, COLOR_WHITE);
 
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y+5,px+20,pos_y+2, COLOR_WHITE);
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y+6,px+20,pos_y+3, COLOR_BLACK);
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y+7,px+20,pos_y+4, COLOR_BLACK);
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y+8,px+20,pos_y+5, COLOR_WHITE);
-
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-2,px+width_ladder,pos_y-5, COLOR_WHITE);
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-3,px+width_ladder,pos_y-6, COLOR_BLACK);
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-4,px+width_ladder,pos_y-7, COLOR_BLACK);
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-5,px+width_ladder,pos_y-8, COLOR_WHITE);
-
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+2,px+width_ladder,pos_y+5, COLOR_WHITE);
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+3,px+width_ladder,pos_y+6, COLOR_BLACK);
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+4,px+width_ladder,pos_y+7, COLOR_BLACK);
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+5,px+width_ladder,pos_y+8, COLOR_WHITE);
+         //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+2,px+width_ladder,pos_y+2, COLOR_WHITE);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+3,px+width_ladder+20,pos_y+3, COLOR_GRAY_Light);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+4,px+width_ladder+20,pos_y+4, COLOR_GRAY_Light);
+         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+5,px+width_ladder,pos_y+5, COLOR_WHITE);
 
 
          //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder,pos_y,px+width_ladder,pos_y, COLOR_GREEN);
@@ -451,12 +461,12 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
                     //Upper ladders
                     // default to stroke strength of 2 (I think it is pixels)
                     const auto stroke_s=2*ladder_stroke_faktor;
-
+            
                     //left upper cap
                     //painter->setPen(m_color);
                     //painter->fillRect(QRectF(px , y , stroke_s , width_ladder/24), m_color);
                     //drawLineI4Ex(bmpBuff.pData, bmpBuff.u32Width, bmpBuff.u32Height, original_point,original_point2, 7)                    
-                    drawRectangleI4(bmpBuff.pData, px , y , stroke_s , width_ladder/24, m_color);
+                    drawRectangleI4(bmpBuff.pData, px , y , stroke_s , width_ladder/24, m_color,subline_thickness);
 
                     //painter->setPen(m_glow);
                     //painter->drawRect(QRectF(px , y , stroke_s , width_ladder/24));
@@ -467,14 +477,14 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
                     //painter->fillRect(QRectF(px , y , width_ladder/3 , stroke_s), m_color);
                     //painter->setPen(m_glow);
                     //painter->drawRect(QRectF(px , y , width_ladder/3 , stroke_s));
-                    drawRectangleI4(bmpBuff.pData, px , y , width_ladder/3 , stroke_s, m_color);
+                    drawRectangleI4(bmpBuff.pData, px , y , width_ladder/3 , stroke_s, m_color,subline_thickness);
 
                     //right upper cap
                     //painter->setPen(m_color);
                     //painter->fillRect(QRectF(px+width_ladder-2 , y , stroke_s , width_ladder/24), m_color);
                     //painter->setPen(m_glow);                    
                     //painter->drawRect(QRectF(px+width_ladder-2 , y , stroke_s , width_ladder/24));
-                    drawRectangleI4(bmpBuff.pData, px+width_ladder-2 , y , stroke_s , width_ladder/24, m_color);
+                    drawRectangleI4(bmpBuff.pData, px+width_ladder-2 , y , stroke_s , width_ladder/24, m_color,subline_thickness);
 
                     //right upper line
                     //painter->setPen(m_color);
@@ -482,7 +492,7 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
                     //painter->setPen(m_glow);
                     //painter->drawRect(QRectF(px+width_ladder*2/3 , y , width_ladder/3 , stroke_s));
                     //painter->setPen(m_color);
-                    drawRectangleI4(bmpBuff.pData, px+width_ladder*2/3 , y , width_ladder/3 , stroke_s, m_color);
+                    drawRectangleI4(bmpBuff.pData, px+width_ladder*2/3 , y , width_ladder/3 , stroke_s, m_color,subline_thickness);
 
 
                 } else if (i < 0) {
@@ -497,55 +507,55 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
                     //painter->fillRect(QRectF(px , y-(width_ladder/24)+2 , stroke_s , width_ladder/24), m_color);
                     //painter->setPen(m_glow);
                     //painter->drawRect(QRectF(px , y-(width_ladder/24)+2 , stroke_s , width_ladder/24));
-                    drawRectangleI4(bmpBuff.pData, px, y-(width_ladder/24)+2 , stroke_s , width_ladder/24, m_color);
+                    drawRectangleI4(bmpBuff.pData, px, y-(width_ladder/24)+2 , stroke_s , width_ladder/24, m_color,subline_thickness);
 
                     //1l
                     //painter->setPen(m_color);
                     //painter->fillRect(QRectF(px , y , width_ladder/12 , stroke_s), m_color);
                     //painter->setPen(m_glow);
                     //painter->drawRect(QRectF(px , y , width_ladder/12 , stroke_s));
-                    drawRectangleI4(bmpBuff.pData, px , y , width_ladder/12 , stroke_s, m_color);
+                    drawRectangleI4(bmpBuff.pData, px , y , width_ladder/12 , stroke_s, m_color,subline_thickness);
                     //2l
                     //painter->setPen(m_color);
                     //painter->fillRect(QRectF(px+(width_ladder/12)*1.5 , y , width_ladder/12 , stroke_s), m_color);
                     //painter->setPen(m_glow);
                     //painter->drawRect(QRectF(px+(width_ladder/12)*1.5 , y , width_ladder/12 , stroke_s));
-                    drawRectangleI4(bmpBuff.pData, px+(width_ladder/12)*1.5 , y , width_ladder/12 , stroke_s, m_color);
+                    drawRectangleI4(bmpBuff.pData, px+(width_ladder/12)*1.5 , y , width_ladder/12 , stroke_s, m_color,subline_thickness);
 
                     //3l
                     //painter->setPen(m_color);
                     //painter->fillRect(QRectF(px+(width_ladder/12)*3 , y , width_ladder/12 , stroke_s), m_color);
                     //painter->setPen(m_glow);
                     //painter->drawRect(QRectF(px+(width_ladder/12)*3 , y , width_ladder/12 , stroke_s));
-                    drawRectangleI4(bmpBuff.pData, px+(width_ladder/12)*3 , y , width_ladder/12 , stroke_s, m_color);
+                    drawRectangleI4(bmpBuff.pData, px+(width_ladder/12)*3 , y , width_ladder/12 , stroke_s, m_color,subline_thickness);
 
                     //right lower cap
                     //painter->setPen(m_color);
                     //painter->fillRect(QRectF(px+width_ladder-2 , y-(width_ladder/24)+2 , stroke_s , width_ladder/24), m_color);
                     //painter->setPen(m_glow);
                     //painter->drawRect(QRectF(px+width_ladder-2 , y-(width_ladder/24)+2 , stroke_s , width_ladder/24));
-                    drawRectangleI4(bmpBuff.pData, px+width_ladder-2 , y-(width_ladder/24)+2 , stroke_s , width_ladder/24, m_color);
+                    drawRectangleI4(bmpBuff.pData, px+width_ladder-2 , y-(width_ladder/24)+2 , stroke_s , width_ladder/24, m_color,subline_thickness);
 
                     //1r ///spacing on these might be a bit off
                     //painter->setPen(m_color);
                     //painter->fillRect(QRectF(px+(width_ladder/12)*8 , y , width_ladder/12 , stroke_s), m_color);
                     //painter->setPen(m_glow);
                     //painter->drawRect(QRectF(px+(width_ladder/12)*8 , y , width_ladder/12 , stroke_s));
-                    drawRectangleI4(bmpBuff.pData, px+(width_ladder/12)*8 , y , width_ladder/12 , stroke_s, m_color);
+                    drawRectangleI4(bmpBuff.pData, px+(width_ladder/12)*8 , y , width_ladder/12 , stroke_s, m_color,subline_thickness);
 
                     //2r ///spacing on these might be a bit off
                     //painter->setPen(m_color);
                     ///painter->fillRect(QRectF(px+(width_ladder/12)*9.5 , y , width_ladder/12 , stroke_s), m_color);
                     //painter->setPen(m_glow);
                     //painter->drawRect(QRectF(px+(width_ladder/12)*9.5 , y , width_ladder/12 , stroke_s));
-                    drawRectangleI4(bmpBuff.pData, px+(width_ladder/12)*9.5 , y , width_ladder/12 , stroke_s, m_color);
+                    drawRectangleI4(bmpBuff.pData, px+(width_ladder/12)*9.5 , y , width_ladder/12 , stroke_s, m_color,subline_thickness);
 
                     //3r  ///spacing on these might be a bit off tried a decimal here
                     //painter->setPen(m_color);
                     //painter->fillRect(QRectF(px+(width_ladder*.9166) , y , width_ladder/12 , stroke_s), m_color);
                     //painter->setPen(m_glow);
                     //painter->drawRect(QRectF(px+(width_ladder*.9166) , y , width_ladder/12 , stroke_s));
-                    drawRectangleI4(bmpBuff.pData, px+(width_ladder*.9166) , y , width_ladder/12 , stroke_s, m_color);
+                    drawRectangleI4(bmpBuff.pData, px+(width_ladder*.9166) , y , width_ladder/12 , stroke_s, m_color,subline_thickness);
                     //painter->setPen(m_color);
                     
 
@@ -559,9 +569,34 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
                 //painter->setPen(m_glow);
                 //painter->drawRect(QRectF(pos_x-width_ladder*2.5/2, y, width_ladder*2.5, stroke_s));
 
-                drawRectangleI4(bmpBuff.pData, pos_x-width_ladder*2.5/2, y, width_ladder*2.5, 3, m_color);//main color
-                drawRectangleI4(bmpBuff.pData, pos_x-width_ladder*2.5/2, y+1, width_ladder*2.5, 1, 0x08);//Black in the middle
-            }
+                //drawRectangleI4(bmpBuff.pData, 1 + pos_x-width_ladder*2.5/2, y, width_ladder*2.5 - 2, 0, m_color,2);//main color
+
+                int rect_height = 5;            // Height of the rectangles (as per your original code)
+                int fragments=6;
+                float  SpacingK=0.6;
+                //int rect_width = (width_ladder*2.5/(fragments + (float)SpacingK*fragments));  // Width of a single rectangle                
+                int rect_width = width_ladder*2.5/(fragments);  // Width of a single semiline+spacing
+
+                int spacing = rect_width*SpacingK ;   // Spacing between rectangles
+
+                rect_width = rect_width - spacing;//Length of a small line
+                // Calculate the starting X position for the first rectangle
+                int start_x = pos_x-width_ladder*2.5/2;
+
+                // Draw 6 rectangles in a line
+                for (int i = 0; i < fragments; i++) {
+                    // Calculate the X position for the current rectangle
+                    int rect_x = start_x + i * (rect_width + spacing) + spacing/2;
+                    // Draw the rectangle
+                    //drawRectangleI4(bmpBuff.pData, rect_x, y, rect_width, rect_height, COLOR_WHITE, 1);//border with AA
+                    //drawRectangleI4(bmpBuff.pData, rect_x, y, rect_width, rect_height , m_color, 100);//solid
+                    //drawRectangleI4(bmpBuff.pData, rect_x, y, rect_width, rect_height, COLOR_WHITE, 1);//border with AA
+                    drawRectangleI4(bmpBuff.pData, rect_x, y, rect_width, 0, COLOR_WHITE, 4);//border with AA
+                    
+                    //drawFilledRectangleI4AA(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, rect_x, y, rect_width, rect_height);
+                    
+                }
+             }
         }
     }
 
@@ -584,7 +619,7 @@ static void draw_screenBMP(){
 		return ;
     }
 
-    if ( (get_time_ms() - LastCleared  ) < 200){//at least 200ms to reload data, otherwise the screen will blink?
+    if ( (get_time_ms() - LastCleared  ) < 20){//at least 200ms to reload data, otherwise the screen will blink?
         //printf("%lu DrawSkipped after clear LastDrawn:%lu | %lu%\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)LastDrawn%10000 , (uint32_t) LastCleared%10000);
 		return ;
     }
@@ -657,16 +692,20 @@ static void draw_screenBMP(){
        // DEBUG_PRINT("\n");
     }
 
+
+
     uint64_t step2=get_time_ms();  
 
     //draw_AHI();
+    
     draw_Ladder();
-
+    
+    stat_screen_refresh_count++;
     uint64_t step3=get_time_ms();  
 #ifdef _x86
     
     
-    sfRenderWindow_clear(window, sfColor_fromRGB(55, 55, 55));
+    sfRenderWindow_clear(window, sfColor_fromRGB(175, 195, 255));
     unsigned char* rgbaData = malloc(bmpBuff.u32Width * bmpBuff.u32Height * 4);  // Allocate memory for RGBA data    
 
     if (PIXEL_FORMAT_DEFAULT==0)          
@@ -694,16 +733,21 @@ static void draw_screenBMP(){
     // Cleanup resources
     sfSprite_destroy(sprite);
     sfTexture_destroy(texture);
-    printf("%lu set_bitmapC for:%u | %u  | %u ms   pitch:%d  roll:%d\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn) , (uint32_t)(get_time_ms() - step2),(uint32_t)(get_time_ms() - step3), last_pitch, last_roll);
+    //printf("%lu set_bitmapC for:%u | %u  | %u ms   pitch:%d  roll:%d\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn) , (uint32_t)(get_time_ms() - step2),(uint32_t)(get_time_ms() - step3), last_pitch, last_roll);
+    
+ 
 
 #else
    int id=0;
    // printf("%lu set_bitmapB for:%d | %d ms\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn));
     
     set_bitmap(osds[FULL_OVERLAY_ID].hand, &bmpBuff);
-    printf("%lu set_bitmapB for:%u | %u   | %u ms\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn) , (uint32_t)(get_time_ms() - step2),(uint32_t)(get_time_ms() - step3));
+    //printf("%lu set_bitmapB for:%u | %u   | %u ms\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn) , (uint32_t)(get_time_ms() - step2),(uint32_t)(get_time_ms() - step3));
 
 #endif
+    stat_draw_overlay_1+=(uint32_t)(get_time_ms() - LastDrawn);
+    stat_draw_overlay_2+=(uint32_t)(get_time_ms() - step2);
+    stat_draw_overlay_3+=(uint32_t)(get_time_ms() - step3);
 
 
     //free(bitmap.pData);
@@ -835,11 +879,15 @@ static void InitMSPHook(){
     if (bitmapFnt.pData!=NULL)
         free(bitmapFnt.pData);
     bitmapFnt.pData=(void *)loadPngToBMPI4(font_name,&bitmapFnt.u32Width,&bitmapFnt.u32Height);
-        bitmapFnt.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
+    bitmapFnt.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
 
     current_display_info.font_width = bitmapFnt.u32Width/2;
     current_display_info.font_height = bitmapFnt.u32Height/256;
     printf("Font %s character size:%d:%d \r\n",font_name,current_display_info.font_width,current_display_info.font_height);
+    if (bitmapFnt.u32Width==0 || bitmapFnt.u32Height==0){
+        printf("Can't find font file : %s \r\n",font_name);
+        return;
+    }
     int rgn=0;   
 
     Use_Fast_Font=false;//test PNG load
@@ -912,7 +960,7 @@ static void InitMSPHook(){
             #endif
 
             if (!access(img, F_OK)){    
-                cntr= - 200;                
+                cntr= - 100;                
                 BITMAP bitmap;                                
                 int prepared=0;
                 if (false){//Load a BITMAP and show it on the screen

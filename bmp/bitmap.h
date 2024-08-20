@@ -145,7 +145,10 @@ typedef struct MI_RGN_PaletteTable_s
     void drawLineI4(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y0, int x1, int y1, uint8_t color);
 
     void drawLineI4Ex(uint8_t* bmpData, uint32_t width, uint32_t height, Point A, Point B, uint8_t color);
-    void drawRectangleI4(uint8_t* bmpData, int posX, int posY, int rectWidth, int rectHeight, uint8_t color);
+    void drawRectangleI4(uint8_t* bmpData, int posX, int posY, int rectWidth, int rectHeight, uint8_t color, int thickness);
+
+    void drawLineI4AA(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y0, int x1, int y1);
+    void drawFilledRectangleI4AA(uint8_t* bmpData, uint32_t width, uint32_t height, int posX, int posY, int rectWidth, int rectHeight);
 
     void copyRectARGB1555(
         uint16_t* srcBitmap, uint32_t srcWidth, uint32_t srcHeight,
@@ -175,6 +178,24 @@ typedef struct MI_RGN_PaletteTable_s
     #define COLOR_CYAN 6
     #define COLOR_WHITE 7
     #define COLOR_BLACK 8
+    #define COLOR_GRAY_Darker 9
+    #define COLOR_GRAY_Darkest 10
+    #define COLOR_GRAY_Medium  11
+    #define COLOR_GRAY_Lighter 12
+    #define COLOR_GRAY_Light   13
+    #define COLOR_GRAY_Dark    14
+    
+    /*
+        {0xFF, 0x84, 0x10, 0x10}, // 0x4210 -> Gray (Darker)
+        {0xFF, 0x42, 0x08, 0x08}, // 0x2108 -> Gray (Even Darker)
+        {0xFF, 0x63, 0x18, 0xC6}, // 0x318C -> Gray (Medium)
+        {0xFF, 0xAD, 0x52, 0xD6}, // 0x5AD6 -> Gray (Lighter)
+        {0xFF, 0xCE, 0x73, 0x9C}, // 0x739C -> Gray (Light)
+        {0xFF, 0x31, 0x8C, 0x6C}, // 0x18C6 -> Gray (Dark)    
+    */
+
+
+
     // Declaration of global palette table
     extern MI_RGN_PaletteTable_t g_stPaletteTable;
 
