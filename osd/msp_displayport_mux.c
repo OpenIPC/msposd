@@ -4,13 +4,7 @@
 #include <string.h>
 #include <sys/poll.h>
 #include <time.h>
-
-//#include "hw/dji_radio_shm.h"
-//#include "json/osd_config.h"
-#include "lz4/lz4.h"
-//#include "net/data_protocol.h"
-//#include "net/network.h"
-//#include "net/serial.h"
+ 
 
 #include "msp/msp.h"
 #include "msp/msp_displayport.h"
@@ -64,7 +58,7 @@ static uint16_t msp_character_map_buffer[MAX_DISPLAY_X][MAX_DISPLAY_Y];
 static uint16_t msp_character_map_draw[MAX_DISPLAY_X][MAX_DISPLAY_Y];
 static msp_hd_options_e msp_hd_option = 0;
 static displayport_vtable_t *display_driver = NULL;
-LZ4_stream_t *lz4_ref_ctx = NULL;
+
 uint8_t update_rate_hz = 2;
 
 int pty_fd;
@@ -81,10 +75,6 @@ static int16_t last_pitch = 0;
 static int16_t last_roll = 0;
 
 static int16_t last_RC_Channels[16];
-
- 
-
-  
 
 static void send_display_size(int serial_fd) {
     uint8_t buffer[8];

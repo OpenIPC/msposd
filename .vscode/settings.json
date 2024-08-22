@@ -34,6 +34,7 @@
         "stacktrace": "c",
         "stop_token": "c",
         "syncstream": "c",
-        "tuple": "c"
+        "tuple": "c",
+        "string.h": "c"
     }
 }

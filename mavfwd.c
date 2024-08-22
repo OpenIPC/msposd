@@ -25,10 +25,10 @@
 
 #include "osd/msp/msp.h"
 //#include "osd/msp/msp.h" // why the fuck
-#include "osd/msp_displayport_mux.c"
+//#include "osd/msp_displayport_mux.c"
 #include "osd/net/network.h"
 
-#include "osd.c"
+#include "osd.c" //Should be merged
 
 //#include "msp/msp.cpp"
 
