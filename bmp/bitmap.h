@@ -142,7 +142,9 @@ typedef struct MI_RGN_PaletteTable_s
 
     void ConvertI4ToRGBA(uint8_t* bitmapI4, uint8_t* rgbaData, uint32_t width, uint32_t height, MI_RGN_PaletteElement_t* palette) ;
 
-    void drawLineI4(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y0, int x1, int y1, uint8_t color);
+    void drawLine(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1, uint8_t color, int thickness);  
+
+    void drawLineI4(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y0, int x1, int y1, uint8_t color, int thickness);
 
     void drawLineI4Ex(uint8_t* bmpData, uint32_t width, uint32_t height, Point A, Point B, uint8_t color);
     void drawRectangleI4(uint8_t* bmpData, int posX, int posY, int rectWidth, int rectHeight, uint8_t color, int thickness);

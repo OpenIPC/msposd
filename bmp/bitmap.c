@@ -678,13 +678,13 @@ MI_RGN_PaletteTable_t g_stPaletteTable =
     { //index0 ~ index15
         {255,   0,   0,   0}, // reserved
       
-        {0xFF, 0xF8, 0x00, 0x00}, // 0x7C00 -> Red
-        {0xFF, 0x00, 0xF8, 0x00}, // 0x03E0 -> Green
-        {0xFF, 0x00, 0x00, 0xF8}, // 0x001F -> Blue
+        {0xFF, 0xFF, 0x00, 0x00}, // 0x7C00 -> Red
+        {0xFF, 0x00, 0xFF, 0x00}, // 0x03E0 -> Green
+        {0xFF, 0x00, 0x00, 0xFF}, // 0x001F -> Blue
         {0xFF, 0xF8, 0xF8, 0x00}, // 0x7FE0 -> Yellow
         {0xFF, 0xF8, 0x00, 0xF8}, // 0x7C1F -> Magenta
         {0xFF, 0x00, 0xF8, 0xF8}, // 0x03FF -> Cyan
-        {0xFF, 0xF8, 0xF8, 0xF8}, // 0x7FFF -> White
+        {0xFF, 0xFF, 0xFF, 0xFF}, // 0x7FFF -> White
         {0xFF, 0x00, 0x00, 0x00}, // 0x0000 -> Black  index 8
         {0xFF, 0x84, 0x10, 0x10}, // 0x4210 -> Gray (Darker)
         {0xFF, 0x42, 0x08, 0x08}, // 0x2108 -> Gray (Even Darker)
@@ -1248,11 +1248,43 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
     rotated->y += img_center.y;
 }
 
+
+
+void drawLine(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1, uint8_t color, int thickness) {
+
+    
+    uint32_t width = Transform_OVERLAY_WIDTH;
+    uint32_t height=Transform_OVERLAY_HEIGHT;
+    // Apply Transform
+    int OffsY = sin((Transform_Pitch) * (M_PI / 180.0)) * 400;
+    Point img_center = {Transform_OVERLAY_WIDTH / 2, Transform_OVERLAY_HEIGHT / 2};  // Center of the image
+
+    // Define the four corners of the rectangle before rotation
+    Point A = {posX0, posY0-OffsY};
+    Point B = {posX1, posY1-OffsY};
+    
+
+    // Rotate each corner around the center
+    Point rotated_A, rotated_B;
+    rotate_point(A, img_center, Transform_Roll, &rotated_A);
+    rotate_point(B, img_center, Transform_Roll, &rotated_B);
+    
+
+    drawLineI4(bmpData, width, height, rotated_A.x, rotated_A.y, rotated_B.x, rotated_B.y, color,thickness); // Right side
+
+    return ;
+}
+ 
+ 
+
+
 void drawRectangleI4(uint8_t* bmpData, int posX, int posY, int rectWidth, int rectHeight, uint8_t color, int thickness) {
 
     
     uint32_t width = Transform_OVERLAY_WIDTH;
     uint32_t height=Transform_OVERLAY_HEIGHT;
+
+
     // Apply Transform
     int OffsY = sin((Transform_Pitch) * (M_PI / 180.0)) * 400;
     Point img_center = {Transform_OVERLAY_WIDTH / 2, Transform_OVERLAY_HEIGHT / 2};  // Center of the image
@@ -1269,18 +1301,20 @@ void drawRectangleI4(uint8_t* bmpData, int posX, int posY, int rectWidth, int re
     rotate_point(B, img_center, Transform_Roll, &rotated_B);
     rotate_point(C, img_center, Transform_Roll, &rotated_C);
     rotate_point(D, img_center, Transform_Roll, &rotated_D);
+ 
+    //Old way
     if (rectHeight==1){
         if (color==COLOR_WHITE)
             drawLineI4AA(bmpData, width, height, rotated_A.x, rotated_A.y, rotated_B.x, rotated_B.y); // Top side
         else
-            drawLineI4(bmpData, width, height, rotated_A.x, rotated_A.y, rotated_B.x, rotated_B.y, color); // Top side    
+            drawLineI4(bmpData, width, height, rotated_A.x, rotated_A.y, rotated_B.x, rotated_B.y, color,1); // Top side    
         return ;
     }
     if (rectWidth==1){
         if (color==COLOR_WHITE)
              drawLineI4AA(bmpData, width, height, rotated_B.x, rotated_B.y, rotated_C.x, rotated_C.y); // Right side
         else
-            drawLineI4(bmpData, width, height, rotated_B.x, rotated_B.y, rotated_C.x, rotated_C.y, color); // Right side
+            drawLineI4(bmpData, width, height, rotated_B.x, rotated_B.y, rotated_C.x, rotated_C.y, color,1); // Right side
         return ;
     }
 
@@ -1292,10 +1326,10 @@ void drawRectangleI4(uint8_t* bmpData, int posX, int posY, int rectWidth, int re
             drawLineI4AA(bmpData, width, height, rotated_C.x, rotated_C.y, rotated_D.x, rotated_D.y); // Bottom side
             drawLineI4AA(bmpData, width, height, rotated_D.x, rotated_D.y, rotated_A.x, rotated_A.y); // Left side
         }else{
-            drawLineI4(bmpData, width, height, rotated_A.x, rotated_A.y, rotated_B.x, rotated_B.y, color); // Top side
-            drawLineI4(bmpData, width, height, rotated_B.x, rotated_B.y, rotated_C.x, rotated_C.y, color); // Right side
-            drawLineI4(bmpData, width, height, rotated_C.x, rotated_C.y, rotated_D.x, rotated_D.y, color); // Bottom side
-            drawLineI4(bmpData, width, height, rotated_D.x, rotated_D.y, rotated_A.x, rotated_A.y, color); // Left side
+            drawLineI4(bmpData, width, height, rotated_A.x, rotated_A.y, rotated_B.x, rotated_B.y, color,1); // Top side
+            drawLineI4(bmpData, width, height, rotated_B.x, rotated_B.y, rotated_C.x, rotated_C.y, color,1); // Right side
+            drawLineI4(bmpData, width, height, rotated_C.x, rotated_C.y, rotated_D.x, rotated_D.y, color,1); // Bottom side
+            drawLineI4(bmpData, width, height, rotated_D.x, rotated_D.y, rotated_A.x, rotated_A.y, color,1); // Left side
         }
     }else if (thickness>=99){
             fillRegionI4(bmpData, width, height,rotated_A.x, rotated_A.y, rotated_B.x, rotated_B.y,rotated_C.x, rotated_C.y, rotated_D.x, rotated_D.y,color);
@@ -1311,7 +1345,7 @@ void drawRectangleI4(uint8_t* bmpData, int posX, int posY, int rectWidth, int re
 void drawThickLineI4(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y0, int x1, int y1, uint8_t color, int thickness) {
     for (int i = -thickness / 2; i <= thickness / 2; i++) {
         for (int j = -thickness / 2; j <= thickness / 2; j++) {
-            drawLineI4(bmpData, width, height, x0 + i, y0 + j, x1 + i, y1 + j, color);
+            drawLineI4(bmpData, width, height, x0 + i, y0 + j, x1 + i, y1 + j, color,1);
         }
     }
 }
@@ -1334,10 +1368,116 @@ void drawLineI4Ex(uint8_t* bmpData, uint32_t width, uint32_t height, Point A, Po
     rotate_point(original_point2, img_center, Transform_Roll, &rotated_pointB);
 
     drawLineI4(bmpData, width, height,rotated_pointA.x,rotated_pointA.y,
-        rotated_pointB.x, rotated_pointB.y,color );
+        rotated_pointB.x, rotated_pointB.y,color,1 );
 }
 
-void drawLineI4(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y0, int x1, int y1, uint8_t color) {
+
+
+//--------------------UGLY -----------------
+    uint8_t* _bmpData;
+    uint32_t _width;
+    uint32_t _height;
+    int _rowstride;
+    int _color;
+    void plot_pixel(int x, int y){        
+        if (x<0 || x>_width)
+            return;
+
+        // Set the pixel at (x0, y0)
+        if (x >= 0 && x < _width && y >= 0 && y < _height) {            
+            uint32_t byteIndex = y * _rowstride + (x / 2);            
+            // Determine if it's the high nibble or low nibble
+            if (x % 2 == 0) {                
+                _bmpData[byteIndex] = (_bmpData[byteIndex] & 0x0F) | (_color << 4);// High nibble (first pixel in the byte)
+            } else {                
+                _bmpData[byteIndex] = (_bmpData[byteIndex] & 0xF0) | (_color & 0x0F);
+            }
+        }
+    
+    }
+
+   void plot_pen_pixel( int x, int y, int pen_width)
+   {
+      switch (pen_width)
+      {
+         case 1  : plot_pixel(x,y);
+                   break;
+
+         case 2  : {
+                      plot_pixel(x    , y    );
+                      plot_pixel(x + 1, y    );
+                      plot_pixel(x + 1, y + 1);
+                      plot_pixel(x    , y + 1);
+                   }
+                   break;
+
+         case  3 : {
+                      plot_pixel(x    , y - 1);
+                      plot_pixel(x - 1, y - 1);
+                      plot_pixel(x + 1, y - 1);
+
+                      plot_pixel(x    , y    );
+                      plot_pixel(x - 1, y    );
+                      plot_pixel(x + 1, y    );
+
+                      plot_pixel(x    , y + 1);
+                      plot_pixel(x - 1, y + 1);
+                      plot_pixel(x + 1, y + 1);
+                   }
+                   break;
+
+         default : plot_pixel(x,y);
+                   break;
+      }
+   }
+
+
+ 
+ void line_segment(int x1, int y1, int x2, int y2, int width){
+      int steep = 0;
+      int sx    = ((x2 - x1) > 0) ? 1 : -1;
+      int sy    = ((y2 - y1) > 0) ? 1 : -1;
+      int dx    = abs(x2 - x1);
+      int dy    = abs(y2 - y1);
+
+      if (dy > dx)
+      {
+        int temp = x1;
+        x1 = y1;
+        y1 = temp;
+        temp = dx;
+        dx = dy;
+        dy = temp;
+        temp=sx;
+        sx = sy;
+        sy = temp;
+        steep = 1;
+      }
+
+      int e = 2 * dy - dx;
+
+      for (int i = 0; i < dx; ++i)
+      {
+         if (steep)
+            plot_pen_pixel(y1,x1,width);
+         else
+            plot_pen_pixel(x1,y1,width);
+
+         while (e >= 0)
+         {
+            y1 += sy;
+            e -= (dx << 1);
+         }
+
+         x1 += sx;
+         e  += (dy << 1);
+      }
+
+      //plot_pen_pixel(x2,y2, width);
+ }
+
+
+void drawLineI4(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y0, int x1, int y1, uint8_t color, int thickness) {
     int dx = abs(x1 - x0);
     int dy = abs(y1 - y0);
     int sx = x0 < x1 ? 1 : -1;
@@ -1350,6 +1490,13 @@ void drawLineI4(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y
     if (x1<0 || x1>width || y0<0 || y0>height || y1<0 || y1>height)
         return;
 
+    _bmpData = bmpData;
+    _width =width;
+    _height = height;
+    _rowstride=rowStride;
+     _color = color;
+     line_segment(x0,y0,x1,y1,thickness);
+    return;
 //    if (color==COLOR_WHITE)
 //        return drawLineI4AA( bmpData, width, height, x0, y0,  x1,  y1);
     while (1) {
@@ -1508,8 +1655,8 @@ void fillRegionI4(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int
         }
     }
 }
- 
 
+   
 
 
 

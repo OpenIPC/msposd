@@ -23,6 +23,17 @@
         "rope": "c",
         "ranges": "c",
         "variant": "c",
-        "lodepng.h": "c"
+        "lodepng.h": "c",
+        "any": "c",
+        "expected": "c",
+        "fstream": "c",
+        "future": "c",
+        "optional": "c",
+        "shared_mutex": "c",
+        "spanstream": "c",
+        "stacktrace": "c",
+        "stop_token": "c",
+        "syncstream": "c",
+        "tuple": "c"
     }
 }
