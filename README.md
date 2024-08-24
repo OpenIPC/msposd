@@ -1,9 +1,12 @@
  # MSPOSD
 A tool for drawing betaflight/inav/ardupilot MSP display port OSD over OpenIPC video stream.
 
-<img src="pic/AHI_OSD.png" alt="AHI OSD" width="640" height="480">
+<img src="pics/AHI_OSD.png" alt="AHI OSD" width="640" height="480">
 
-![AHI OSD](pic/AHI_OSD.png)
+![AHI OSD](pics/AHI_OSD.png)
+
+
+![alt text](pics/AHI_OSD.png "flight statistics")
 
 ```
 Usage: msposd [OPTIONS]
