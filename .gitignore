@@ -2,3 +2,5 @@ mavfwd
 tmp/**
 notes.txt
 toolchain/
+*.png
+

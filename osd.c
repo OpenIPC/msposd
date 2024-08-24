@@ -144,6 +144,10 @@ static int stat_msp_msg_attitude=0;
 static int stat_screen_refresh_count=0;
 static int stat_draw_overlay_1=0, stat_draw_overlay_2=0, stat_draw_overlay_3=0;
 
+
+extern struct sockaddr_in sin_out;//= {.sin_family = AF_INET,};
+extern int out_sock;
+
 extern void showchannels(int count);
 extern void ProcessChannels();
 extern uint16_t channels[18];
@@ -183,15 +187,16 @@ static void rx_msp_callback(msp_msg_t *msp_message)
                     fb_cursor = 0;
                     return;
                 }
-                uint16_t size = msp_data_from_msg(message_buffer, msp_message);
-                copy_to_msp_frame_buffer(message_buffer, size);
-                if(msp_message->payload[0] == MSP_DISPLAYPORT_DRAW_SCREEN) {
-                    // Once we have a whole frame of data, send it DEBUG it !!!
-                    /*
-                    int written=write(socket_fd, frame_buffer, fb_cursor);                    
-                    DEBUG_PRINT("DRAW! wrote %d bytes %d\n", fb_cursor, written);
-                    */
-                    fb_cursor = 0;
+                if (out_sock>0){
+                    uint16_t size = msp_data_from_msg(message_buffer, msp_message);
+                    copy_to_msp_frame_buffer(message_buffer, size);
+                    if(msp_message->payload[0] == MSP_DISPLAYPORT_DRAW_SCREEN) {
+                        // Once we have a whole frame of data, send it aggregated                        
+                        //int written=write(socket_fd, frame_buffer, fb_cursor);                                            
+                        int written = sendto(out_sock, frame_buffer, fb_cursor, 0, (struct sockaddr *)&sin_out, sizeof(sin_out));
+                        //printf("Flushed via UDP! wrote %d bytes %d\n", fb_cursor, written);
+                        fb_cursor = 0;
+                    }
                 }
             }
             break;

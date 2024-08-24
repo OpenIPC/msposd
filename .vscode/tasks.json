@@ -6,7 +6,7 @@
             "type": "shell",
             "command": "cc",
             "args": [
-                "mavfwd.c",
+                "msposd.c",
                 "bmp/bitmap.c",
                 "bmp/region.c",
                 "osd/net/network.c",

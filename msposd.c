@@ -827,7 +827,11 @@ static int handle_data(const char *port_name, int baudrate,
 
 	out_sock = socket(AF_INET, SOCK_DGRAM, 0);
 
- 
+ 	if (!parse_host_port(out_addr,
+			     (struct in_addr *)&sin_out.sin_addr.s_addr,
+			     &sin_out.sin_port))
+		goto err;
+
 
 	printf("Listening on %s...\n", port_name);
 
@@ -1037,7 +1041,9 @@ int main(int argc, char **argv)
 		rx_msp_state = calloc(1, sizeof(msp_state_t));   
 		rx_msp_state->cb = &rx_msp_callback;  
 		InitMSPHook();
-		if (true){//Forwarding MSP enabled 
+
+		if (false){//Forwarding MSP enabled 
+		//this opens the UDP port so that it can be used ith file descriptors
 			socket_fd = bind_socket(MSP_PORT+1); 
 			// Connect the socket to the target address and port so that we can debug
 			struct sockaddr_in si_other;

@@ -5,7 +5,7 @@ LDLIBS=-levent_core
 
 
 #SRCS := lib/schrift.c compat.c bitmap.c net.c region.c text.c main.c
-SRCS := mavfwd.c bmp/bitmap.c bmp/region.c osd/net/network.c osd/msp/msp.c osd/msp/msp_displayport.c libpng/lodepng.c
+SRCS := msposd.c bmp/bitmap.c bmp/region.c osd/net/network.c osd/msp/msp.c osd/msp/msp_displayport.c libpng/lodepng.c
 #BUILD = $(CC) $(SRCS) -I $(SDK)/include -L $(DRV) $(LIB) -Os -s -o $(or $(TARGET),$@)
 
 #BUILD = $(CC) $(SRCS) -I $(SDK)/include -L $(DRV) $(LIB) $(CFLAGS) $(LDFLAGS) $(LDLIBS) -o $(or $(TARGET),$@)
