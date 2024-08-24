@@ -209,7 +209,7 @@ static void rx_msp_callback(msp_msg_t *msp_message)
                 memcpy(current_fc_identifier, msp_message->payload, 4);
                 //Seems only BetaFlight needs this
                 send_version_request(serial_fd);
-                printf("Flight Controller detected:%s\r\n",current_fc_identifier);
+                printf("Flight Controller detected: %s\r\n",current_fc_identifier);
             }
             break;
         }
@@ -683,7 +683,8 @@ static void draw_screenBMP(){
 		return ;
     }
 
-    if ( (get_time_ms() - LastCleared  ) < 20){//at least 20ms to reload data after clearscreen, otherwise the screen will blink?
+    if ( (get_time_ms() - LastCleared  ) < 2){//at least 2ms to reload some data after clearscreen, otherwise the screen will blink?
+                                            //but if there is too few chars to show we may never render it
         //printf("%lu DrawSkipped after clear LastDrawn:%lu | %lu%\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)LastDrawn%10000 , (uint32_t) LastCleared%10000);
 		return ;
     }
@@ -834,7 +835,7 @@ static void clear_screen()
     if (cntr++<0 )
         return ;
     //BetaFlight needs this. INAV can be configured to skip it
-    if (font_pages>2 || get_time_ms() - LastCleared>2500) {//no faster than 0.5 per second
+    if (font_pages>2 || (get_time_ms() - LastCleared)>2500) {//no faster than 0.5 per second
         memset(character_map, 0, sizeof(character_map));
         if (bmpBuff.pData!=NULL)//Set whole BMP as transparant, Palette index 0xF if 4bit
             bmpBuff.pData = memset(bmpBuff.pData, 0xFF , (bmpBuff.u32Height * bmpBuff.u32Width * PIXEL_FORMAT_BitsPerPixel / 8) );
@@ -850,6 +851,7 @@ static void clear_screen()
 static int draws=0;
 static void draw_complete()
 {
+    
     //draw_screenBMP();
     if (enable_fast_layout){
         draws++;
@@ -1070,6 +1072,7 @@ static void InitMSPHook(){
 
     osds = mmap(NULL, sizeof(*osds) * MAX_OSD,
                 PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
+
     for (int id = 0; id < MAX_OSD; id++){
         osds[id].hand = id;
         osds[id].size = DEF_SIZE;
@@ -1335,8 +1338,9 @@ static void InitMSPHook(){
 
 static void CloseMSP(){
      munmap(osds, sizeof(*osds) * MAX_OSD);
+     int s32Ret=0;
     #ifdef __SIGMASTAR__
-    int s32Ret = MI_RGN_DeInit();
+    s32Ret = MI_RGN_DeInit();
     if (s32Ret)
         printf("[%s:%d]RGN_DeInit failed with %#x!\n", __func__, __LINE__, s32Ret);        
     #endif
@@ -1344,5 +1348,9 @@ static void CloseMSP(){
         free(bitmapFnt.pData);
     if (bmpBuff.pData!=NULL)
         free(bmpBuff.pData);
+        
+    int res_mun=munmap(osds, sizeof(*osds) * MAX_OSD);
+
+    printf("\nClosed resources! MI_RGN_DeInit=%d, MemFree:%d\n",s32Ret, res_mun);        
 
 }

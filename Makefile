@@ -1,4 +1,8 @@
-CFLAGS=-O1 -g  -fno-omit-frame-pointer -Wall -Wextra
+
+# Get the current date and time in the format YYYYMMDD_HHMMSS
+VERSION_STRING := $(shell date +"%Y%m%d_%H%M%S")
+
+CFLAGS=-O1 -g  -fno-omit-frame-pointer -Wall -Wextra -DVERSION_STRING="\"$(VERSION_STRING)\""
 #LDFLAGS = -g -fsanitize=address -L/usr/lib/x86_64-linux-gnu/
 LDFLAGS = -g 
 LDLIBS=-levent_core

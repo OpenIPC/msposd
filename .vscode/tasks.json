@@ -27,6 +27,7 @@
                 "-lcsfml-system",
                 "-levent_core",
                 "-lm",
+                "-DVERSION_STRING=\"1\"",
                 "-o",
                 "msposd"
             ],

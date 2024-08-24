@@ -952,6 +952,7 @@ int main(int argc, char **argv)
 	MinTimeBetweenScreenRefresh=50;
 	last_board_temp=-100;
 
+	printf("Ver: %s\n", VERSION_STRING);
 	int opt;
 	int long_index = 0;
 	while ((opt = getopt_long_only(argc, argv, "", long_options, &long_index)) != -1) {
