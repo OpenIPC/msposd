@@ -52,8 +52,9 @@ const int RC_CHANNELS_RAW = 35; //RC_CHANNELS_RAW ( #35 ) for ExpressLRS,Crossfi
 //if we gonna use MSP parsing
 msp_state_t *rx_msp_state;
 
-uint8_t ch_count = 0;
-uint16_t ch[14];
+//RC channel number to monitor, not zero based, first is 1
+uint8_t rc_channel_no = 0;
+
 
 struct bufferevent *serial_bev;
 struct sockaddr_in sin_out = {
@@ -169,7 +170,7 @@ static void signal_cb(evutil_socket_t fd, short event, void *arg)
 	struct event_base *base = arg;
 	(void)event;
 
-	printf("%s signal received\n", strsignal(fd));
+	printf("Exit Request: %s signal received\n", strsignal(fd));
 	event_base_loopbreak(base);
 }
 
@@ -455,15 +456,15 @@ unsigned int ChannelCmds=0;
 static uint64_t mavpckts_ttl=0;
 
 void ProcessChannels(){
-	//ch_count , not zero based, 1 is first
+	//rc_channel_no , not zero based, 1 is first
 	uint16_t val=0;
-	if (ch_count<1 || ch_count>16  /* || (mavpckts_ttl<100*/ ) //wait in the beginning for the values to settle
+	if (rc_channel_no<1 || rc_channel_no>16  /* || (mavpckts_ttl<100*/ ) //wait in the beginning for the values to settle
 		return;
 
 	if ( abs(get_current_time_ms()-LastStart) < wait_after_bash)		
 		return;
 	
-	val=channels[ch_count-1];
+	val=channels[rc_channel_no-1];
 	
 	if (abs(val-NewValue)>32 && ChannelPersistPeriodmMS>0){
 		//We have a new value, let us wait for it to persist
@@ -482,7 +483,7 @@ void ProcessChannels(){
 	LastValue=val;
 	
 	char buff[60];
-    sprintf(buff, "/usr/bin/channels.sh %d %d &", ch_count, val);
+    sprintf(buff, "/usr/bin/channels.sh %d %d &", rc_channel_no, val);
 
 	printf("Starting(%d): %s n",ChannelCmds,buff);
 	LastStart=get_current_time_ms();
@@ -665,7 +666,7 @@ static void serial_read_cb(struct bufferevent *bev, void *arg)
 			}
 
 			//Let's try to parse the stream	
-			if (aggregate>0 || ch_count>0)//if no RC channel control needed, only forward the data
+			if (aggregate>0 || rc_channel_no>0)//if no RC channel control needed, only forward the data
 				process_mavlink(data,packet_len, arg);//Let's try to parse the stream		
 		}
 		evbuffer_drain(input, packet_len);		
@@ -757,7 +758,7 @@ static void send_variant_request2(int serial_fd) {
 	int res=0;
 
 
-	if (ch_count>0 && VariantCounter%5==1){//once every 5 cycles, 4 times per second
+	if (rc_channel_no>0 && VariantCounter%5==1){//once every 5 cycles, 4 times per second
 		construct_msp_command(buffer, MSP_RC, NULL, 0, MSP_OUTBOUND);
     	res = write(serial_fd, &buffer, sizeof(buffer));
 	}else if (AHI_Enabled){
@@ -785,11 +786,14 @@ static void poll_msp(evutil_socket_t sock, short event, void *arg)
 	send_variant_request2(serial_fd);
 }
 
+
+
 static int handle_data(const char *port_name, int baudrate,
 		       const char *out_addr )
 {
 	struct event_base *base = NULL;
 	struct event *sig_int = NULL, *in_ev = NULL, *temp_tmr = NULL, *msp_tmr=NULL;
+	struct event *sig_term;
 	int ret = EXIT_SUCCESS;
 
 	int serial_fd = open(port_name, O_RDWR | O_NOCTTY);
@@ -836,8 +840,13 @@ static int handle_data(const char *port_name, int baudrate,
 
 	sig_int = evsignal_new(base, SIGINT, signal_cb, base);
 	event_add(sig_int, NULL);
+
 	// it's recommended by libevent authors to ignore SIGPIPE
 	signal(SIGPIPE, SIG_IGN);
+
+    // Handle SIGTERM (e.g., killall myapp)
+    sig_term = evsignal_new(base, SIGTERM, signal_cb, base);
+    event_add(sig_term, NULL);
 
 	//Test inject a simple packet to test malvink communication Camera to Ground
 	signal(SIGUSR1, sendtestmsg);
@@ -874,15 +883,14 @@ static int handle_data(const char *port_name, int baudrate,
 	event_base_dispatch(base);
 
 err:
-	if (temp_tmr) {
+	
+if (temp_tmr) {
 		event_del(temp_tmr);
 		event_free(temp_tmr);
 	}
 	if (out_sock>0)
 		close(out_sock);
-
  
-
 	if (serial_fd >= 0)
 		close(serial_fd);
 
@@ -907,6 +915,7 @@ err:
 	return ret;
 }
 
+ 
 
 //COMPILE : gcc -o program mavfwd.c -levent -levent_core
 
@@ -960,11 +969,11 @@ int main(int argc, char **argv)
 		break;
 		
 		case 'c':
-			ch_count = atoi(optarg);
-			if(ch_count == 0) 
+			rc_channel_no = atoi(optarg);
+			if(rc_channel_no == 0) 
 				printf("rc_channels  monitoring disabled\n");
 			else 
-				printf("Monitoring RC channel %d \n", ch_count);
+				printf("Monitoring RC channel %d \n", rc_channel_no);
 			
 			LastStart=get_current_time_ms();
 			break;
@@ -1025,10 +1034,10 @@ int main(int argc, char **argv)
      
 	if (ParseMSP){
  		//msp_process_data(rx_msp_state, serial_data[i]);
-		 rx_msp_state = calloc(1, sizeof(msp_state_t));   
-		 rx_msp_state->cb = &rx_msp_callback;  
-		 InitMSPHook();
-		if (true){//Debug parsing from device to PC
+		rx_msp_state = calloc(1, sizeof(msp_state_t));   
+		rx_msp_state->cb = &rx_msp_callback;  
+		InitMSPHook();
+		if (true){//Forwarding MSP enabled 
 			socket_fd = bind_socket(MSP_PORT+1); 
 			// Connect the socket to the target address and port so that we can debug
 			struct sockaddr_in si_other;

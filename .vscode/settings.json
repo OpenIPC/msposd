@@ -35,6 +35,7 @@
         "stop_token": "c",
         "syncstream": "c",
         "tuple": "c",
-        "string.h": "c"
+        "string.h": "c",
+        "mi_vpe.h": "c"
     }
 }

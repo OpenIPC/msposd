@@ -32,6 +32,8 @@ extern "C"
 #ifdef __SIGMASTAR__
 #include "mi_common.h"
 #include "mi_rgn.h"
+//#include "mi_vpe.h"
+#include "mi_venc.h"
 
 #define IO_BASE 0x1F000000
 #define IO_SIZE 0x400000
@@ -60,6 +62,7 @@ extern "C"
 #define PIXEL_FORMAT_2BPP PIXEL_FORMAT_ARGB_2BPP
 #define PIXEL_FORMAT_8888 PIXEL_FORMAT_ARGB_8888
 #endif
+
 
 #ifndef DIV_UP
 #define DIV_UP(x, a) (((x) + ((a)-1)) / a)

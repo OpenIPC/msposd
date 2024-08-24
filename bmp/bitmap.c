@@ -632,15 +632,17 @@ uint8_t findClosestPaletteIndexRGBA(uint8_t *color, MI_RGN_PaletteTable_t* palet
     uint8_t g = *(color+1);
     uint8_t b = *(color+2);
     uint8_t a = *(color+3);
-    if (a==0)
+    if (a<128)//transparency treshold
         return 15;//transparent
     else if (r>77)
         bestIndex = 0;
     else
         bestIndex = 0;
 
+    if (a>2 && a<200)
+        a++;
      
-    for (uint8_t i = 0; i < 18; ++i) {// only 16 searched
+    for (uint8_t i = 1; i < 18; ++i) {// only 16 searched
         MI_RGN_PaletteElement_t* element = &paletteTable->astElement[i];
         uint32_t distance = colorDistance8(r, g, b, element->u8Red, element->u8Green, element->u8Blue);
         if (distance < minDistance) {
@@ -1184,12 +1186,13 @@ void convertRGBAToI4(
             uint8_t paletteIndex = findClosestPaletteIndexRGBA(&srcBitmap[srcIndex], paletteTable); 
             
             // Handle specific palette indices as per SigmaStar requirements
-            if (paletteIndex == 0) // Sigmastar reserved
-                paletteIndex = 8;  // Black
+ //           if (paletteIndex == 0) // Sigmastar reserved
+//                paletteIndex = 8;  // Black
             if (paletteIndex == 17) // Transparent color
                 paletteIndex = 15;
 
             // Handle SigmaStar-specific bit manipulation
+            /*
 #ifdef __SIGMASTAR__           
             if (u32X % 2) {   // SigmaStar I4 format needs reversed 4-bit pairs
 #else
@@ -1201,6 +1204,8 @@ void convertRGBAToI4(
                 u8Value = (*(destBitmap + (u32Stride * u32Y) + u32X / 2) & 0xF0) | (paletteIndex & 0x0F);
                 *(destBitmap + (u32Stride * u32Y) + u32X / 2) = u8Value;
             }
+            */
+           setPixelI4(destBitmap,width, u32X,u32Y, paletteIndex  , u32Stride);
         }
     }
 }
@@ -1212,7 +1217,11 @@ void setPixelI4(uint8_t* bmpData, uint32_t width, uint32_t x, uint32_t y, uint8_
     uint32_t byteIndex = y * rowStride + (x / 2);
 
     // Determine if it's the high nibble or low nibble
+#ifdef __SIGMASTAR__    
+    if (x % 2 == 1) {
+#else  
     if (x % 2 == 0) {
+#endif        
         // High nibble (first pixel in the byte)
         bmpData[byteIndex] = (bmpData[byteIndex] & 0x0F) | (color << 4);
     } else {

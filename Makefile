@@ -34,7 +34,7 @@ osd-star6b0:
 
 osd-star6e:
 	$(eval SDK = ./sdk/infinity6)
-	$(eval LIB = -D__SIGMASTAR__ -D__INFINITY6__ -D__INFINITY6E__ -lcam_os_wrapper -lm -lmi_rgn -lmi_sys)
+	$(eval LIB = -D__SIGMASTAR__ -D__INFINITY6__ -D__INFINITY6E__ -lcam_os_wrapper -lm -lmi_rgn -lmi_sys -lmi_venc)
 	$(BUILD)
 
 #gcc your_program.c lodepng.c -ansi -pedantic -Wall -Wextra -O3

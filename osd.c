@@ -88,6 +88,7 @@ static uint32_t fb_cursor = 0;
 
 static uint8_t message_buffer[256]; // only needs to be the maximum size of an MSP packet, we only care to fwd MSP
 static char current_fc_identifier[4];
+static char current_fc_identifier_end_of_string=0x00;
 
 /* For compressed full-frame transmission */
 static uint16_t msp_character_map_buffer[MAX_DISPLAY_X][MAX_DISPLAY_Y];
@@ -102,7 +103,7 @@ int serial_fd;
 int socket_fd;
 int compressed_fd;
 
- 
+int font_pages=2;
 static uint8_t serial_passthrough = 1;
 static uint8_t compress = 0;
 static uint8_t no_btfl_hd = 0;
@@ -186,8 +187,10 @@ static void rx_msp_callback(msp_msg_t *msp_message)
                 copy_to_msp_frame_buffer(message_buffer, size);
                 if(msp_message->payload[0] == MSP_DISPLAYPORT_DRAW_SCREEN) {
                     // Once we have a whole frame of data, send it DEBUG it !!!
+                    /*
                     int written=write(socket_fd, frame_buffer, fb_cursor);                    
                     DEBUG_PRINT("DRAW! wrote %d bytes %d\n", fb_cursor, written);
+                    */
                     fb_cursor = 0;
                 }
             }
@@ -199,7 +202,9 @@ static void rx_msp_callback(msp_msg_t *msp_message)
             if(strncmp(current_fc_identifier, msp_message->payload, 4) != 0) {
                 // FC variant changed or was updated. Update the current FC identifier and send an MSP version request.
                 memcpy(current_fc_identifier, msp_message->payload, 4);
+                //Seems only BetaFlight needs this
                 send_version_request(serial_fd);
+                printf("Flight Controller detected:%s\r\n",current_fc_identifier);
             }
             break;
         }
@@ -268,7 +273,6 @@ static void msp_set_options(uint8_t font_num, msp_hd_options_e is_hd) {
 /*----------------------------------------------------------------------------------------------------*/
 /*------------CONFIGURE SWITCHES ----------------------------------------------------------------*/
 static int enable_fast_layout = 0;
-static int Use_Fast_Font = 3;
 
 void *io_map;
 struct osd *osds;
@@ -378,105 +382,9 @@ int center_refresh=0;
 static unsigned long long LastCleared=0;
 static unsigned long long LastDrawn=0;
 
-//Not used, draw only the center of the screen to save CPU
-static void draw_screenCenter(){
-
-    cntr++;
-    int s32BytesPerPix=2;//ARGB1555, 16bit
-
-	if ( (get_time_ms() - LastDrawn  ) < MinTimeBetweenScreenRefresh){//Once a second max{        
-		return ;
-    }
-
-    if ( (get_time_ms() - LastCleared  ) < 150){//at least 200ms to reload data
-        printf("%lu DrawCenter skipped after clear LastDrawn:%lu | %lu%\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)LastDrawn%10000 , (uint32_t) LastCleared%10000);
-		return ;
-    }
-
-    BITMAP bitmap;
-    LastDrawn = get_time_ms();
-    bitmap.u32Height= osds[FAST_OVERLAY_ID].height;
-    bitmap.u32Width= osds[FAST_OVERLAY_ID].width;
-    bitmap.pData = malloc( bitmap.u32Height * getRowStride(bitmap.u32Width , PIXEL_FORMAT_BitsPerPixel));
-    bitmap.enPixelFormat = PIXEL_FORMAT_1555;
-    
-    current_display_info.font_width = bitmapFnt.u32Width/2;
-    current_display_info.font_height = bitmapFnt.u32Height/256;
-
-
-    for (int y = fcY; y < current_display_info.char_height-fcH; y++)
-    {
-        for (int x = fcX; x < current_display_info.char_width-fcW; x++)
-        {
-            uint16_t c = character_map[x][y];
-            if (c != 0)
-            {
-                uint8_t page = 0;
-                if (c > 255) {
-                    page = 1;
-                    c = c & 0xFF;
-                }
-               // DEBUG_PRINT("%02X", c);
-                //Where is the rectangle in the Font Bitmap
-                u_int16_t s_left = page*current_display_info.font_width;
-                u_int16_t s_top = current_display_info.font_height * c;
-                u_int16_t s_width = current_display_info.font_width;
-                u_int16_t s_height = current_display_info.font_height;                                
-                //the location in the screen bmp where we will place the character glyph
-                u_int16_t d_x=(x-fcX) * current_display_info.font_width + X_OFFSET;
-                u_int16_t d_y=(y-fcY) * current_display_info.font_height;
-                
-                copyRectARGB1555(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
-                                bitmap.pData,bitmap.u32Width, bitmap.u32Height,
-                                s_left,s_top,s_width,s_height,
-                                d_x,d_y);
-               
-            }else{
-            }
-           // DEBUG_PRINT("  ");
-        }
-       // DEBUG_PRINT("\n");
-    }
-
-#ifdef _x86
-    uint64_t step2=get_time_ms();  
-    sfRenderWindow_clear(window, sfColor_fromRGB(255, 255, 255));
-    unsigned char* rgbaData = malloc(bitmap.u32Width * bitmap.u32Height * 4);  // Allocate memory for RGBA data    
-    Convert1555ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height);    
-    sfTexture* texture = sfTexture_create(bitmap.u32Width, bitmap.u32Height);
-    if (!texture) 
-        return;
-    sfTexture_updateFromPixels(texture, rgbaData, bitmap.u32Width, bitmap.u32Height, 0, 0);
-    free(rgbaData);  
-    // Step 2: Create a sprite and set the texture
-    sfSprite* sprite = sfSprite_create();
-    sfSprite_setTexture(sprite, texture, sfTrue);
-    // Set the position where you want to draw the sprite
-    sfVector2f position = {1, 1};
-    sfSprite_setPosition(sprite, position);    
-    sfRenderWindow_drawSprite(window, sprite, NULL);
-
-    // Cleanup resources
-    sfSprite_destroy(sprite);
-    sfTexture_destroy(texture);
-
-    
-    printf("%lu set_bitmapC for:%u | %u  ms\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn) , (uint32_t)(get_time_ms() - step2));
-
-#else
-    int id=0;
-    uint64_t step2=get_time_ms();  
-    set_bitmap(osds[FAST_OVERLAY_ID].hand, &bitmap);
-    printf("%lu set_bitmapC for:%u | %u  ms\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn) , (uint32_t)(get_time_ms() - step2));
-
-
-#endif
-
-
-    free(bitmap.pData);
-}
-
- BITMAP bmpBuff;
+ 
+//This will be where we will copy font icons and then pass to Display API  to render over video.
+BITMAP bmpBuff;
 
 int x_start = 600;
 int y_start = 500;
@@ -514,7 +422,6 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
       
     int OffsY= sin((last_pitch/10) * (M_PI / 180.0))*400;
     
-
     int img_width = x_end-x_start;
     int img_height = y_end-y_start;
     
@@ -548,21 +455,24 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
     //Point img_center = {OVERLAY_WIDTH/2, OVERLAY_HEIGHT/2};  // Center of the image (example)
     //Point original_point = {600, 500};  // Example point
     //Point original_point2 = {1300, 500};  // Example point
-
-
      
     
     const bool horizonInvertPitch = false;
     const bool horizonInvertRoll = false;
-    const double horizonWidth = 3;
+    double horizonWidth = 3;
     const int horizonSpacing = 165;//????//pixels per degree 165
     const bool horizonShowLadder = true;
-    const int horizonRange = 80; //total vertical range in degrees
+    int horizonRange = 80; //total vertical range in degrees
     const int horizonStep = 10;//????//degrees per line
     const bool show_center_indicator = false;////m_show_center_indicator;
-    // we use fillRect for the ladder lines, this adjust how big the linesize is (e.g. how strong the stroke)
+    
     const double ladder_stroke_faktor=0.1;
     const int subline_thickness=2;
+
+    if (OVERLAY_HEIGHT<900){//720p mode
+        horizonWidth = 2;
+        horizonRange = 50;
+    }
 
     double roll_degree = ((double)last_roll)/10;
     double pitch_degree = ((double)last_pitch)/10;
@@ -758,16 +668,11 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
 
                 }
             } else { // i==0
+                //Main AHI Line
                 // default to stroke strength of 3 - a bit bigger than the non center lines
                 const auto stroke_s=4*ladder_stroke_faktor;
 
-                //Center line
-                //painter->fillRect(QRectF(pos_x-width_ladder*2.5/2, y, width_ladder*2.5, stroke_s), m_color);
-                //painter->setPen(m_glow);
-                //painter->drawRect(QRectF(pos_x-width_ladder*2.5/2, y, width_ladder*2.5, stroke_s));
-
-                //drawRectangleI4(bmpBuff.pData, 1 + pos_x-width_ladder*2.5/2, y, width_ladder*2.5 - 2, 0, m_color,2);//main color
-
+                
                 int rect_height = 5;            // Height of the rectangles (as per your original code)
                 int fragments=6;
                 float  SpacingK=0.6;
@@ -797,35 +702,24 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
         }
     }
 
-
-
-    
-   // drawLineI4Ex(bmpBuff.pData, bmpBuff.u32Width, bmpBuff.u32Height, original_point,original_point2, 7);
-   // original_point = (Point){600, 480}; original_point2 = (Point){600, 520};
-  //  drawLineI4Ex(bmpBuff.pData, bmpBuff.u32Width, bmpBuff.u32Height, original_point,original_point2, 7);
-   // original_point = (Point){1300, 480}; original_point2 = (Point){1300, 520};
-  //  drawLineI4Ex(bmpBuff.pData, bmpBuff.u32Width, bmpBuff.u32Height, original_point,original_point2, 7);
+ 
  }
 
 static void draw_screenBMP(){
     
-    if (cntr++<0 )
+    if (cntr++<0 )//skip in the beginning to show to font preview
         return ;
 	if ( (get_time_ms() - LastDrawn  ) < MinTimeBetweenScreenRefresh){//Set some delay to keep CPU load low
         // printf("%lu DrawSkipped LastDrawn:%lu\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)LastDrawn);
 		return ;
     }
 
-    if ( (get_time_ms() - LastCleared  ) < 20){//at least 200ms to reload data, otherwise the screen will blink?
+    if ( (get_time_ms() - LastCleared  ) < 20){//at least 20ms to reload data after clearscreen, otherwise the screen will blink?
         //printf("%lu DrawSkipped after clear LastDrawn:%lu | %lu%\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)LastDrawn%10000 , (uint32_t) LastCleared%10000);
 		return ;
     }
     
     LastDrawn= get_time_ms();
-
-    //The number of characters in the FontTemplate for 1080p
-    current_display_info.font_width = bitmapFnt.u32Width/2;
-    current_display_info.font_height = bitmapFnt.u32Height/256;
 
     if (bmpBuff.pData==NULL){
         //bmpBuff.u32Width = 
@@ -841,8 +735,8 @@ static void draw_screenBMP(){
     bmpBuff.enPixelFormat =  PIXEL_FORMAT_DEFAULT;//  PIXEL_FORMAT_DEFAULT ;//PIXEL_FORMAT_1555;
 
     // a Character icon size in the FontTemplate
-    current_display_info.font_width = bitmapFnt.u32Width/2;
-    current_display_info.font_height = bitmapFnt.u32Height/256;
+   // current_display_info.font_width = bitmapFnt.u32Width/2;
+   // current_display_info.font_height = bitmapFnt.u32Height/256;
  
 
 
@@ -968,7 +862,8 @@ static void clear_screen()
 {
     if (cntr++<0 )
         return ;
-    if (get_time_ms() - LastCleared>2500) {//no faster than 0.5 per second
+    //BetaFlight needs this. INAV can be configured to skip it
+    if (font_pages>2 || get_time_ms() - LastCleared>2500) {//no faster than 0.5 per second
         memset(character_map, 0, sizeof(character_map));
         if (bmpBuff.pData!=NULL)//Set whole BMP as transparant, Palette index 0xF if 4bit
             bmpBuff.pData = memset(bmpBuff.pData, 0xFF , (bmpBuff.u32Height * bmpBuff.u32Width * PIXEL_FORMAT_BitsPerPixel / 8) );
@@ -989,7 +884,7 @@ static void draw_complete()
         if(draws%5==1)
             draw_screenBMP();
         else
-            draw_screenCenter();
+            {/*draw_screenCenter();*/}//not used
     }else
         draw_screenBMP();
 
@@ -1047,50 +942,130 @@ unsigned char* loadPngToBMPI4(const char* filename, unsigned int* width, unsigne
     return bmpData;
 }
 
+int GetMajesticVideoConfig(){
+
+    FILE *file;
+    char line[256];
+    bool inVideo0Section = false;
+    char sizeValue[50];  // Buffer to store the size value
+    int width, height;
+
+    // Open the configuration file
+#ifdef _x86    
+    file = fopen("majestic.yaml", "r");
+#else
+    file = fopen("/etc/majestic.yaml", "r");
+#endif
+    if (file == NULL) {
+        printf("Could not open majestic.yaml.\n");
+        return 0;
+    }
+
+    // Read the file line by line
+    while (fgets(line, sizeof(line), file)) {
+        // Check if we've entered the video0 section
+        if (strstr(line, "video0:") != NULL) 
+            inVideo0Section = true;
+
+        // If we're in the video0 section, look for the size parameter
+        if (inVideo0Section && line[0] != '#') {
+            if (strstr(line, "size:") != NULL) {
+                // Extract the value after "size:"
+                sscanf(line, " size: %49s", sizeValue); // Extract the size value with a buffer limit
+                break;  // Exit the loop once the size is found
+            }
+        }
+
+        // If another section starts, exit the video0 section
+        if (line[0] != ' ' && line[0] != '#' && strstr(line, ":") != NULL && strstr(line, "video0:") == NULL) {
+            inVideo0Section = false;
+        }
+    }
+
+    // Close the file
+    fclose(file);
+
+    // Print the extracted size value
+    if (strlen(sizeValue) > 0) {
+        // Use sscanf to parse the size value into width and height
+        if (sscanf(sizeValue, "%dx%d", &width, &height) == 2) {
+            printf("Width: %d, Height: %d\n", width, height);
+        } else {
+            printf("Failed to parse size value. %s\n",sizeValue);
+            height = 1080;
+        }
+
+    } else {
+        printf("Size parameter not found in Video0 section.\n");
+    }
+
+    return height;
+
+}
 
 
 int fd_mem;
 static void InitMSPHook(){
     memset(character_map, 0, sizeof(character_map));
     
-    char *font_name;   
-    font_name = "font_inav";    
-    char font_load_name[255];
-
-    snprintf(font_load_name, 255, "%s.bmp", font_name);
- 
-
-    font_name = "/usr/bin/font_inav.png";
-    #ifdef _x86
-    font_name = "font_inav.png";//.bmp
-    #endif
-    /* BMP Font template.
-    if (load_fontFromBMP(font_name,&bitmapFnt)<0)// must clean up after free(bitmap.pData);
-        printf("Can't load font %s \r\n",font_name);
     
-    if (bitmapFnt.u32Width==0)
-        printf("Error in font %s \r\n !!!",font_name);
-    */
+    char *font_path;
+    char *font_suffix;
+    char font_load_name[255];
+    font_suffix="";
+    font_path = "/usr/bin/";   
+     #ifdef _x86
+    font_path = "";//.bmp
+    #endif 
+ 
+    int height = GetMajesticVideoConfig();
+    //height=1080;
+    printf("Video Mode %dp\r\n",height);
+    if (height<800 && height>400){
+        font_suffix = "_hd";
+        OVERLAY_WIDTH=1200;
+        OVERLAY_HEIGHT=700;
+        current_display_info = hd_display_info;
+        current_display_info.font_width = 24;
+        current_display_info.font_height = 36;
+    }else{
+        OVERLAY_WIDTH=1800;
+        OVERLAY_HEIGHT=1000;
+        current_display_info = hd_display_info;
+        current_display_info.font_width = 36;
+        current_display_info.font_height = 54;
+    }
+
+    snprintf(font_load_name, 255, "%sfont%s.png", font_path, font_suffix);
+     
     PIXEL_FORMAT_DEFAULT=3;//I4 format, 4 bits per pixel. 
     PIXEL_FORMAT_BitsPerPixel = 4;
-    if (bitmapFnt.pData!=NULL)
+    if (bitmapFnt.pData!=NULL)//if called by mistake
         free(bitmapFnt.pData);
-    bitmapFnt.pData=(void *)loadPngToBMPI4(font_name,&bitmapFnt.u32Width,&bitmapFnt.u32Height);
+
+    bitmapFnt.pData=(void *)loadPngToBMPI4(font_load_name,&bitmapFnt.u32Width,&bitmapFnt.u32Height);
     bitmapFnt.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
 
-    current_display_info.font_width = bitmapFnt.u32Width/2;
-    current_display_info.font_height = bitmapFnt.u32Height/256;
-    printf("Font %s character size:%d:%d \r\n",font_name,current_display_info.font_width,current_display_info.font_height);
+    
+    //INAV only constants, need to calculate them
+    //current_display_info.font_width = bitmapFnt.u32Width/2;
+    //current_display_info.font_height = bitmapFnt.u32Height/256;
+
+    
+    font_pages = bitmapFnt.u32Width/current_display_info.font_width;
+
+    printf("Font %s character size:%d:%d \r\n",font_load_name,current_display_info.font_width,current_display_info.font_height);
     if (bitmapFnt.u32Width==0 || bitmapFnt.u32Height==0){
-        printf("Can't find font file : %s \r\n",font_name);
+        printf("Can't find font file : %s \r\n OSD Disabled! \r\n",font_load_name);
         return;
     }
     int rgn=0;   
 
-    Use_Fast_Font=false;//test PNG load
-     // Convert icons font to i8 format
+
+
+     // OBSOLETE, used for BMP font files. Convert icons font to i8 or i4 format
      // This will speed up a little... :)
-     if (Use_Fast_Font){
+     if (false){
         //PIXEL_FORMAT_DEFAULT=4;//E_MI_RGN_PIXEL_FORMAT_I8
         //PIXEL_FORMAT_BitsPerPixel=8;
         //TESTTING, not working with SetBitmap?!??!
@@ -1110,7 +1085,8 @@ static void InitMSPHook(){
         bitmapFnt.pData=(void *)destBitmap;
         bitmapFnt.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
      }else{
-        /*
+        /* 
+        //Test to load PNG pic
         PIXEL_FORMAT_DEFAULT=3;//1555 PIXEL_FORMAT_1555
         PIXEL_FORMAT_BitsPerPixel = 4;
         bitmapFnt.pData=(void *)loadPngToBmpMemory("font_inav.png",&bitmapFnt.u32Width,&bitmapFnt.u32Height);
@@ -1137,213 +1113,211 @@ static void InitMSPHook(){
     #endif
 
 
-        #ifdef __SIGMASTAR__            
-            int s32Ret = MI_RGN_Init(&g_stPaletteTable);
-            printf("MI_RGN_Init results: %d \r\n", s32Ret);
-            if (s32Ret)
-                fprintf(stderr, "[%s:%d]RGN_Init failed with %#x!\n", __func__, __LINE__, s32Ret);
+    #ifdef __SIGMASTAR__            
+        int s32Ret = MI_RGN_Init(&g_stPaletteTable);
+        printf("MI_RGN_Init results: %d \r\n", s32Ret);
+        if (s32Ret)
+            fprintf(stderr, "[%s:%d]RGN_Init failed with %#x!\n", __func__, __LINE__, s32Ret);
+    #endif
+
+        //THIS IS NEEDED, the main 
+        rgn=create_region(&osds[FULL_OVERLAY_ID].hand, osds[FULL_OVERLAY_ID].posx, osds[FULL_OVERLAY_ID].posy, OVERLAY_WIDTH, OVERLAY_HEIGHT);
+        printf("Create_region PixelFormat:%d Size: %d:%d results: %d \r\n", PIXEL_FORMAT_DEFAULT, OVERLAY_WIDTH,OVERLAY_HEIGHT, rgn);
+
+        //LOGO TEST, for TEST ONLY, loads a file for several seconds as overlay
+        char img[32];//test to show a simple files
+        #ifdef __SIGMASTAR__ 
+        sprintf(img, "/osd%d.png", FULL_OVERLAY_ID);
+        #else
+        sprintf(img, "osd%d.png", FULL_OVERLAY_ID);
         #endif
 
-            //THIS IS NEEDED, the main 
-            rgn=create_region(&osds[FULL_OVERLAY_ID].hand, osds[FULL_OVERLAY_ID].posx, osds[FULL_OVERLAY_ID].posy, OVERLAY_WIDTH, OVERLAY_HEIGHT);
-            printf("Create_region PixelFormat:%d Size: %d:%d results: %d \r\n", PIXEL_FORMAT_DEFAULT, OVERLAY_WIDTH,OVERLAY_HEIGHT, rgn);
-    
-            //LOGO TEST, for TEST ONLY, loads a file for several seconds as overlay
-            char img[32];//test to show a simple files
-            #ifdef __SIGMASTAR__ 
-            sprintf(img, "/osd%d.png", FULL_OVERLAY_ID);
-            #else
-            sprintf(img, "osd%d.png", FULL_OVERLAY_ID);
-            #endif
+        if (true/*!access(img, F_OK)*/){    
+            cntr= - 100;                
+            BITMAP bitmap;                                
+            int prepared=0;
+            if (false){//Load a BITMAP and show it on the screen
+                prepared =!(prepare_bitmap(img, &bitmap, 2, TRANSPARENT_COLOR, PIXEL_FORMAT_1555));                                                                                                  
+                printf("Loaded LOGO bmp  %d x %d success:%d\n",bitmap.u32Height, bitmap.u32Width,rgn);                 
 
-            if (!access(img, F_OK)){    
-                cntr= - 100;                
-                BITMAP bitmap;                                
-                int prepared=0;
-                if (false){//Load a BITMAP and show it on the screen
-                    prepared =!(prepare_bitmap(img, &bitmap, 2, TRANSPARENT_COLOR, PIXEL_FORMAT_1555));                                                                                                  
-                    printf("Loaded LOGO bmp  %d x %d success:%d\n",bitmap.u32Height, bitmap.u32Width,rgn);                 
+                // Destination bitmap in I4 format (4 bits per pixel)
+                //uint8_t* destBitmap = (uint8_t*)malloc((bitmap.u32Width * bitmap.u32Height) / 2);                                     
+                //convertBitmap1555ToI4(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, palette);
+            
+                // Destination bitmap in I8 format (8 bits per pixel)
+                uint8_t* destBitmap =  (uint8_t*)malloc((bitmap.u32Width * bitmap.u32Height));     
+                convertBitmap1555ToI8(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable);
+                free(bitmap.pData);
 
-                    // Destination bitmap in I4 format (4 bits per pixel)
-                    //uint8_t* destBitmap = (uint8_t*)malloc((bitmap.u32Width * bitmap.u32Height) / 2);                                     
-                    //convertBitmap1555ToI4(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, palette);
+                bitmap.pData=(void *)destBitmap;//to thenew structure data only
+                ///E_MI_RGN_PIXEL_FORMAT_I4 DOEAS NOT WORK!!!
+                #ifdef __SIGMASTAR__
+                bitmap.enPixelFormat = PIXEL_FORMAT_DEFAULT; // E_MI_RGN_PIXEL_FORMAT_I4; //0
+                #endif
                 
-                  // Destination bitmap in I8 format (8 bits per pixel)
-                    uint8_t* destBitmap =  (uint8_t*)malloc((bitmap.u32Width * bitmap.u32Height));     
+            }
+            //TEST how bitmaps conversions work
+            if (false){//LOAD a bitmap and show it on the screen using canvas, works directly into display memory, faster!
+
+                uint8_t* destBitmap =  (uint8_t*)malloc(bitmap.u32Height * getRowStride(bitmap.u32Width , PIXEL_FORMAT_BitsPerPixel));   
+                if (PIXEL_FORMAT_DEFAULT==4)  
                     convertBitmap1555ToI8(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable);
-                    free(bitmap.pData);
+                
+                if (PIXEL_FORMAT_DEFAULT==3)  
+                    convertBitmap1555ToI4(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable);
 
-                    bitmap.pData=(void *)destBitmap;//to thenew structure data only
-                    ///E_MI_RGN_PIXEL_FORMAT_I4 DOEAS NOT WORK!!!
-                    #ifdef __SIGMASTAR__
-                    bitmap.enPixelFormat = PIXEL_FORMAT_DEFAULT; // E_MI_RGN_PIXEL_FORMAT_I4; //0
-                    #endif
-                    
-                }
-                //TEST how bitmaps conversions work
-                if (false){//LOAD a bitmap and show it on the screen using canvas, works directly into display memory, faster!
-
-                    uint8_t* destBitmap =  (uint8_t*)malloc(bitmap.u32Height * getRowStride(bitmap.u32Width , PIXEL_FORMAT_BitsPerPixel));   
-                    if (PIXEL_FORMAT_DEFAULT==4)  
-                       convertBitmap1555ToI8(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable);
-                    
-                    if (PIXEL_FORMAT_DEFAULT==3)  
-                        convertBitmap1555ToI4(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable);
-
-                    free(bitmap.pData);
-                    
-                    bitmap.pData=(void *)destBitmap;//to the new structure data only
-                    bitmap.enPixelFormat = PIXEL_FORMAT_DEFAULT; // E_MI_RGN_PIXEL_FORMAT_I4; //0
-                    printf("convertBitmap1555ToI%d  success. FULL_OVERLAY_ID.hand= %d\n",(PIXEL_FORMAT_DEFAULT==4)?8:4,osds[FULL_OVERLAY_ID].hand);                 
+                free(bitmap.pData);
+                
+                bitmap.pData=(void *)destBitmap;//to the new structure data only
+                bitmap.enPixelFormat = PIXEL_FORMAT_DEFAULT; // E_MI_RGN_PIXEL_FORMAT_I4; //0
+                printf("convertBitmap1555ToI%d  success. FULL_OVERLAY_ID.hand= %d\n",(PIXEL_FORMAT_DEFAULT==4)?8:4,osds[FULL_OVERLAY_ID].hand);                 
 
 #ifdef __SIGMASTAR__   
-                    MI_RGN_CanvasInfo_t stCanvasInfo; 
-                    memset(&stCanvasInfo,0,sizeof(stCanvasInfo));                     
-                    //memset(&stCanvasInfo,0,sizeof(stCanvasInfo));
-                    s32Ret =  GetCanvas(osds[FULL_OVERLAY_ID].hand, &stCanvasInfo);                                       
-                    printf("stCanvasInfo  CanvasStride: %d , BMP_Stride:%d Size: %d:%d \r\n", 
-                        stCanvasInfo.u32Stride, getRowStride(bitmap.u32Width, PIXEL_FORMAT_BitsPerPixel), bitmap.u32Width,bitmap.u32Height);
-                    int byteWidth =  bitmap.u32Width ; // Each row's width in bytes (I4 = 4 bits per pixel)
-                    if (PIXEL_FORMAT_DEFAULT==4)
-                        byteWidth =  (bitmap.u32Width) * PIXEL_FORMAT_BitsPerPixel / 8;
-                    if (PIXEL_FORMAT_DEFAULT==3){ //I4
-                        //bytesperpixel=0.5F;
-                        byteWidth = (uint16_t)(bitmap.u32Width + 1) * PIXEL_FORMAT_BitsPerPixel / 8 ; // Each row's width in bytes (I4 = 4 bits per pixel)                        
-                        byteWidth = getRowStride(bitmap.u32Width,PIXEL_FORMAT_BitsPerPixel);
-                    }
-
-                    for (int i = 0; i < bitmap.u32Height; i++)                    
-                        memcpy((void *)(stCanvasInfo.virtAddr + i * (stCanvasInfo.u32Stride)), bitmap.pData + i * byteWidth, byteWidth);
-
-                    //This tests direct copy to overlay - will further speed up!
-                    //DrawBitmap1555ToI4(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable, (void *)stCanvasInfo.virtAddr,stCanvasInfo.u32Stride);
-                    /* this draws a line directly into the OSD memory
-                    for (int y = 0; y < bitmap.u32Height/2; y++)                           
-                        for (int x = 0; x < 5; x+=2)
-                            ST_OSD_DrawPoint((void *)stCanvasInfo.virtAddr,stCanvasInfo.u32Stride, x,y, 3 );//y%14+1
-                    */
-
-                    s32Ret = MI_RGN_UpdateCanvas(osds[FULL_OVERLAY_ID].hand);
-                    printf("MI_RGN_UpdateCanvas completed byteWidth:%d!\n",byteWidth);
-                    if  (s32Ret!= MI_RGN_OK)    
-                        fprintf(stderr, "MI_RGN_UpdateCanvas failed with %#x!\n", __func__, __LINE__, s32Ret);                 
-#elif _x86 
-                    //TEST ON x86
-                    
-                        sfRenderWindow_clear(window, sfColor_fromRGB(255, 255, 0));
-                       
-                        unsigned char* rgbaData = malloc(bitmap.u32Width * bitmap.u32Height * 4);  // Allocate memory for RGBA data    
-
-                        if (PIXEL_FORMAT_DEFAULT==0)          
-                            Convert1555ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height);    
-                        if (PIXEL_FORMAT_DEFAULT==4)          
-                            ConvertI8ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height,&g_stPaletteTable);    
-                        if (PIXEL_FORMAT_DEFAULT==3)          
-                            ConvertI4ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height,&g_stPaletteTable);    
-
-                        sfTexture* texture = sfTexture_create(bitmap.u32Width, bitmap.u32Height);
-                        if (!texture) 
-                            return;
-                        sfTexture_updateFromPixels(texture, rgbaData, bitmap.u32Width, bitmap.u32Height, 0, 0);
-                        free(rgbaData);  
-                        
-                        sfSprite* sprite = sfSprite_create();
-                        sfSprite_setTexture(sprite, texture, sfTrue);
-                        // Set the position where you want to draw the sprite
-                        sfVector2f position = {1, 1};
-                        sfSprite_setPosition(sprite, position);    
-                        sfRenderWindow_drawSprite(window, sprite, NULL);
-
-                        // Cleanup resources
-                        sfSprite_destroy(sprite);
-                        sfTexture_destroy(texture);
-                        printf("Test show bitmap s\r\n");
-                        sfRenderWindow_display(window);
-
-#endif
-                    prepared=false;
+                MI_RGN_CanvasInfo_t stCanvasInfo; 
+                memset(&stCanvasInfo,0,sizeof(stCanvasInfo));                     
+                //memset(&stCanvasInfo,0,sizeof(stCanvasInfo));
+                s32Ret =  GetCanvas(osds[FULL_OVERLAY_ID].hand, &stCanvasInfo);                                       
+                printf("stCanvasInfo  CanvasStride: %d , BMP_Stride:%d Size: %d:%d \r\n", 
+                    stCanvasInfo.u32Stride, getRowStride(bitmap.u32Width, PIXEL_FORMAT_BitsPerPixel), bitmap.u32Width,bitmap.u32Height);
+                int byteWidth =  bitmap.u32Width ; // Each row's width in bytes (I4 = 4 bits per pixel)
+                if (PIXEL_FORMAT_DEFAULT==4)
+                    byteWidth =  (bitmap.u32Width) * PIXEL_FORMAT_BitsPerPixel / 8;
+                if (PIXEL_FORMAT_DEFAULT==3){ //I4
+                    //bytesperpixel=0.5F;
+                    byteWidth = (uint16_t)(bitmap.u32Width + 1) * PIXEL_FORMAT_BitsPerPixel / 8 ; // Each row's width in bytes (I4 = 4 bits per pixel)                        
+                    byteWidth = getRowStride(bitmap.u32Width,PIXEL_FORMAT_BitsPerPixel);
                 }
-                //LOAD PNG TEST
-                if (true){
-                    prepared=1;
-                    
-                   // uint8_t* destBitmap = loadPngToBMPI4("font_inav.png",&width,&height);
 
-                   
-                    bitmap.enPixelFormat-PIXEL_FORMAT_DEFAULT;
-                    int cols=bitmapFnt.u32Height / OVERLAY_HEIGHT;
-                    int rows=OVERLAY_HEIGHT/    current_display_info.font_height;
-                    int fontPageHeight=rows * current_display_info.font_height;//OVERLAY_HEIGHT;;
-                    bitmap.u32Height = OVERLAY_HEIGHT;//rows * current_display_info.font_height;//OVERLAY_HEIGHT;
-                    bitmap.u32Width = OVERLAY_WIDTH;//bitmapFnt.u32Width * cols;                    
-                    bitmap.pData = (unsigned char*)malloc(PIXEL_FORMAT_BitsPerPixel * bitmap.u32Height * getRowStride(bitmap.u32Width , PIXEL_FORMAT_BitsPerPixel));
-                    memset(bitmap.pData, 0, PIXEL_FORMAT_BitsPerPixel * bitmap.u32Height * getRowStride(bitmap.u32Width , PIXEL_FORMAT_BitsPerPixel));
-                    //bmp.u32Width=current_display_info.font_width * current_display_info.char_width;
-                    //bmp.u32Height = current_display_info.font_height * current_display_info.char_height;
-                    //bmp.pData = malloc( PIXEL_FORMAT_BitsPerPixel  * bmp.u32Height * getRowStride(bmp.u32Width , PIXEL_FORMAT_BitsPerPixel));
+                for (int i = 0; i < bitmap.u32Height; i++)                    
+                    memcpy((void *)(stCanvasInfo.virtAddr + i * (stCanvasInfo.u32Stride)), bitmap.pData + i * byteWidth, byteWidth);
 
-                    for (int i=0; i<cols ; i++ )
-                        copyRectI4(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
-                                    bitmap.pData,bitmap.u32Width, bitmap.u32Height,
-                                    0,i * fontPageHeight, bitmapFnt.u32Width, fontPageHeight,
-                                    i*bitmapFnt.u32Width,0);
+                //This tests direct copy to overlay - will further speed up!
+                //DrawBitmap1555ToI4(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable, (void *)stCanvasInfo.virtAddr,stCanvasInfo.u32Stride);
+                /* this draws a line directly into the OSD memory
+                for (int y = 0; y < bitmap.u32Height/2; y++)                           
+                    for (int x = 0; x < 5; x+=2)
+                        ST_OSD_DrawPoint((void *)stCanvasInfo.virtAddr,stCanvasInfo.u32Stride, x,y, 3 );//y%14+1
+                */
 
-                  
+                s32Ret = MI_RGN_UpdateCanvas(osds[FULL_OVERLAY_ID].hand);
+                printf("MI_RGN_UpdateCanvas completed byteWidth:%d!\n",byteWidth);
+                if  (s32Ret!= MI_RGN_OK)    
+                    fprintf(stderr, "MI_RGN_UpdateCanvas failed with %#x!\n", __func__, __LINE__, s32Ret);                 
+#elif _x86 
+                //TEST ON x86
                 
-                   /* Test load image
-                    bitmap.pData = loadPngToBMPI4(img, &bitmap.u32Width, &bitmap.u32Height);
-                    bitmap.enPixelFormat-PIXEL_FORMAT_DEFAULT;
-                    */
-                
+                    sfRenderWindow_clear(window, sfColor_fromRGB(255, 255, 0));
                     
-                    #ifdef __SIGMASTAR__   
-                        printf("Set Font Review %d:%d", bitmap.u32Width, bitmap.u32Height);
-                        //For some reason this fails...?!
-                        set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);//bitmap must match region dimensions!
-                        
-                        set_bitmapEx(osds[FULL_OVERLAY_ID].hand, &bitmap, PIXEL_FORMAT_BitsPerPixel);
+                    unsigned char* rgbaData = malloc(bitmap.u32Width * bitmap.u32Height * 4);  // Allocate memory for RGBA data    
 
-                    #else
-                        sfRenderWindow_clear(window, sfColor_fromRGB(255, 255, 0));
-                        
-                        unsigned char* rgbaData = malloc(bitmap.u32Width * bitmap.u32Height * 4);  // Allocate memory for RGBA data          
+                    if (PIXEL_FORMAT_DEFAULT==0)          
+                        Convert1555ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height);    
+                    if (PIXEL_FORMAT_DEFAULT==4)          
+                        ConvertI8ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height,&g_stPaletteTable);    
+                    if (PIXEL_FORMAT_DEFAULT==3)          
                         ConvertI4ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height,&g_stPaletteTable);    
 
-                        sfTexture* texture = sfTexture_create(bitmap.u32Width, bitmap.u32Height);
-                        if (!texture) 
-                            return;
-                        sfTexture_updateFromPixels(texture, rgbaData, bitmap.u32Width, bitmap.u32Height, 0, 0);
-                        free(rgbaData);  
-                        
-                        sfSprite* sprite = sfSprite_create();
-                        sfSprite_setTexture(sprite, texture, sfTrue);
-                        // Set the position where you want to draw the sprite
-                        sfVector2f position = {1, 1};
-                        sfSprite_setPosition(sprite, position);    
-                        sfRenderWindow_drawSprite(window, sprite, NULL);
+                    sfTexture* texture = sfTexture_create(bitmap.u32Width, bitmap.u32Height);
+                    if (!texture) 
+                        return;
+                    sfTexture_updateFromPixels(texture, rgbaData, bitmap.u32Width, bitmap.u32Height, 0, 0);
+                    free(rgbaData);  
+                    
+                    sfSprite* sprite = sfSprite_create();
+                    sfSprite_setTexture(sprite, texture, sfTrue);
+                    // Set the position where you want to draw the sprite
+                    sfVector2f position = {1, 1};
+                    sfSprite_setPosition(sprite, position);    
+                    sfRenderWindow_drawSprite(window, sprite, NULL);
 
-                        // Cleanup resources
-                        sfSprite_destroy(sprite);
-                        sfTexture_destroy(texture);
-                        printf("Test show bitmap s\r\n");
-                        sfRenderWindow_display(window);
-                #endif
-                    //free(bitmap.pData);
-                }
+                    // Cleanup resources
+                    sfSprite_destroy(sprite);
+                    sfTexture_destroy(texture);
+                    printf("Test show bitmap s\r\n");
+                    sfRenderWindow_display(window);
 
-                if (prepared){
-                    printf("set_LOGO with u32Height:%d enPixelFormat %d\n",bitmap.u32Height, bitmap.enPixelFormat);                   
-                    int s32Ret=set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);
-                    if(s32Ret!=0)
-                        printf("ERROR set_bitmap%d \n",s32Ret);  
+#endif
+                prepared=false;
+            }
+            //LOAD PNG TEST
+            if (true){//Split and show a review of the selected font for several seconds
+                prepared=1;
+                
+                bitmap.enPixelFormat-PIXEL_FORMAT_DEFAULT;
+                int preview_height=current_display_info.font_height * current_display_info.char_height;
+                int cols=bitmapFnt.u32Height / preview_height;/*OVERLAY_HEIGH*/;
+                int rows=preview_height/    current_display_info.font_height;
+                int fontPageHeight=rows * current_display_info.font_height;//OVERLAY_HEIGHT;;
+                bitmap.u32Height = preview_height;//rows * current_display_info.font_height;//OVERLAY_HEIGHT;
+                bitmap.u32Width = OVERLAY_WIDTH;//bitmapFnt.u32Width * cols;                    
+                bitmap.pData = (unsigned char*)malloc(PIXEL_FORMAT_BitsPerPixel * bitmap.u32Height * getRowStride(bitmap.u32Width , PIXEL_FORMAT_BitsPerPixel));
+                memset(bitmap.pData, 0, PIXEL_FORMAT_BitsPerPixel * bitmap.u32Height * getRowStride(bitmap.u32Width , PIXEL_FORMAT_BitsPerPixel));
+                //bmp.u32Width=current_display_info.font_width * current_display_info.char_width;
+                //bmp.u32Height = current_display_info.font_height * current_display_info.char_height;
+                //bmp.pData = malloc( PIXEL_FORMAT_BitsPerPixel  * bmp.u32Height * getRowStride(bmp.u32Width , PIXEL_FORMAT_BitsPerPixel));
 
-                    free(bitmap.pData);
-                }
+                for (int i=0; i<cols ; i++ )
+                    copyRectI4(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
+                                bitmap.pData,bitmap.u32Width, bitmap.u32Height,
+                                0,i * fontPageHeight, bitmapFnt.u32Width, fontPageHeight,
+                                i*bitmapFnt.u32Width,0);                
+            
+                /* Test load BMP image and show it on the screen 
+                bitmap.pData = loadPngToBMPI4(img, &bitmap.u32Width, &bitmap.u32Height);
+                bitmap.enPixelFormat-PIXEL_FORMAT_DEFAULT;
+                */
+                
+                #ifdef __SIGMASTAR__   
+                    printf("Set Font Review %d:%d", bitmap.u32Width, bitmap.u32Height);
+                    //For some reason this fails...?!
+                    //set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);//bitmap must match region dimensions!
+                    
+                    set_bitmapEx(osds[FULL_OVERLAY_ID].hand, &bitmap, PIXEL_FORMAT_BitsPerPixel);
 
+                #else
+                    sfRenderWindow_clear(window, sfColor_fromRGB(255, 255, 0));
+                    
+                    unsigned char* rgbaData = malloc(bitmap.u32Width * bitmap.u32Height * 4);  // Allocate memory for RGBA data          
+                    ConvertI4ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height,&g_stPaletteTable);    
 
+                    //test simple load PNG file and show it
+                    //free(rgbaData);
+                    //int width,height;
+                    //unsigned int error = lodepng_decode32_file(&rgbaData, &bitmap.u32Width, &bitmap.u32Height, font_load_name);                    
 
-            }else
-                 printf("No logo file %s \n",img);
+                    sfTexture* texture = sfTexture_create(bitmap.u32Width, bitmap.u32Height);
+                    if (!texture) 
+                        return;
+                    sfTexture_updateFromPixels(texture, rgbaData, bitmap.u32Width, bitmap.u32Height, 0, 0);
+                    free(rgbaData);  
+                    
+                    sfSprite* sprite = sfSprite_create();
+                    sfSprite_setTexture(sprite, texture, sfTrue);
+                    // Set the position where you want to draw the sprite
+                    sfVector2f position = {1, 1};
+                    sfSprite_setPosition(sprite, position);    
+                    sfRenderWindow_drawSprite(window, sprite, NULL);
+
+                    // Cleanup resources
+                    sfSprite_destroy(sprite);
+                    sfTexture_destroy(texture);
+                    printf("Test show bitmap s\r\n");
+                    sfRenderWindow_display(window);
+            #endif
+                //free(bitmap.pData);
+            }
+
+            if (prepared){
+                printf("set_LOGO with u32Height:%d enPixelFormat %d\n",bitmap.u32Height, bitmap.enPixelFormat);                   
+                int s32Ret=set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);
+                if(s32Ret!=0)
+                    printf("ERROR set_bitmap%d \n",s32Ret);  
+
+                free(bitmap.pData);
+            }
+
+        }else
+                printf("No logo file %s \n",img);
     
 
      if (enable_fast_layout){ //fast_overlay , can be smaller     
@@ -1370,8 +1344,7 @@ static void InitMSPHook(){
 
     msp_state_t *msp_state = calloc(1, sizeof(msp_state_t));
     msp_state->cb = &msp_callback;
-
-    printf("\r\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",font_name);
+ 
 
 }
 
