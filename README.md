@@ -20,10 +20,10 @@ Usage: msposd [OPTIONS]
  --help           Display this help\n"
 ```
 
-###Additional options.
-Forwarding of MSP packets via UDP.
-Can monitor RC Channels values in FC and call the script `channels.sh` (located at /usr/bin or /usr/sbin).Will passing the channel number and its value to it as $1 and $2 parameters. This allows for controlling the camera via the Remote Control Transmitter
-AHI (Artificial Horizon Indicator) ladder - Graphical AHI , that is drawn over the standard OSD.
+### Additional options.
+Forwarding of MSP packets via UDP.  
+Can monitor RC Channels values in FC and call the script `channels.sh` (located at /usr/bin or /usr/sbin).Will passing the channel number and its value to it as $1 and $2 parameters. This allows for controlling the camera via the Remote Control Transmitter.  
+AHI (Artificial Horizon Indicator) ladder - Graphical AHI , that is drawn over the standard OSD.  
 
 This project is based on these exceptional repos https://github.com/fpv-wtf/msp-osd and https://github.com/OpenIPC/osd
 
@@ -42,7 +42,7 @@ Font files for every Flight control firmwares have two versions - for 720p and f
 They are different for every FC, choose the appropriate pair.
 The program will read /etc/majestic.yaml and will choose the type of font that will be used based on the video resolution configured there.
 
-## To install.
+## To install:
 Copy msposd for the architecture you need on the cam.  
 ```
 curl -o /usr/bin/msposd https://github.com/tipoman9/msposd/tree/MSP_OSD/release/star6e/msposd
