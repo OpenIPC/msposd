@@ -1,12 +1,7 @@
  # MSPOSD
-A tool for drawing betaflight/inav/ardupilot MSP display port OSD over OpenIPC video stream.
+## A tool for drawing betaflight/inav/ardupilot MSP Display Port OSD over OpenIPC video stream.
 
-<img src="pics/AHI_OSD.png" alt="AHI OSD" width="640" height="480">
-
-![AHI OSD](pics/AHI_OSD.png)
-
-
-![alt text](pics/AHI_OSD.png "flight statistics")
+[![Video sample](pics/AHI_OSD.png)](https://www.youtube.com/watch?v=4907k5c7b4U)
 
 ```
 Usage: msposd [OPTIONS]
@@ -25,13 +20,14 @@ Usage: msposd [OPTIONS]
  --help           Display this help\n"
 ```
 
-Additional options
+###Additional options.
 Forwarding of MSP packets via UDP.
-Can monitor RC Channels, and call the script `channels.sh` (located at /usr/bin or /usr/sbin) passing the channel number and its value to it when changing as $1 and $2 parameters. An example of channels.sh is present.
-This allows for controlling the camera via the Remote Control Transmitter
+Can monitor RC Channels values in FC and call the script `channels.sh` (located at /usr/bin or /usr/sbin).Will passing the channel number and its value to it as $1 and $2 parameters. This allows for controlling the camera via the Remote Control Transmitter
 AHI (Artificial Horizon Indicator) ladder - Graphical AHI , that is drawn over the standard OSD.
 
-Example :
+This project is based on these exceptional repos https://github.com/fpv-wtf/msp-osd and https://github.com/OpenIPC/osd
+
+## Example :
 
 ```
 msposd  --master /dev/ttyS2 --baudrate 115200 --channels 7 --out 127.0.0.1:14555 -osd -r 20 --ahi 1 -v
@@ -46,7 +42,18 @@ Font files for every Flight control firmwares have two versions - for 720p and f
 They are different for every FC, choose the appropriate pair.
 The program will read /etc/majestic.yaml and will choose the type of font that will be used based on the video resolution configured there.
 
-To install.
-Copy msposd on the cam.
-Start it or include it OpenIPC scripts.
-Don't forget to copy the font files
+## To install.
+Copy msposd for the architecture you need on the cam.  
+```
+curl -o /usr/bin/msposd https://github.com/tipoman9/msposd/tree/MSP_OSD/release/star6e/msposd
+chmod 755 /usr/bin/msposd
+```
+Don't forget to copy the font files for you flight controller firmware!
+for INAV these would be
+```
+curl -O https://github.com/tipoman9/msposd/tree/MSP_OSD/fonts/inav/font_hd.png
+curl -O https://github.com/tipoman9/msposd/tree/MSP_OSD/fonts/inav/font.png
+```
+Start msposd or reference it in OpenIPC scripts.  
+Additional fonts can be downloaded from here: https://sites.google.com/view/sneaky-fpv/home 
+
