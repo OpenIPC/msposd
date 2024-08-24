@@ -1,6 +1,7 @@
  # MSPOSD
 ## A tool for drawing betaflight/inav/ardupilot MSP Display Port OSD over OpenIPC video stream.
 
+**Click the image below to watch a video sample:**
 [![Video sample](pics/AHI_OSD.png)](https://www.youtube.com/watch?v=4907k5c7b4U)
 
 ```
