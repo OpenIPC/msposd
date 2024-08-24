@@ -1,0 +1,30 @@
+
+
+# to compile for desktop
+sudo apt-get update
+sudo apt-get install libevent-dev
+make
+sudo apt-get install gdb
+
+# on desktop test, enable USB to serial
+sudo systemctl stop brltty
+sudo systemctl disable --now brltty brltty-udev
+sudo systemctl mask brltty brltty-udev
+
+sudo chmod 666 /dev/ttyUSB3
+msposd --channels 7 --master /dev/ttyUSB0 --baudrate 115200 --out 127.0.0.1:14550  -a 9 -f /tmp -t --osd
+
+#msp needs two-way communication
+
+make osd-x86 VERBOSE=1
+
+./build.sh star6e
+./build.sh x86
+
+cc msposd.c -I ./include -L/usr/lib/x86_64-linux-gnu/  -lcsfml-graphics -lcsfml-window -lcsfml-system -O1 -g -fsanitize=address -fno-omit-frame-pointer -Wall -Wextra -D_x86 -g -fsanitize=address -levent_core -o msposd
+
+scp ./osd-star6e root@192.168.1.88:/usr/bin/msposd
+scp ./release/star6e/msposd root@192.168.1.88:/usr/bin/msposd
+
+on the camera
+msposd --channels 7 --master /dev/ttyS2 --baudrate 115200  --osd -r 30

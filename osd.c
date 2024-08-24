@@ -144,10 +144,10 @@ static int stat_msp_msg_attitude=0;
 static int stat_screen_refresh_count=0;
 static int stat_draw_overlay_1=0, stat_draw_overlay_2=0, stat_draw_overlay_3=0;
 
-
+extern bool verbose;
 extern struct sockaddr_in sin_out;//= {.sin_family = AF_INET,};
 extern int out_sock;
-
+extern int AHI_Enabled;
 extern void showchannels(int count);
 extern void ProcessChannels();
 extern uint16_t channels[18];
@@ -397,32 +397,6 @@ int x_end = 1300;
 int y_end = 500;
 
  
-// Function to rotate a point (x, y) around the center of an image
- 
-
-// Function to rotate a point around the center of an image
-/*
-void rotate_point(Point original, Point img_center, double angle_degrees, Point *rotated) {
-    // Translate the point to move the center to the origin
-    int x_translated = original.x - img_center.x;
-    int y_translated = original.y - img_center.y;
-
-    // Convert the angle from degrees to radians
-    double angle_radians = angle_degrees * M_PI / 180.0;
-
-    // Compute the rotated positions using the rotation matrix
-    double cos_theta = cos(angle_radians);
-    double sin_theta = sin(angle_radians);
-
-    // Apply the rotation
-    rotated->x = (int)(x_translated * cos_theta - y_translated * sin_theta);
-    rotated->y = (int)(x_translated * sin_theta + y_translated * cos_theta);
-
-    // Translate the rotated point back to the original center
-    rotated->x += img_center.x;
-    rotated->y += img_center.y;
-}
-*/
  static void draw_AHI(){
       
     int OffsY= sin((last_pitch/10) * (M_PI / 180.0))*400;
@@ -440,13 +414,17 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
     Point original_point = {600, 500};  // Example point
     Point original_point2 = {1300, 500};  // Example point
     
-    drawLineI4Ex(bmpBuff.pData, bmpBuff.u32Width, bmpBuff.u32Height, original_point,original_point2, 7);
-    original_point = (Point){600, 480}; original_point2 = (Point){600, 520};
-    drawLineI4Ex(bmpBuff.pData, bmpBuff.u32Width, bmpBuff.u32Height, original_point,original_point2, 7);
-    original_point = (Point){1300, 480}; original_point2 = (Point){1300, 520};
-    drawLineI4Ex(bmpBuff.pData, bmpBuff.u32Width, bmpBuff.u32Height, original_point,original_point2, 7);
+   // drawLineI4Ex(bmpBuff.pData, bmpBuff.u32Width, bmpBuff.u32Height, original_point,original_point2, 7);
+    int linewidth=400;
+    int linethickness=2;
+    if (OVERLAY_WIDTH>1500){
+        linewidth=500;
+        linethickness=3;
+    }
 
-     drawRectangleI4(bmpBuff.pData, 600 , 400 , 700 , 6, COLOR_GREEN, 1);
+    drawLine(bmpBuff.pData, img_center.x-linewidth/2 , img_center.y, img_center.x+linewidth/2, img_center.y, COLOR_WHITE, linethickness);
+
+     //drawRectangleI4(bmpBuff.pData, 600 , 400 , 700 , 6, COLOR_GREEN, 1);
 
  }
 
@@ -487,15 +465,9 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
     }
     if (horizonInvertPitch == false){
         pitch_degree=pitch_degree*-1;
-    }
-    //weird rounding issue where decimals make ladder dissappear
-    roll_degree = round(roll_degree);
-    //pitch_degree = round(pitch_degree);
+    }   
 
-    //std::string str = std::to_string(pitch_degree);
-    //qDebug()<<"Roll:"<<roll_degree<<" Pitch:"<<pitch_degree<< " : " << str.c_str();
-
-    int TiltY= - 150;//pixels, negative value means up
+    int TiltY= - 100;//pixels offset on the vertical, negative value means up
     const int pos_x= OVERLAY_WIDTH/2;
     const int pos_y= (OVERLAY_HEIGHT/2)  + TiltY;
     const int width_ladder= 100*horizonWidth;
@@ -504,14 +476,6 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
 
 
     if(/*show_center_indicator*/true){
-
-/*
-        drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-50, px+100,pos_y-60, COLOR_WHITE);
-        drawLineI4AA(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-48, px+100,pos_y-58);
-        drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-46, px+100,pos_y-56, COLOR_WHITE);
-        drawLineI4AA(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-45, px+100,pos_y-55);
-        drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-40, px+100,pos_y-50, COLOR_BLACK);
-*/
 
         //painter->setPen(m_color);
         // Line always drawn in the center to have some orientation where the center is
@@ -792,9 +756,11 @@ static void draw_screenBMP(){
 
     uint64_t step2=get_time_ms();  
 
-    //draw_AHI();
+    if (AHI_Enabled==2)
+        draw_AHI();
     
-    draw_Ladder();
+    if (AHI_Enabled==1 || AHI_Enabled>2)
+        draw_Ladder();        
     
     stat_screen_refresh_count++;
     uint64_t step3=get_time_ms();  
@@ -874,10 +840,11 @@ static void clear_screen()
             bmpBuff.pData = memset(bmpBuff.pData, 0xFF , (bmpBuff.u32Height * bmpBuff.u32Width * PIXEL_FORMAT_BitsPerPixel / 8) );
 
         LastCleared=(get_time_ms());
-        printf("%lu Clear screen\n",(uint32_t)(LastCleared%10000));
+        //printf("%lu Clear screen\n",(uint32_t)(LastCleared%10000));
         //LastDrawn=(get_time_ms())+500;///give 200ms no refresh  to load data in buffer 
     }else
-         printf("%lu Clear screen skipped\n",(uint32_t)((uint32_t)get_time_ms())%10000 );
+        if (verbose)
+            printf("%lu Clear screen skipped\n",(uint32_t)((uint32_t)get_time_ms())%10000 );
     //LastDrawn=(get_time_ms())+200;//give 120ms more to load data 
 }
 static int draws=0;
@@ -994,7 +961,7 @@ int GetMajesticVideoConfig(){
     if (strlen(sizeValue) > 0) {
         // Use sscanf to parse the size value into width and height
         if (sscanf(sizeValue, "%dx%d", &width, &height) == 2) {
-            printf("Width: %d, Height: %d\n", width, height);
+            printf("Majestic width:%d,height:%d\n", width, height);
         } else {
             printf("Failed to parse size value. %s\n",sizeValue);
             height = 1080;
@@ -1025,8 +992,8 @@ static void InitMSPHook(){
  
     int height = GetMajesticVideoConfig();
     //height=1080;
-    printf("Video Mode %dp\r\n",height);
-    if (height<800 && height>400){
+    
+    if (height<1000 && height>400){
         font_suffix = "_hd";
         OVERLAY_WIDTH=1200;
         OVERLAY_HEIGHT=700;
@@ -1040,6 +1007,8 @@ static void InitMSPHook(){
         current_display_info.font_width = 36;
         current_display_info.font_height = 54;
     }
+    printf("Video Mode %dp. Characters matrix : %d:%d, Fontsize:%d:%d\r\n",
+        height,current_display_info.char_width,current_display_info.char_height,current_display_info.font_width, current_display_info.font_height);
 
     snprintf(font_load_name, 255, "%sfont%s.png", font_path, font_suffix);
      
@@ -1120,14 +1089,16 @@ static void InitMSPHook(){
 
     #ifdef __SIGMASTAR__            
         int s32Ret = MI_RGN_Init(&g_stPaletteTable);
-        printf("MI_RGN_Init results: %d \r\n", s32Ret);
+        if (verbose)
+            printf("MI_RGN_Init results: %d \r\n", s32Ret);
         if (s32Ret)
             fprintf(stderr, "[%s:%d]RGN_Init failed with %#x!\n", __func__, __LINE__, s32Ret);
     #endif
 
-        //THIS IS NEEDED, the main 
+        //THIS IS NEEDED, the main region to draw inside
         rgn=create_region(&osds[FULL_OVERLAY_ID].hand, osds[FULL_OVERLAY_ID].posx, osds[FULL_OVERLAY_ID].posy, OVERLAY_WIDTH, OVERLAY_HEIGHT);
-        printf("Create_region PixelFormat:%d Size: %d:%d results: %d \r\n", PIXEL_FORMAT_DEFAULT, OVERLAY_WIDTH,OVERLAY_HEIGHT, rgn);
+        if (verbose)
+            printf("Create_region PixelFormat:%d Size: %d:%d results: %d \r\n", PIXEL_FORMAT_DEFAULT, OVERLAY_WIDTH,OVERLAY_HEIGHT, rgn);
 
         //LOGO TEST, for TEST ONLY, loads a file for several seconds as overlay
         char img[32];//test to show a simple files
@@ -1181,9 +1152,10 @@ static void InitMSPHook(){
                 MI_RGN_CanvasInfo_t stCanvasInfo; 
                 memset(&stCanvasInfo,0,sizeof(stCanvasInfo));                     
                 //memset(&stCanvasInfo,0,sizeof(stCanvasInfo));
-                s32Ret =  GetCanvas(osds[FULL_OVERLAY_ID].hand, &stCanvasInfo);                                       
-                printf("stCanvasInfo  CanvasStride: %d , BMP_Stride:%d Size: %d:%d \r\n", 
-                    stCanvasInfo.u32Stride, getRowStride(bitmap.u32Width, PIXEL_FORMAT_BitsPerPixel), bitmap.u32Width,bitmap.u32Height);
+                s32Ret =  GetCanvas(osds[FULL_OVERLAY_ID].hand, &stCanvasInfo);      
+                if (verbose)                                 
+                    printf("stCanvasInfo  CanvasStride: %d , BMP_Stride:%d Size: %d:%d \r\n", 
+                stCanvasInfo.u32Stride, getRowStride(bitmap.u32Width, PIXEL_FORMAT_BitsPerPixel), bitmap.u32Width,bitmap.u32Height);
                 int byteWidth =  bitmap.u32Width ; // Each row's width in bytes (I4 = 4 bits per pixel)
                 if (PIXEL_FORMAT_DEFAULT==4)
                     byteWidth =  (bitmap.u32Width) * PIXEL_FORMAT_BitsPerPixel / 8;
@@ -1205,7 +1177,8 @@ static void InitMSPHook(){
                 */
 
                 s32Ret = MI_RGN_UpdateCanvas(osds[FULL_OVERLAY_ID].hand);
-                printf("MI_RGN_UpdateCanvas completed byteWidth:%d!\n",byteWidth);
+                if (verbose)
+                    printf("MI_RGN_UpdateCanvas completed byteWidth:%d!\n",byteWidth);
                 if  (s32Ret!= MI_RGN_OK)    
                     fprintf(stderr, "MI_RGN_UpdateCanvas failed with %#x!\n", __func__, __LINE__, s32Ret);                 
 #elif _x86 
@@ -1238,7 +1211,7 @@ static void InitMSPHook(){
                     // Cleanup resources
                     sfSprite_destroy(sprite);
                     sfTexture_destroy(texture);
-                    printf("Test show bitmap s\r\n");
+                    //printf("Test show bitmap s\r\n");
                     sfRenderWindow_display(window);
 
 #endif
@@ -1261,6 +1234,9 @@ static void InitMSPHook(){
                 //bmp.u32Height = current_display_info.font_height * current_display_info.char_height;
                 //bmp.pData = malloc( PIXEL_FORMAT_BitsPerPixel  * bmp.u32Height * getRowStride(bmp.u32Width , PIXEL_FORMAT_BitsPerPixel));
 
+                if (bitmapFnt.u32Width*(cols+1)  > bitmap.u32Width + bitmapFnt.u32Width )
+                    cols = (bitmap.u32Width / bitmapFnt.u32Width) -1;
+
                 for (int i=0; i<cols ; i++ )
                     copyRectI4(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
                                 bitmap.pData,bitmap.u32Width, bitmap.u32Height,
@@ -1273,7 +1249,8 @@ static void InitMSPHook(){
                 */
                 
                 #ifdef __SIGMASTAR__   
-                    printf("Set Font Review %d:%d", bitmap.u32Width, bitmap.u32Height);
+                    if (verbose)
+                        printf("Set Font Review %d:%d", bitmap.u32Width, bitmap.u32Height);
                     //For some reason this fails...?!
                     //set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);//bitmap must match region dimensions!
                     
@@ -1306,14 +1283,16 @@ static void InitMSPHook(){
                     // Cleanup resources
                     sfSprite_destroy(sprite);
                     sfTexture_destroy(texture);
-                    printf("Test show bitmap s\r\n");
+                    if (verbose)
+                        printf("Test show bitmap s\r\n");
                     sfRenderWindow_display(window);
             #endif
                 //free(bitmap.pData);
             }
 
             if (prepared){
-                printf("set_LOGO with u32Height:%d enPixelFormat %d\n",bitmap.u32Height, bitmap.enPixelFormat);                   
+                if (verbose)
+                    printf("set_LOGO with u32Height:%d enPixelFormat %d\n",bitmap.u32Height, bitmap.enPixelFormat);                   
                 int s32Ret=set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);
                 if(s32Ret!=0)
                     printf("ERROR set_bitmap%d \n",s32Ret);  
@@ -1322,6 +1301,7 @@ static void InitMSPHook(){
             }
 
         }else
+           if (verbose)
                 printf("No logo file %s \n",img);
     
 
@@ -1331,7 +1311,7 @@ static void InitMSPHook(){
         int fY=54;
         int fX=36;
 
-        printf("%d\r",osds[FULL_OVERLAY_ID].posx);      
+        printf("FAST LAYOUT %d\r",osds[FULL_OVERLAY_ID].posx);      
         osds[FAST_OVERLAY_ID].width=fcW * fX; //  OVERLAY_WIDTH/3; 
         osds[FAST_OVERLAY_ID].height = fcH*fY;
         
@@ -1362,5 +1342,7 @@ static void CloseMSP(){
     #endif
     if (bitmapFnt.pData!=NULL)
         free(bitmapFnt.pData);
+    if (bmpBuff.pData!=NULL)
+        free(bmpBuff.pData);
 
 }

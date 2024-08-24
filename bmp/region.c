@@ -9,6 +9,7 @@ PIXEL_FORMAT_DEFAULT=E_MI_RGN_PIXEL_FORMAT_I4; //0 for PIXEL_FORMAT_1555 , 4 for
  PIXEL_FORMAT_DEFAULT=3;   //0 for PIXEL_FORMAT_1555 , 4 for E_MI_RGN_PIXEL_FORMAT_I8
 #endif
 
+extern bool verbose;
 const double inv16 = 1.0 / 16.0;
 
 int create_region(int *handle, int x, int y, int width, int height)
@@ -59,14 +60,15 @@ int create_region(int *handle, int x, int y, int width, int height)
 #endif
     if (s32Ret)
     {
-        fprintf(stderr, "[%s:%d]RGN_GetAttr failed with %#x , creating region %d...\n", __func__, __LINE__, s32Ret, *handle);
+        if (verbose)
+            fprintf(stderr, "[%s:%d]RGN_GetAttr failed with %#x , creating region %d...\n", __func__, __LINE__, s32Ret, *handle);
 #ifdef __SIGMASTAR__
         s32Ret = MI_RGN_Create(*handle, &stRegion);
 #else
         s32Ret = HI_MPI_RGN_Create(*handle, &stRegion);
 #endif
         if (s32Ret)
-        {
+        {            
             fprintf(stderr, "[%s:%d]RGN_Create failed with %#x!\n", __func__, __LINE__, s32Ret);
             return -1;
         }
@@ -106,14 +108,16 @@ int create_region(int *handle, int x, int y, int width, int height)
     s32Ret = HI_MPI_RGN_GetDisplayAttr(*handle, &stChn, &stChnAttrCurrent);
 #endif
     if (s32Ret)
-        fprintf(stderr, "[%s:%d]RGN_GetDisplayAttr failed with %#x %d, attaching...\n", __func__, __LINE__, s32Ret, *handle);
+        if (verbose)
+            fprintf(stderr, "[%s:%d]RGN_GetDisplayAttr failed with %#x %d, attaching...\n", __func__, __LINE__, s32Ret, *handle);
 #ifdef __SIGMASTAR__
     else if (stChnAttrCurrent.stPoint.u32X != x || stChnAttrCurrent.stPoint.u32Y != y)
 #else
     else if (stChnAttrCurrent.unChnAttr.stOverlayChn.stPoint.s32X != x || stChnAttrCurrent.unChnAttr.stOverlayChn.stPoint.s32Y != y)
 #endif
     {
-        fprintf(stderr, "[%s:%d] Position has changed, detaching handle %d from channel %d...\n", __func__, __LINE__, *handle, &stChn.s32ChnId);
+        if (verbose)
+            fprintf(stderr, "[%s:%d] Position has changed, detaching handle %d from channel %d...\n", __func__, __LINE__, *handle, &stChn.s32ChnId);
 #ifdef __SIGMASTAR__
         stChn.s32OutputPortId = 1;
         MI_RGN_DetachFromChn(*handle, &stChn);
@@ -351,7 +355,8 @@ int set_bitmapEx(int handle, BITMAP *bitmap, int BitsPerPixel){
     */
 
     s32Ret = MI_RGN_UpdateCanvas(handle);
-    printf("MI_RGN_UpdateCanvas completed byteWidth:%d!\n",byteWidth);
+    if (verbose)
+        printf("MI_RGN_UpdateCanvas completed byteWidth:%d!\n",byteWidth);
 #endif
 return   s32Ret;   
 }
@@ -390,7 +395,8 @@ void unload_region(int *handle)
      int s32Result = MI_RGN_GetCanvasInfo(handle, stCanvasInfo);
      if (s32Result != MI_RGN_OK)    
          return s32Result;
-    printf("MI_RGN_GetCanvas stride:%d  stSize:%d:%d  ePixelFmt:%d !\n", 
+    if (verbose)
+        printf("MI_RGN_GetCanvas stride:%d  stSize:%d:%d  ePixelFmt:%d !\n", 
     stCanvasInfo->u32Stride, stCanvasInfo->stSize.u32Width , stCanvasInfo->stSize.u32Height , stCanvasInfo->ePixelFmt);
     return 0;     
  }

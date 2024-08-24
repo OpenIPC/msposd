@@ -1,6 +1,6 @@
 mavfwd
 tmp/**
-notes.txt
 toolchain/
-*.png
+/*.png
+majestic.yaml
 

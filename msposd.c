@@ -488,7 +488,7 @@ void ProcessChannels(){
 	printf("Starting(%d): %s n",ChannelCmds,buff);
 	LastStart=get_current_time_ms();
     
-	if (ChannelCmds>0){//intentionally skip the first command, since when stating mavfwd it will always receive some channel value and execute the script
+	if (ChannelCmds>0){//intentionally skip the first command, since when stating  it will always receive some channel value and execute the script
     	system(buff);
 		
 	}
@@ -633,8 +633,9 @@ static void serial_read_cb(struct bufferevent *bev, void *arg)
 			last_stat=(get_time_ms());
 			if (stat_screen_refresh_count==0)
 				stat_screen_refresh_count++;
-			printf("UART Events:%u MessagesTTL:%u AttitMSGs:%u Bytes/Sec:%u FPS:%u, avg time per frame ms:%d | %d | %d | \n",stat_pckts,stat_msp_msgs,stat_msp_msg_attitude, 
-				stat_bytes, stat_screen_refresh_count,stat_draw_overlay_1/stat_screen_refresh_count,stat_draw_overlay_2/stat_screen_refresh_count,stat_draw_overlay_3/stat_screen_refresh_count);
+			if (verbose)
+				printf("UART Events:%u MessagesTTL:%u AttitMSGs:%u Bytes/Sec:%u FPS:%u, avg time per frame ms:%d | %d | %d | \n",stat_pckts,stat_msp_msgs,stat_msp_msg_attitude, 
+					stat_bytes, stat_screen_refresh_count,stat_draw_overlay_1/stat_screen_refresh_count,stat_draw_overlay_2/stat_screen_refresh_count,stat_draw_overlay_3/stat_screen_refresh_count);
 			stat_screen_refresh_count=0;
 			stat_pckts=0;
 			stat_bytes=0;
@@ -918,10 +919,6 @@ if (temp_tmr) {
 
 	return ret;
 }
-
- 
-
-//COMPILE : gcc -o program mavfwd.c -levent -levent_core
 
 int main(int argc, char **argv)
 {

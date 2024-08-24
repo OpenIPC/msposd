@@ -1166,7 +1166,7 @@ void convertRGBAToI4(
     unsigned char u8Value = 0;
     int u32Stride = getRowStride(width, 4);
 
-    printf("I4 %d:%d Stride:%d\n", width, height, u32Stride);
+   // printf("I4 %d:%d Stride:%d\n", width, height, u32Stride);
 
     for (uint32_t u32Y = 0; u32Y < height; ++u32Y) {
         for (int32_t u32X = 0; u32X < width; ++u32X) {
