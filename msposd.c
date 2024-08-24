@@ -81,20 +81,24 @@ static void print_usage()
 {
 	printf("Usage: msposd [OPTIONS]\n"
 	       "Where:\n"
-	       "  -m --master      Local MAVLink master port (%s by default)\n"
-	       "  -b --baudrate    Serial port baudrate (%d by default)\n"
-	       "  -c --channels    RC Channel to listen for commands (0 by default) and call channels.sh\n"
-	       "  -w --wait        Delay after each command received(2000ms default)\n"
-		   "  -r --fps         Max MSP Display refresh rate\n"
-		   "  -p --persist     How long a channel value must persist to generate a command - for multiposition switches (0ms default)\n"
-	       "  -t --temp        Inject SoC temperature into HUD\n"
-		   "  -d --wfb         Monitors wfb.log file and reports errors via HUD messages\n"
-		   "  -s --osd         Parse MSP and draw OSD over the video"
-		   "  -a --ahi         Draw graphic AHI"
-	       "  -v --verbose     Display each packet, default not\n"	       
-	       "  --help         Display this help\n",
-	       default_master, default_baudrate, defualt_out_addr,
-	       default_in_addr, aggregate);
+
+ "	-m --master      Serial port to receive MSP (%s by default)\n"
+ "	-b --baudrate    Serial port baudrate (%d by default)\n"
+ "	-o --output	  	 UDP endpoint to forward aggregated MSP messages (%s)\n"
+ "	-c --channels    RC Channel to listen for commands (0 by default) and exec channels.sh\n"
+ "	-w --wait        Delay after each command received(2000ms default)\n"
+ "	-r --fps         Max MSP Display refresh rate(5..50)\n"
+ "	-p --persist     How long a channel value must persist to generate a command - for multiposition switches (0ms default)\n"
+ "	-t --temp        Read SoC temperature\n"
+ "	-d --wfb         Monitors wfb.log file and reports errors via HUD messages\n"
+ "	-s --osd         Parse MSP and draw OSD over the video\n"
+ "	-a --ahi         Draw graphic AHI, mode [0-No, 2-Simple 1-Ladder, 3-LadderEx]\n"
+ "	-v --verbose     Show debug infot\n"	       
+ "	--help           Display this help\n",
+
+
+
+	       default_master, default_baudrate, defualt_out_addr);
 }
 
 static speed_t speed_by_value(int baudrate)

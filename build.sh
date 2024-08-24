@@ -39,6 +39,7 @@ elif [ "$1" = "star6e" ]; then
 elif [ "$1" = "x86" ]; then
 	DRV=$PWD
 	make -C .  DRV=$DRV $1
+	strip release/$1/msposd
 else
 	echo "Usage: $0 [goke|hisi|star6b0|star6e]"
 	exit 1

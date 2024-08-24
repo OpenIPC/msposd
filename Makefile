@@ -49,5 +49,6 @@ x86:
 	$(eval CFLAGS += -D_x86)
 	$(eval LIB = -lcsfml-graphics -lcsfml-window -lcsfml-system -lm)
 	$(eval TARGET = x86)
+	$(eval OUT = x86)
 	$(BUILD)
 #cc msposd.c -I ./include -L/usr/lib/x86_64-linux-gnu/  -lcsfml-graphics -lcsfml-window -lcsfml-system -O1 -g -fsanitize=address -fno-omit-frame-pointer -Wall -Wextra -D_x86 -g -fsanitize=address -levent_core -o msposd
