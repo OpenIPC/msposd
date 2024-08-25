@@ -144,6 +144,7 @@ static int stat_msp_msg_attitude=0;
 static int stat_screen_refresh_count=0;
 static int stat_draw_overlay_1=0, stat_draw_overlay_2=0, stat_draw_overlay_3=0;
 
+extern bool AbortNow;
 extern bool verbose;
 extern struct sockaddr_in sin_out;//= {.sin_family = AF_INET,};
 extern int out_sock;
@@ -712,6 +713,12 @@ static void draw_screenBMP(){
 
     for (int y = 0; y < current_display_info.char_height; y++){
         for (int x = 0; x < current_display_info.char_width; x++){
+
+            if (AbortNow){//There is request to close app, do not copy to buffer since it may be disposed already.
+                printf("Drawing aborted. \r\n");
+                return;
+            }
+
             uint16_t c = character_map[x][y];
             if (c != 0){
                 uint8_t page = 0;
@@ -1337,13 +1344,20 @@ static void InitMSPHook(){
 }
 
 static void CloseMSP(){
-     munmap(osds, sizeof(*osds) * MAX_OSD);
+     int deinit=0;
      int s32Ret=0;
     #ifdef __SIGMASTAR__
-    s32Ret = MI_RGN_DeInit();
-    if (s32Ret)
+
+    //s32Ret = MI_RGN_Destroy(&osds[FULL_OVERLAY_ID].hand);
+    s32Ret = unload_region(&osds[FULL_OVERLAY_ID].hand);
+
+    deinit = MI_RGN_DeInit();
+    if (deinit)
         printf("[%s:%d]RGN_DeInit failed with %#x!\n", __func__, __LINE__, s32Ret);        
     #endif
+
+    munmap(osds, sizeof(*osds) * MAX_OSD);
+
     if (bitmapFnt.pData!=NULL)
         free(bitmapFnt.pData);
     if (bmpBuff.pData!=NULL)
@@ -1351,6 +1365,6 @@ static void CloseMSP(){
         
     int res_mun=munmap(osds, sizeof(*osds) * MAX_OSD);
 
-    printf("\nClosed resources! MI_RGN_DeInit=%d, MemFree:%d\n",s32Ret, res_mun);        
+    printf("RGN_Destroy=%X, RGN_DeInit:%X\n",s32Ret, deinit);        
 
 }

@@ -35,6 +35,7 @@
 #define MAX_MTU 9000
 
 
+bool AbortNow=false;
 bool verbose = false;
 bool ParseMSP = false;
 int MSP_PollRate=20;
@@ -173,7 +174,7 @@ static void signal_cb(evutil_socket_t fd, short event, void *arg)
 {
 	struct event_base *base = arg;
 	(void)event;
-
+	AbortNow=true;
 	printf("Exit Request: %s signal received\n", strsignal(fd));
 	event_base_loopbreak(base);
 }

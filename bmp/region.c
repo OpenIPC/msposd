@@ -361,8 +361,9 @@ int set_bitmapEx(int handle, BITMAP *bitmap, int BitsPerPixel){
 return   s32Ret;   
 }
 
-void unload_region(int *handle)
+int unload_region(int *handle)
 {
+int s32Ret =0;
 #ifdef __SIGMASTAR__
     MI_RGN_ChnPort_t stChn;
     stChn.s32DevId = 0;
@@ -373,7 +374,7 @@ void unload_region(int *handle)
     MI_RGN_DetachFromChn(*handle, &stChn);
     stChn.s32OutputPortId = 0;
     MI_RGN_DetachFromChn(*handle, &stChn);
-    int s32Ret = MI_RGN_Destroy(*handle);
+    s32Ret = MI_RGN_Destroy(*handle);
     if (s32Ret)
         fprintf(stderr, "[%s:%d]RGN_Destroy failed with %#x %d!\n", __func__, __LINE__, s32Ret, *handle);
 #elif __GOKE__
@@ -383,10 +384,11 @@ void unload_region(int *handle)
 
     stChn.enModId = HI_ID_VENC;
     HI_MPI_RGN_DetachFromChn(*handle, &stChn);
-    int s32Ret = HI_MPI_RGN_Destroy(*handle);
+    s32Ret = HI_MPI_RGN_Destroy(*handle);
     if (s32Ret)
         fprintf(stderr, "[%s:%d]RGN_Destroy failed with %#x %d!\n", __func__, __LINE__, s32Ret, *handle);
 #endif
+    return s32Ret;
     
 }
 #ifdef __SIGMASTAR__
