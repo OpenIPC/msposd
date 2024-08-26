@@ -26,7 +26,9 @@ Forwarding of MSP packets via UDP.
 Can monitor RC Channels values in FC and call the script `channels.sh` (located at /usr/bin or /usr/sbin).Will passing the channel number and its value to it as $1 and $2 parameters. This allows for controlling the camera via the Remote Control Transmitter.  
 AHI (Artificial Horizon Indicator) ladder - Graphical AHI , that is drawn over the standard OSD.  
 
-This work is based on these exceptional projects: https://github.com/fpv-wtf/msp-osd and https://github.com/OpenIPC/osd
+This work is based on these exceptional projects:
+- https://github.com/fpv-wtf/msp-osd
+- https://github.com/OpenIPC/osd
 
 ## Example :
 
