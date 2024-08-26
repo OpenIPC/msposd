@@ -4,37 +4,16 @@
         {
             "label": "gcc build",
             "type": "shell",
-            "command": "cc",
-            "args": [
-                "msposd.c",
-                "bmp/bitmap.c",
-                "bmp/region.c",
-                "osd/net/network.c",
-                "osd/msp/msp.c",
-                "osd/msp/msp_displayport.c",
-                "libpng/lodepng.c",
-                "-I",
-                "./sdk/gk7205v300/include",
-                "-L",
-                "-O1",
-                "-g",
-                "-fno-omit-frame-pointer",
-                "-Wall",
-                "-Wextra",
-                "-D_x86",
-                "-lcsfml-graphics",
-                "-lcsfml-window",
-                "-lcsfml-system",
-                "-levent_core",
-                "-lm",
-                "-DVERSION_STRING=\"1\"",
-                "-o",
-                "msposd"
-            ],
+            "command": "make x86",
+            "args": [],
             "group": {
                 "kind": "build",
                 "isDefault": true
-            }
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "Build project using Makefile"
         }
     ]
 }

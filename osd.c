@@ -306,6 +306,14 @@ static const display_info_t hd_display_info = {
     .num_chars = 512,
 };
 
+static const display_info_t fhd_display_info = {
+    .char_width = 50,
+    .char_height = 18,
+    .font_width = 36,
+    .font_height = 54,
+    .num_chars = 512,
+};
+
 /*
 36*50=1800
 54*18=972
@@ -882,11 +890,16 @@ static void msp_callback(msp_msg_t *msp_message)
 }
 
 static void set_options(uint8_t font, uint8_t is_hd) {
+    /*
     if(is_hd) { 
         current_display_info = hd_display_info;
     } else {
         current_display_info = sd_display_info;
     }
+    */
+   //we need FullHD option?!
+    if (verbose)
+        printf("FC set mode:%d",is_hd);
 }
 
 
@@ -1012,9 +1025,7 @@ static void InitMSPHook(){
     }else{
         OVERLAY_WIDTH=1800;
         OVERLAY_HEIGHT=1000;
-        current_display_info = hd_display_info;
-        current_display_info.font_width = 36;
-        current_display_info.font_height = 54;
+        current_display_info = fhd_display_info;
     }
     printf("Video Mode %dp. Characters matrix : %d:%d, Fontsize:%d:%d\r\n",
         height,current_display_info.char_width,current_display_info.char_height,current_display_info.font_width, current_display_info.font_height);

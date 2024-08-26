@@ -6,7 +6,7 @@
             "name": "C Debug",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/msposd",
+            "program": "${workspaceFolder}/release/x86/msposd",
             "args": [                
                 "--master",
                 "/dev/ttyUSB0",
@@ -45,8 +45,7 @@
             "preLaunchTask": "gcc build",
             "linux": {
                 "preLaunchTask": "gcc build"
-            }
-            
+            }            
         }
     ]
 }
