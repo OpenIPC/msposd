@@ -326,8 +326,9 @@ static const display_info_t fhd_display_info = {
 #define TRANSPARENT_COLOR 0xFBDE
 
 //Not implemented, draw the center part of the screen with much faster rate to keep CPU load low
-#define FULL_OVERLAY_ID 1
-#define FAST_OVERLAY_ID 2
+//overlays 1 to 8 are taken by OSD tool
+#define FULL_OVERLAY_ID 9
+#define FAST_OVERLAY_ID 8
 
 char font_2_name[256];
 
@@ -899,7 +900,7 @@ static void set_options(uint8_t font, uint8_t is_hd) {
     */
    //we need FullHD option?!
     if (verbose)
-        printf("FC set mode:%d",is_hd);
+        printf("FC set mode:%d\r\n",is_hd);
 }
 
 
@@ -1091,7 +1092,7 @@ static void InitMSPHook(){
     osds = mmap(NULL, sizeof(*osds) * MAX_OSD,
                 PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
 
-    for (int id = 0; id < MAX_OSD; id++){
+    for (int id = 8; id < MAX_OSD; id++){
         osds[id].hand = id;
         osds[id].size = DEF_SIZE;
         osds[id].posx = DEF_POSX;

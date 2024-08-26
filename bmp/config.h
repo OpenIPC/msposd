@@ -7,7 +7,8 @@
 #define DEF_SIZE 32.0f
 #define DEF_TIMEFMT "%Y/%m/%d %H:%M:%S"
 #define MAX_CONN 16
-#define MAX_OSD 8
+//get two more than osd-tool in order not to interfere with it
+#define MAX_OSD 10
 #define PORT "9000"
 #define QUEUE_SIZE 1000000
 #define SUPP_UTF32
