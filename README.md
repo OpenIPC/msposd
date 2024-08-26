@@ -1,5 +1,6 @@
- # MSPOSD
-## A tool for drawing betaflight/inav/ardupilot MSP Display Port OSD over OpenIPC video stream.
+## MSPOSD
+
+### A tool for drawing betaflight/inav/ardupilot MSP Display Port OSD over OpenIPC video stream.
 
 **Click the image below to watch a video sample:**
 [![Video sample](pics/AHI_OSD.png)](https://www.youtube.com/watch?v=4907k5c7b4U)
@@ -30,7 +31,7 @@ This work is based on these exceptional projects:
 - https://github.com/fpv-wtf/msp-osd
 - https://github.com/OpenIPC/osd
 
-## Example :
+### Example :
 
 ```
 msposd  --master /dev/ttyS2 --baudrate 115200 --channels 7 --out 127.0.0.1:14555 -osd -r 20 --ahi 1 -v
@@ -45,7 +46,7 @@ Font files for each Flight Controller firmware have two versions—one for 720p 
 They vary depending on the Flight Controller, so choose the appropriate pair.
 The program will read from /etc/majestic.yaml and will select the type of font to use based on the video resolution configured there.
 
-## To install:
+### To install:
 Copy msposd for the architecture you need on the cam.  
 Prebuild binaries for x86 and SigmaStar are at release/ folder.  
 ```
@@ -60,4 +61,3 @@ curl -L -o font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fon
 ```
 Start msposd or reference it in OpenIPC scripts.  
 Excellent additional fonts can be found here: https://sites.google.com/view/sneaky-fpv/home 
-
