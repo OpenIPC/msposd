@@ -31,7 +31,7 @@ This work is based on these exceptional projects:
 - https://github.com/fpv-wtf/msp-osd
 - https://github.com/OpenIPC/osd
 
-### Example :
+### Example:
 
 ```
 msposd  --master /dev/ttyS2 --baudrate 115200 --channels 7 --out 127.0.0.1:14555 -osd -r 20 --ahi 1 -v
@@ -60,4 +60,8 @@ curl -L -o font.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/
 curl -L -o font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/inav/font_hd.png
 ```
 Start msposd or reference it in OpenIPC scripts.  
-Excellent additional fonts can be found here: https://sites.google.com/view/sneaky-fpv/home 
+
+### Acknowledgements:
+- Default fonts included in this project are created by SNEAKY_FPV.  These and other excellent additional fonts can be found here: https://sites.google.com/view/sneaky-fpv/home
+- https://github.com/fpv-wtf/msp-osd
+- https://github.com/OpenIPC/osd
