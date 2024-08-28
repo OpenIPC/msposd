@@ -23,6 +23,7 @@
 #endif
 #include "bmp/region.h"
 #include "bmp/bitmap.h"
+#include "bmp/text.h"
 #include "libpng/lodepng.h"
 
 
@@ -152,6 +153,9 @@ extern int AHI_Enabled;
 extern void showchannels(int count);
 extern void ProcessChannels();
 extern uint16_t channels[18];
+extern int GetTempSigmaStar();
+
+
 static void rx_msp_callback(msp_msg_t *msp_message)
 {
     // Process a received MSP message from FC and decide whether to send it to the PTY (DJI) or UDP port (MSP-OSD on Goggles)
@@ -393,10 +397,14 @@ static long cntr=-10;
 
 int center_refresh=0;
 
+/// @brief Where to place the message, 0 upper left, 1 -upper middle , 2 - upper right, 3 - upper row moving 
+int msg_layout=0;
+/// @brief Color type to use to render the font. 0 - White, 1 - Black edges on white font
+int msg_colour=0;
 
 static unsigned long long LastCleared=0;
 static unsigned long long LastDrawn=0;
-
+static bool osd_msg_enabled = false;
  
 //This will be where we will copy font icons and then pass to Display API  to render over video.
 BITMAP bmpBuff;
@@ -684,6 +692,272 @@ int y_end = 500;
  
  }
 
+
+static void fill(char* str)
+{
+    unsigned int rxb_l, txb_l, cpu_l[6];
+    char out[80] = "";
+    char param = 0;
+    int ipos = 0, opos = 0;
+
+    while(str[ipos] != 0)
+    {
+        if (str[ipos]=='\r' ||  str[ipos]=='\n')
+            str[ipos]=' ';
+        if (str[ipos] != '&')
+        {
+            strncat(out, str + ipos, 1);
+            opos++;
+        }
+        else if (str[ipos + 1] == 'Z')
+        {
+            ipos++;
+            struct ifaddrs *ifaddr, *ifa;
+            if (getifaddrs(&ifaddr) == -1) continue;
+
+            for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next)
+            { 
+                if (equals(ifa->ifa_name, "lo")) continue;
+                if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_PACKET) continue;
+                if (!ifa->ifa_data) continue;
+
+                struct rtnl_link_stats *stats = ifa->ifa_data;
+                char b[32];
+                sprintf(b, "R:%dKbps S:%dKbps", 
+                    (stats->rx_bytes - rxb_l) / 1024, (stats->tx_bytes - txb_l) / 1024);
+                strcat(out, b);
+                opos += strlen(b);
+                rxb_l = stats->rx_bytes;
+                txb_l = stats->tx_bytes;
+                break;
+            }
+            
+            freeifaddrs(ifaddr);
+        }
+        else if (str[ipos + 1] == 'C')
+        {
+            ipos++;
+            char tmp[6];
+            unsigned int cpu[6];
+#ifdef __SIGMASTAR__            
+            FILE *stat = fopen("/proc/stat", "r");
+            fscanf(stat, "%s %u %u %u %u %u %u",
+                tmp, &cpu[0], &cpu[1], &cpu[2], &cpu[3], &cpu[4], &cpu[5]);
+            fclose(stat);
+#else
+            
+#endif
+            char c[5];
+            char avg = 100 - (cpu[3] - cpu_l[3]) / sysconf(_SC_NPROCESSORS_ONLN);
+            sprintf(c, "%d%%", avg);
+            strcat(out, c);
+            opos += strlen(c);
+            for (int i = 0; i < sizeof(cpu) / sizeof(cpu[0]); i++)
+                cpu_l[i] = cpu[i];
+        }
+
+        else if (str[ipos + 1] == 'B')
+        {
+            ipos++;
+            unsigned int bitrate; ;
+            float fps;
+            char c[25];
+#ifdef __SIGMASTAR__                          
+            FILE *stat = popen("cat /proc/mi_modules/mi_venc/mi_venc0 | grep Fps10s -A 1 | awk 'NR==2 {print $9, $10}'", "r");
+            // Sample result : 34.91 14836
+            if (stat == NULL) {
+                sscanf("34.91 14836", "%f %u", &fps, &bitrate);              
+            }else{
+                fscanf(stat, "%f %u", &fps, &bitrate);
+                fclose(stat);            
+            }
+#else
+            sscanf("34.91 14836", "%f %u", &fps, &bitrate);
+#endif            
+            // Convert kilobits to megabits
+            float megabits = bitrate / 1000.0;
+    
+            // Print the value with one digit after the decimal point
+            sprintf(c, "%.1fMb FPS:%d", megabits,(unsigned int)fps);
+                        
+            strcat(out, c);
+            
+        }
+        /*
+        else if (str[ipos + 1] == 'M')
+        {
+            ipos++;
+            struct sysinfo si;
+            sysinfo(&si);
+
+            char m[16];
+            short used = (si.freeram + si.bufferram) / 1024 / 1024;
+            short total = si.totalram / 1024 / 1024;
+            sprintf(m, "%d/%dMB", used, total);
+            strcat(out, m);
+            opos += strlen(m);
+        } */
+        else if (str[ipos + 1] == 't')
+        {
+            ipos++;
+            char s[64];
+            time_t t = time(NULL);
+            struct tm *tm = gmtime(&t);
+            strftime(s, 64, timefmt, tm);
+            strcat(out, s);
+            opos += strlen(s);
+        }
+        else if (str[ipos + 1] == 'T')
+        {
+            ipos++;
+#ifdef __SIGMASTAR__
+            unsigned short temp = GetTempSigmaStar();//1370 * (400 - ((unsigned short*)io_map)[0x2918 >> 1]) / 1000.0f + 27;
+#elif defined(__16CV300__)
+            unsigned short temp = 0;// (((unsigned short*)io_map)[0x300A4 >> 1] - 125) / 806.0f * 165.0f - 40;
+#else
+            unsigned short temp = 0;//;(((unsigned short*)io_map)[0x280BC >> 1] - 117) / 798.0f * 165.0f - 40;
+#endif
+            char t[8];
+            sprintf(t, "%d", temp);
+            strcat(out, t);
+            opos += strlen(t);
+        } else if (str[ipos + 1] == 'F' && isdigit(str[ipos + 2]) && isdigit(str[ipos + 3])) {
+            // Extract the two digits after $F as an integer
+            char numStr[3] = {str[ipos + 2], str[ipos + 3], '\0'};
+            int value = atoi(numStr);
+            //Ugly
+            osds[FULL_OVERLAY_ID].size=value;
+            // Skip the $Fxx part in the input string
+            ipos += 3;
+        } else if (str[ipos + 1] == 'L' && isdigit(str[ipos + 2]) && isdigit(str[ipos + 3])) {
+            // Extract the two digits after $F as an integer
+            char numStr[3] = {str[ipos + 2], str[ipos + 3], '\0'};
+            int value = atoi(numStr);
+            //Ugly
+            msg_layout=value%10;
+            msg_colour=value/10;
+            // Skip the $Fxx part in the input string
+            ipos += 3;
+        }
+
+
+        else if (str[ipos + 1] == '&') {
+            ipos++;
+            strcat(out, "&");
+            opos++;
+        }
+        ipos++; 
+    }
+    strncpy(str, out, 80);
+}
+
+#ifdef   _x86
+static char FECFile[128]= "./MSPOSD.msg"; 
+#else
+static char FECFile[128]= "/tmp/MSPOSD.msg"; 
+#endif    
+
+uint64_t LastOSDMsgParsed = 0;
+
+BITMAP bitmapText;
+
+char osdmsg[80];
+
+bool DrawText(){
+    char *font;
+#ifdef   _x86
+    asprintf(&font, "fonts/%s.ttf", osds[FULL_OVERLAY_ID].font);
+#else
+    asprintf(&font, "/usr/share/fonts/truetype/%s.ttf", osds[FULL_OVERLAY_ID].font);    
+	
+#endif    
+
+    if (!osd_msg_enabled){
+        if ((get_time_ms() - LastOSDMsgParsed)<1000){//If msgs are not needed, do not check for file every frame, but once per second        
+            //printf("skipped msg osd check\n");
+            return false;
+        }
+        LastOSDMsgParsed = get_time_ms();//Do not parse and read variable too often
+    }
+    
+    bool res=false;   
+    int result;
+    
+    char out[80];
+    size_t bytesRead=0;
+    FILE *file=NULL;    
+    file = fopen(FECFile, "rb");
+    if (file != NULL){// New file, will have to render the font            
+        bytesRead = fread(osdmsg, 1, 79 /*max buffer*/, file); //with files        
+        fclose(file);        
+        remove(FECFile);
+        osdmsg[bytesRead]=0;//end of string	                        
+        osds[FULL_OVERLAY_ID].updt = 1;
+        osd_msg_enabled=true;
+    }
+    if (osd_msg_enabled==false)
+        return;
+
+    uint64_t timems=get_time_ms();
+    if(osds[FULL_OVERLAY_ID].updt == 1 || 
+        (timems - LastOSDMsgParsed) > 1000){//Update varaibles in Message and render the text as BMP
+        LastOSDMsgParsed= timems;//Do not parse and read variable too often
+        strcpy(out, osdmsg);
+        //sprintf(out,"$M $B Size: %d",(int)osds[FULL_OVERLAY_ID].size);
+        //osds[FULL_OVERLAY_ID].size=18+((cntr/10)%10);//TEST
+        if (strstr(out, "&")){
+            fill(out);
+            osds[FULL_OVERLAY_ID].updt = 0;//
+        }
+        if (access(font, F_OK)) //no font file
+            return false;
+
+        RECT rect = measure_text(font, osds[FULL_OVERLAY_ID].size, out);
+       
+        if (bitmapText.pData!=NULL){
+            bitmapText.pData=NULL;
+            free(bitmapText.pData);
+        }
+
+        bitmapText = raster_text(font, osds[FULL_OVERLAY_ID].size, out);//allocates new bitmap
+        
+        if (PIXEL_FORMAT_DEFAULT==3){//convert to I4 and copy over the main overlay            
+																									  
+            uint8_t* destBitmap =  (uint8_t*)malloc(bitmapText.u32Height*getRowStride(bitmapText.u32Width , PIXEL_FORMAT_BitsPerPixel));                                  
+						   
+            convertBitmap1555ToI4(bitmapText.pData, bitmapText.u32Width , bitmapText.u32Height, destBitmap, (msg_colour==0)?COLOR_BLACK:COLOR_WHITE);      
+                    
+            free(bitmapText.pData);//free ARGB1555 bitmap
+            //This is inefficient, we use 4 times more memory, but the buffer size is small
+            bitmapText.pData=(void *)destBitmap;//replace it with I4, same size
+            bitmapText.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
+        }
+         
+    }
+
+    int posX=5, posY=5;
+
+    if (msg_layout%4==0)//upper left
+        posX=4;
+    if (msg_layout%4==1)//upper center
+        posX=(bmpBuff.u32Width - bitmapText.u32Width) /2;            
+    if (msg_layout%4==2)//upper right
+        posX=(bmpBuff.u32Width - bitmapText.u32Width) -2;
+    if (msg_layout%4==3)//moving
+        posX=20 + ((timems/16)%(bmpBuff.u32Width - bitmapText.u32Width - 40))& ~1;
+    posY=(msg_layout/4)==0? 0 : (bmpBuff.u32Height - bitmapText.u32Height) - 2;
+
+    if (bitmapText.pData!=NULL && bitmapText.enPixelFormat ==  PIXEL_FORMAT_DEFAULT){
+        copyRectI4(bitmapText.pData,bitmapText.u32Width,bitmapText.u32Height,
+                                bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
+                                //0,0,bitmapText.u32Width,bitmapText.u32Height,
+                                0,0,bitmapText.u32Width ,bitmapText.u32Height,
+                                posX,posY);
+
+    }
+    return true;
+}
+
 static void draw_screenBMP(){
     
     if (cntr++<0 )//skip in the beginning to show to font preview
@@ -704,8 +978,8 @@ static void draw_screenBMP(){
     if (bmpBuff.pData==NULL){
         //bmpBuff.u32Width = 
         bmpBuff.enPixelFormat=PIXEL_FORMAT_DEFAULT;
-        bmpBuff.u32Width=current_display_info.font_width * current_display_info.char_width;
-        bmpBuff.u32Height = current_display_info.font_height * current_display_info.char_height;
+        bmpBuff.u32Width= OVERLAY_WIDTH;   //current_display_info.font_width * current_display_info.char_width;
+        bmpBuff.u32Height = OVERLAY_HEIGHT;//current_display_info.font_height * current_display_info.char_height;
         //bmpBuff.pData = malloc( PIXEL_FORMAT_BitsPerPixel  * bmpBuff.u32Height * bmpBuff.u32Width / 8);
         bmpBuff.pData = malloc( PIXEL_FORMAT_BitsPerPixel  * bmpBuff.u32Height * getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));
         
@@ -713,11 +987,6 @@ static void draw_screenBMP(){
         bmpBuff.pData = memset(bmpBuff.pData, 0xFF , PIXEL_FORMAT_BitsPerPixel  * bmpBuff.u32Height * getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));
 
     bmpBuff.enPixelFormat =  PIXEL_FORMAT_DEFAULT;//  PIXEL_FORMAT_DEFAULT ;//PIXEL_FORMAT_1555;
-
-    // a Character icon size in the FontTemplate
-   // current_display_info.font_width = bitmapFnt.u32Width/2;
-   // current_display_info.font_height = bitmapFnt.u32Height/256;
- 
 
 
     for (int y = 0; y < current_display_info.char_height; y++){
@@ -763,13 +1032,9 @@ static void draw_screenBMP(){
 
 
             }else{
-            }
-           // DEBUG_PRINT("  ");
+            }           
         }
-       // DEBUG_PRINT("\n");
     }
-
-
 
     uint64_t step2=get_time_ms();  
 
@@ -777,7 +1042,10 @@ static void draw_screenBMP(){
         draw_AHI();
     
     if (AHI_Enabled==1 || AHI_Enabled>2)
-        draw_Ladder();        
+        draw_Ladder();   
+
+    //strcpy(osds[FULL_OVERLAY_ID].text,"$M $B Test");//"$M $B Test");
+    DrawText();
     
     stat_screen_refresh_count++;
     uint64_t step3=get_time_ms();  
@@ -1018,15 +1286,21 @@ static void InitMSPHook(){
     
     if (height<1000 && height>400){
         font_suffix = "_hd";
-        OVERLAY_WIDTH=1200;
-        OVERLAY_HEIGHT=700;
+        //OVERLAY_WIDTH=1200;
+        //OVERLAY_HEIGHT=700;
         current_display_info = hd_display_info;
         current_display_info.font_width = 24;
         current_display_info.font_height = 36;
+        OVERLAY_WIDTH = current_display_info.font_width * (current_display_info.char_width);
+        OVERLAY_HEIGHT =current_display_info.font_height * (current_display_info.char_height+2);
+
     }else{
-        OVERLAY_WIDTH=1800;
-        OVERLAY_HEIGHT=1000;
+        //OVERLAY_WIDTH=1840;
+        //OVERLAY_HEIGHT=1000;
         current_display_info = fhd_display_info;
+        OVERLAY_WIDTH = current_display_info.font_width * (current_display_info.char_width+0);
+        OVERLAY_WIDTH=1840;//must be multiple of 8 !!!! Give some extra area to draw custom code
+        OVERLAY_HEIGHT =current_display_info.font_height * (current_display_info.char_height+1);
     }
     printf("Video Mode %dp. Characters matrix : %d:%d, Fontsize:%d:%d\r\n",
         height,current_display_info.char_width,current_display_info.char_height,current_display_info.font_width, current_display_info.font_height);
@@ -1073,7 +1347,7 @@ static void InitMSPHook(){
             convertBitmap1555ToI8(bitmapFnt.pData, bitmapFnt.u32Width , bitmapFnt.u32Height, destBitmap, &g_stPaletteTable);        
                    
         if  (PIXEL_FORMAT_DEFAULT==3)
-             convertBitmap1555ToI4(bitmapFnt.pData, bitmapFnt.u32Width , bitmapFnt.u32Height, destBitmap, &g_stPaletteTable);      
+             convertBitmap1555ToI4(bitmapFnt.pData, bitmapFnt.u32Width , bitmapFnt.u32Height, destBitmap,-1);      
              
         
         free(bitmapFnt.pData);
@@ -1118,7 +1392,7 @@ static void InitMSPHook(){
     #endif
 
         //THIS IS NEEDED, the main region to draw inside
-        rgn=create_region(&osds[FULL_OVERLAY_ID].hand, osds[FULL_OVERLAY_ID].posx, osds[FULL_OVERLAY_ID].posy, OVERLAY_WIDTH, OVERLAY_HEIGHT);
+        rgn=create_region(&osds[FULL_OVERLAY_ID].hand, 8, 0, OVERLAY_WIDTH, OVERLAY_HEIGHT);
         if (verbose)
             printf("Create_region PixelFormat:%d Size: %d:%d results: %d \r\n", PIXEL_FORMAT_DEFAULT, OVERLAY_WIDTH,OVERLAY_HEIGHT, rgn);
 
@@ -1162,7 +1436,7 @@ static void InitMSPHook(){
                     convertBitmap1555ToI8(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable);
                 
                 if (PIXEL_FORMAT_DEFAULT==3)  
-                    convertBitmap1555ToI4(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable);
+                    convertBitmap1555ToI4(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap,-1);
 
                 free(bitmap.pData);
                 

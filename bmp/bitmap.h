@@ -127,7 +127,7 @@ typedef struct MI_RGN_PaletteTable_s
     void Convert1555ToRGBA(unsigned short* bitmap1555, unsigned char* rgbaData, unsigned int width, unsigned int height);
     void convertBitmap1555ToI4(
     uint16_t* srcBitmap, uint32_t width, uint32_t height, 
-    uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable);
+    uint8_t* destBitmap,int transparentColor);
 
     void convertRGBAToI4(
     uint8_t* srcBitmap, uint32_t width, uint32_t height, 

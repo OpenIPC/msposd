@@ -600,17 +600,58 @@ uint8_t findClosestPaletteIndex(uint16_t color, uint16_t* palette) {
     return bestIndex;
 }
 
+
 // Function to find the closest color in the palette
-uint8_t findClosestPaletteIndex8(uint16_t color, MI_RGN_PaletteTable_t* paletteTable) {
+uint8_t findClosestPaletteIndexBW(uint16_t color, MI_RGN_PaletteTable_t* paletteTable) {
     uint32_t minDistance = 65535;
-    uint8_t bestIndex = 0;
+    uint8_t bestIndex = 2;
+
+    uint8_t a = (color >> 15) & 0x01;  // 1-bit alpha
+    if (a==0){
+            bestIndex=15;//transparent
+            return bestIndex;
+    }
 
     // Extract RGB components from ARGB1555 color
     uint8_t r = ((color >> 10) & 0x1F) << 3;  // Convert 5-bit to 8-bit
     uint8_t g = ((color >> 5) & 0x1F) << 3;   // Convert 5-bit to 8-bit
     uint8_t b = (color & 0x1F) << 3;          // Convert 5-bit to 8-bit
-     
-    for (uint8_t i = 0; i < 18; ++i) {// only 16 searched
+
+
+    for (uint8_t i = 7; i < 18; ++i) {// only 5 searched W, Bl, 2xGrays , transp     
+        if (i==9)
+            i=13;
+        MI_RGN_PaletteElement_t* element = &paletteTable->astElement[i];
+        uint32_t distance = colorDistance8(r, g, b, element->u8Red, element->u8Green, element->u8Blue);
+        if (distance < minDistance) {
+            minDistance = distance;
+            bestIndex = i;
+        }
+    }
+
+    return bestIndex;
+}
+
+
+// Function to find the closest color in the palette
+uint8_t findClosestPaletteIndex8(uint16_t color, MI_RGN_PaletteTable_t* paletteTable) {
+    uint32_t minDistance = 65535;
+    uint8_t bestIndex = 0;
+
+    uint8_t a = (color >> 15) & 0x01;  // 1-bit alpha
+    if (a==0){
+            bestIndex=15;//transparent
+            return bestIndex;
+    }
+
+    // Extract RGB components from ARGB1555 color
+    uint8_t r = ((color >> 10) & 0x1F) << 3;  // Convert 5-bit to 8-bit
+    uint8_t g = ((color >> 5) & 0x1F) << 3;   // Convert 5-bit to 8-bit
+    uint8_t b = (color & 0x1F) << 3;          // Convert 5-bit to 8-bit
+
+
+    for (uint8_t i = 1; i < 18; ++i) {// only 16 searched       
+
         MI_RGN_PaletteElement_t* element = &paletteTable->astElement[i];
         uint32_t distance = colorDistance8(r, g, b, element->u8Red, element->u8Green, element->u8Blue);
         if (distance < minDistance) {
@@ -688,15 +729,13 @@ MI_RGN_PaletteTable_t g_stPaletteTable =
         {0xFF, 0x00, 0xF8, 0xF8}, // 0x03FF -> Cyan
         {0xFF, 0xFF, 0xFF, 0xFF}, // 0x7FFF -> White
         {0xFF, 0x00, 0x00, 0x00}, // 0x0000 -> Black  index 8
-        {0xFF, 0x84, 0x10, 0x10}, // 0x4210 -> Gray (Darker)
-        {0xFF, 0x42, 0x08, 0x08}, // 0x2108 -> Gray (Even Darker)
-        {0xFF, 0x63, 0x18, 0xC6}, // 0x318C -> Gray (Medium)
-        {0xFF, 0xAD, 0x52, 0xD6}, // 0x5AD6 -> Gray (Lighter)
-        {0xFF, 0xDD, 0xDD, 0xDD}, // 0x739C -> Gray (Light)
-        {0xFF, 0xAA, 0xAA, 0xAA}, // 0x18C6 -> Gray (Dark)
+        {0xFF, 0x84, 0x10, 0x10}, //  
+        {0xFF, 0x42, 0x08, 0x08}, //  
+        {0xFF, 0x63, 0x18, 0xC6}, //  
+        {0xFF, 0xAD, 0x52, 0xD6}, //  
+        {0xFF, 0xCC, 0xCC, 0xCC}, // 0x739C -> Gray (Light)
+        {0xFF, 0x77, 0x77, 0x77}, // 0x18C6 -> Gray (Dark)
 
-        //{0xFF, 0xCE, 0x73, 0x9C}, // 0x739C -> Gray (Light)
-        //{0xFF, 0x31, 0x8C, 0x6C}, // 0x18C6 -> Gray (Dark)
         {0x00,   0,   0,   0}, // transparent  index 15, 0x0A
         {0x00,   0,   0,   0},  // 0x7BDE -> transparent
  
@@ -1114,29 +1153,49 @@ int getRowStride(int width, int BitsPerPixel){
 
 void convertBitmap1555ToI4(
     uint16_t* srcBitmap, uint32_t width, uint32_t height, 
-    uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable)
+    uint8_t* destBitmap, int transparentColor)
 {
+    MI_RGN_PaletteTable_t* paletteTable=&g_stPaletteTable;
     // Calculate the number of bytes required per line without padding
-     
+
+    if (transparentColor ==-1)//The color that we assume as transparent
+        transparentColor=15;
     unsigned char  u8Value = 0;
-    uint32_t  u32Stride =   (width + 1) / 2;     
+    uint32_t  u32Stride =   (width + 1) / 2;    
+
+    int SourceStride=getRowStride(width,16); 
 
     int u32Stride2  = getRowStride(width,4);//  rowLength + 32 - ((rowLength-1) % 32)) >> 3;        
 
-    printf("I4 %d:%d Stride1:%d  Stride2:%d \n",width,height,u32Stride , u32Stride2 );
+    //printf("I4 %d:%d Stride1:%d  Stride2:%d \n",width,height,u32Stride , u32Stride2 );
 
     u32Stride=u32Stride2;
+    
+
 
     for (uint32_t u32Y = 0; u32Y < height; ++u32Y) {
  
         for (int32_t u32X = 0; u32X < width; ++u32X) {
-            uint32_t srcIndex = u32Y * width + u32X;  // Calculate the source index
-            uint8_t paletteIndex = findClosestPaletteIndex8(srcBitmap[srcIndex], paletteTable); 
+            uint32_t srcIndex = u32Y * width + u32X;  // Calculate the source index, but what if it is odd ?
+          //  srcIndex = u32Y*SourceStride/2 + u32X; 
+           uint8_t paletteIndex = 15;
+           if (transparentColor==COLOR_WHITE || transparentColor==COLOR_BLACK)
+                paletteIndex = findClosestPaletteIndexBW(srcBitmap[srcIndex], paletteTable); 
+            else                
+                paletteIndex = findClosestPaletteIndex8(srcBitmap[srcIndex], paletteTable);
             
-            if (paletteIndex == 0)//Sigmastar reserver
-                paletteIndex=8;//black
-            if (paletteIndex == 17)//Transparent color
-                paletteIndex=15;
+            if (paletteIndex == 0)//Sigmastar reserved
+                paletteIndex=8;//black           
+
+            //convert to black and white
+            if (transparentColor==COLOR_WHITE)//all colors become white, leave only black and gray
+                if (paletteIndex!=15 /*&& paletteIndex!=COLOR_GRAY_Light && paletteIndex!=COLOR_GRAY_Dark*/)
+                    paletteIndex=COLOR_BLACK;
+
+            //transparentColor==COLOR_BLACK means only one color font - white !
+            if (transparentColor==COLOR_BLACK)
+                if ( paletteIndex!=15)
+                    paletteIndex=COLOR_WHITE;
 
             // No Fucking idea why this is different for x86 and Sigmastar, BUT !!!
             //SigmaStar I4 format needs it reversit 4bit pairs.   0x0A, 0x0B needs to be 0XBA

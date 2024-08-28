@@ -329,7 +329,7 @@ static float last_board_temp;
 
 /// @brief 
 /// @return -100 if no sigmastar found 
-static int GetTempSigmaStar(){
+int GetTempSigmaStar(){
 
 //https://wx.comake.online/doc/doc/SigmaStarDocs-SSD220-SIGMASTAR-202305231834/platform/BSP/Ikayaki/frequency_en.html
  	FILE *file = fopen("/sys/devices/virtual/mstar/msys/TEMP_R", "r"); //Temperature 62

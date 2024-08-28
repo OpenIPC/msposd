@@ -36,6 +36,21 @@
         "syncstream": "c",
         "tuple": "c",
         "string.h": "c",
-        "mi_vpe.h": "c"
+        "mi_vpe.h": "c",
+        "bitset": "c",
+        "slist": "c",
+        "initializer_list": "c",
+        "span": "c",
+        "regex": "c",
+        "utility": "c",
+        "*.tcc": "c",
+        "iomanip": "c",
+        "istream": "c",
+        "streambuf": "c",
+        "*.def": "c",
+        "iterator": "c",
+        "charconv": "c",
+        "ratio": "c",
+        "type_traits": "c"
     }
 }

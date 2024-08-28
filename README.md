@@ -26,11 +26,18 @@ Usage: msposd [OPTIONS]
 Forwarding of MSP packets via UDP.  
 Can monitor RC Channels values in FC and call the script `channels.sh` (located at /usr/bin or /usr/sbin).Will passing the channel number and its value to it as $1 and $2 parameters. This allows for controlling the camera via the Remote Control Transmitter.  
 AHI (Artificial Horizon Indicator) ladder - Graphical AHI , that is drawn over the standard OSD.  
-
-This work is based on these exceptional projects:
-- https://github.com/fpv-wtf/msp-osd
-- https://github.com/OpenIPC/osd
-
+**Show custom mesage and diagnostics** on screen when text is written to file /tmp/MSPOSD.msg 
+```
+echo "Custom Message... &L04 &F22 CPU:&C &B temp:&T" >/tmp/MSPOSD.msg
+```
+Extra params withing the message to be shown:
+- &T - Board temperature  
+- &B - Video Bitrate and FPS  
+- &C - CPU Usage percent  
+- &t - Time  
+- &Fxx - Set text font size (10 to 99)  
+- &Lxx - Set text colour (first digit 0- white, 1 - black) and postion on the screen(second digit)  0-TopLeft, 1-TopCenter, 2-TopRight, 3-TopMoving,4-BottomLeft, 5-BottomCenter, 6-BottomRight, 7-BottomMoving   
+ 
 ### Example:
 
 ```
@@ -63,5 +70,6 @@ Start msposd or reference it in OpenIPC scripts.
 
 ### Acknowledgements:
 - Default fonts included in this project are created by SNEAKY_FPV.  These and other excellent additional fonts can be found here: https://sites.google.com/view/sneaky-fpv/home
+This work is based on these projects:
 - https://github.com/fpv-wtf/msp-osd
 - https://github.com/OpenIPC/osd
