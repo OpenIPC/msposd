@@ -5,7 +5,9 @@ if [[ "$1" == *"star6b0" ]]; then
 	CC=cortex_a7_thumb2_hf-gcc13-musl-4_9
 elif [[ "$1" == *"star6e" ]]; then
 	CC=cortex_a7_thumb2_hf-gcc13-glibc-4_9
-elif [[ "$1" == *"osd-goke" ]]; then
+elif [[ "$1" == *"goke" ]]; then
+	CC=cortex_a7_thumb2-gcc13-musl-4_9
+elif [[ "$1" == *"hisi" ]]; then
 	CC=cortex_a7_thumb2-gcc13-musl-4_9
 fi
 

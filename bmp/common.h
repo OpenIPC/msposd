@@ -41,6 +41,8 @@ extern "C"
 #define PIXEL_FORMAT_1555 E_MI_RGN_PIXEL_FORMAT_ARGB1555
 #define PIXEL_FORMAT_2BPP E_MI_RGN_PIXEL_FORMAT_I2
 #define PIXEL_FORMAT_8888 E_MI_RGN_PIXEL_FORMAT_ARGB8888
+#define PIXEL_FORMAT_I4   E_MI_RGN_PIXEL_FORMAT_I4
+
 #elif defined(__INGENIC__)
 #include "imp_system.h"
 #include "imp_osd.h"
@@ -50,6 +52,7 @@ extern "C"
 #define PIXEL_FORMAT_1555 PIX_FMT_RGB555LE
 #define PIXEL_FORMAT_2BPP PIX_FMT_0RGB
 #define PIXEL_FORMAT_8888 PIX_FMT_ARGB
+#define PIXEL_FORMAT_I4   E_MI_RGN_PIXEL_FORMAT_I4
 #else
 #include "hi_common.h"
 #include "hi_math.h"
@@ -61,6 +64,8 @@ extern "C"
 #define PIXEL_FORMAT_1555 PIXEL_FORMAT_ARGB_1555
 #define PIXEL_FORMAT_2BPP PIXEL_FORMAT_ARGB_2BPP
 #define PIXEL_FORMAT_8888 PIXEL_FORMAT_ARGB_8888
+#define PIXEL_FORMAT_I4   3 //This will not work on GOKE anyway
+
 #endif
 
 

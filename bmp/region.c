@@ -321,8 +321,10 @@ int set_bitmap(int handle, BITMAP *bitmap)
 #endif
     if (s32Ret)
     {
+#ifdef __SIGMASTAR__        
         if (s32Ret==E_MI_ERR_ILLEGAL_PARAM)
             fprintf(stderr, "RGN_SetBitMap failed E_MI_ERR_ILLEGAL_PARAM %#x!\n", s32Ret);
+#endif            
         fprintf(stderr, "RGN_SetBitMap failed with %#x  %d!\n", s32Ret, (s32Ret & 0xFFF) );
         return -1;
     }

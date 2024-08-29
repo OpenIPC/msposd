@@ -447,6 +447,8 @@ int y_end = 500;
  }
 
  static void draw_Ladder(){
+    if (PIXEL_FORMAT_DEFAULT!=PIXEL_FORMAT_I4)
+        return;
               
     Transform_OVERLAY_WIDTH=OVERLAY_WIDTH;
     Transform_OVERLAY_HEIGHT=OVERLAY_HEIGHT;
@@ -929,7 +931,7 @@ bool DrawText(){
 
         bitmapText = raster_text(font, osds[FULL_OVERLAY_ID].size, out);//allocates new bitmap
         
-        if (PIXEL_FORMAT_DEFAULT==3){//convert to I4 and copy over the main overlay            
+        if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4){//convert to I4 and copy over the main overlay            
 																									  
             uint8_t* destBitmap =  (uint8_t*)malloc(bitmapText.u32Height*getRowStride(bitmapText.u32Width , PIXEL_FORMAT_BitsPerPixel));                                  
 
@@ -992,7 +994,8 @@ static void draw_screenBMP(){
         bmpBuff.pData = malloc( PIXEL_FORMAT_BitsPerPixel  * bmpBuff.u32Height * getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));
         
     }else
-        bmpBuff.pData = memset(bmpBuff.pData, 0xFF , PIXEL_FORMAT_BitsPerPixel  * bmpBuff.u32Height * getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));
+        bmpBuff.pData = memset(bmpBuff.pData, PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4 ? 0xFF : 0x00 , PIXEL_FORMAT_BitsPerPixel  * bmpBuff.u32Height * getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));
+        //bmpBuff.pData = memset(bmpBuff.pData,  0xFF , PIXEL_FORMAT_BitsPerPixel  * bmpBuff.u32Height * getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));
 
     bmpBuff.enPixelFormat =  PIXEL_FORMAT_DEFAULT;//  PIXEL_FORMAT_DEFAULT ;//PIXEL_FORMAT_1555;
 
@@ -1022,12 +1025,12 @@ static void draw_screenBMP(){
                 u_int16_t d_x=x * current_display_info.font_width + X_OFFSET;
                 u_int16_t d_y=y * current_display_info.font_height;
 
-                if (PIXEL_FORMAT_DEFAULT==0)                
+                if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_1555)                
                  copyRectARGB1555(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
                                  bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
                                  s_left,s_top,s_width,s_height,
                                  d_x,d_y);
-                else if (PIXEL_FORMAT_DEFAULT==3)   
+                else if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4)   
                 copyRectI4(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
                                 bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
                                 s_left,s_top,s_width,s_height,
@@ -1063,11 +1066,11 @@ static void draw_screenBMP(){
     sfRenderWindow_clear(window, sfColor_fromRGB(175, 195, 255));
     unsigned char* rgbaData = malloc(bmpBuff.u32Width * bmpBuff.u32Height * 4);  // Allocate memory for RGBA data    
 
-    if (PIXEL_FORMAT_DEFAULT==0)          
+    if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_1555)          
         Convert1555ToRGBA( bmpBuff.pData, rgbaData, bmpBuff.u32Width, bmpBuff.u32Height);    
     else if (PIXEL_FORMAT_DEFAULT==4) //I8 one byte format
         ConvertI8ToRGBA( bmpBuff.pData, rgbaData, bmpBuff.u32Width, bmpBuff.u32Height,&g_stPaletteTable);    
-    else if (PIXEL_FORMAT_DEFAULT==3) //I4 half byte format
+    else if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4) //I4 half byte format
         ConvertI4ToRGBA( bmpBuff.pData, rgbaData, bmpBuff.u32Width, bmpBuff.u32Height,&g_stPaletteTable);     
 
     sfTexture* texture = sfTexture_create(bmpBuff.u32Width, bmpBuff.u32Height);
@@ -1183,7 +1186,7 @@ static void set_options(uint8_t font, uint8_t is_hd) {
 /**  Load and Convert PNG to BMP format, 4bit per pixel.
  *  Allocates memory, return width and height
  */
-unsigned char* loadPngToBMPI4(const char* filename, unsigned int* width, unsigned int* height) {
+unsigned char* loadPngToBMP(const char* filename, unsigned int* width, unsigned int* height) {
     unsigned char* pngData;
     unsigned int error = lodepng_decode32_file(&pngData, width, height, filename);
 
@@ -1194,7 +1197,7 @@ unsigned char* loadPngToBMPI4(const char* filename, unsigned int* width, unsigne
 
     // Calculate BMP stride (row size aligned to 4 bytes)
     unsigned int bmpStride = (*width * 4 + 3) & ~3;
-    bmpStride =  getRowStride(*width,4);
+    bmpStride =  getRowStride(*width,PIXEL_FORMAT_BitsPerPixel);
 
     // Allocate memory for BMP data
     unsigned int bmpSize = bmpStride * (*height);
@@ -1205,7 +1208,10 @@ unsigned char* loadPngToBMPI4(const char* filename, unsigned int* width, unsigne
         return NULL;
     }
 
-    convertRGBAToI4( pngData, *width , *height, bmpData, &g_stPaletteTable);
+    if (PIXEL_FORMAT_DEFAULT==3)//I4
+        convertRGBAToI4( pngData, *width , *height, bmpData, &g_stPaletteTable);
+    else        
+        convertRGBAToARGB1555( pngData, *width , *height, bmpData);
 
     // Clean up
     free(pngData);
@@ -1213,7 +1219,7 @@ unsigned char* loadPngToBMPI4(const char* filename, unsigned int* width, unsigne
     return bmpData;
 }
 
-int GetMajesticVideoConfig(){
+int GetMajesticVideoConfig(int *Width){
 
     FILE *file;
     char line[256];
@@ -1261,8 +1267,10 @@ int GetMajesticVideoConfig(){
         // Use sscanf to parse the size value into width and height
         if (sscanf(sizeValue, "%dx%d", &width, &height) == 2) {
             printf("Majestic width:%d,height:%d\n", width, height);
+             *Width=width;
         } else {
             printf("Failed to parse video size in Majestic, assume 720p! %s\n",sizeValue);
+            *Width=1280;
             height = 720;
         }
 
@@ -1272,7 +1280,7 @@ int GetMajesticVideoConfig(){
     return height;
 }
 
-
+int majestic_width;
 int fd_mem;
 static void InitMSPHook(){
     memset(character_map, 0, sizeof(character_map));
@@ -1287,7 +1295,8 @@ static void InitMSPHook(){
     font_path = "";//.bmp
     #endif 
  
-    int height = GetMajesticVideoConfig();
+    
+    int height = GetMajesticVideoConfig(&majestic_width);
     //height=1080;
     
     if (height<1000 && height>400){
@@ -1312,19 +1321,31 @@ static void InitMSPHook(){
         height,current_display_info.char_width,current_display_info.char_height,current_display_info.font_width, current_display_info.font_height);
 
     snprintf(font_load_name, 255, "%sfont%s.png", font_path, font_suffix);
-     
-    PIXEL_FORMAT_DEFAULT=3;//I4 format, 4 bits per pixel. 
-    PIXEL_FORMAT_BitsPerPixel = 4;
+
+
+    PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_1555;//ARGB1555 format, 16 bits per pixel 
+    PIXEL_FORMAT_BitsPerPixel = 16;    
+
+    #ifdef __SIGMASTAR__
+        PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_I4;//I4 format, 4 bits per pixel 
+        PIXEL_FORMAT_BitsPerPixel = 4;
+    #endif
+    #ifdef _x86
+        PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_I4;//I4 format, 4 bits per pixel 
+        PIXEL_FORMAT_BitsPerPixel = 4;   
+    #endif
+
+    //Uncomment to test for Goke / Hisilicon
+    if(false){//THIS Allows to text 1555 format on x86 and SigmStar!!!
+        PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_1555;//ARGB1555 format, 16 bits per pixel 
+        PIXEL_FORMAT_BitsPerPixel = 16;
+    }
+
     if (bitmapFnt.pData!=NULL)//if called by mistake
         free(bitmapFnt.pData);
 
-    bitmapFnt.pData=(void *)loadPngToBMPI4(font_load_name,&bitmapFnt.u32Width,&bitmapFnt.u32Height);
+    bitmapFnt.pData=(void *)loadPngToBMP(font_load_name,&bitmapFnt.u32Width,&bitmapFnt.u32Height);
     bitmapFnt.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
-
-    
-    //INAV only constants, need to calculate them
-    //current_display_info.font_width = bitmapFnt.u32Width/2;
-    //current_display_info.font_height = bitmapFnt.u32Height/256;
 
     
     font_pages = bitmapFnt.u32Width/current_display_info.font_width;
@@ -1336,38 +1357,6 @@ static void InitMSPHook(){
     }
     int rgn=0;   
 
-
-
-     // OBSOLETE, used for BMP font files. Convert icons font to i8 or i4 format
-     // This will speed up a little... :)
-     if (false){
-        //PIXEL_FORMAT_DEFAULT=4;//E_MI_RGN_PIXEL_FORMAT_I8
-        //PIXEL_FORMAT_BitsPerPixel=8;
-        //TESTTING, not working with SetBitmap?!??!
-        PIXEL_FORMAT_DEFAULT=3;//E_MI_RGN_PIXEL_FORMAT_I4
-        PIXEL_FORMAT_BitsPerPixel=4;
-
-        uint8_t* destBitmap =  (uint8_t*)malloc(bitmapFnt.u32Height*getRowStride(bitmapFnt.u32Width , PIXEL_FORMAT_BitsPerPixel));  
-
-        if  (PIXEL_FORMAT_DEFAULT==4)
-            convertBitmap1555ToI8(bitmapFnt.pData, bitmapFnt.u32Width , bitmapFnt.u32Height, destBitmap, &g_stPaletteTable);        
-                   
-        if  (PIXEL_FORMAT_DEFAULT==3)
-             convertBitmap1555ToI4(bitmapFnt.pData, bitmapFnt.u32Width , bitmapFnt.u32Height, destBitmap,-1);      
-             
-        
-        free(bitmapFnt.pData);
-        bitmapFnt.pData=(void *)destBitmap;
-        bitmapFnt.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
-     }else{
-        /* 
-        //Test to load PNG pic
-        PIXEL_FORMAT_DEFAULT=3;//1555 PIXEL_FORMAT_1555
-        PIXEL_FORMAT_BitsPerPixel = 4;
-        bitmapFnt.pData=(void *)loadPngToBmpMemory("font_inav.png",&bitmapFnt.u32Width,&bitmapFnt.u32Height);
-        bitmapFnt.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
-        */
-     }
 
     osds = mmap(NULL, sizeof(*osds) * MAX_OSD,
                 PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
@@ -1397,10 +1386,13 @@ static void InitMSPHook(){
             fprintf(stderr, "[%s:%d]RGN_Init failed with %#x!\n", __func__, __LINE__, s32Ret);
     #endif
 
+        int XOffs=(majestic_width - OVERLAY_WIDTH)/2;
+        if (XOffs<0)
+            XOffs=8;
         //THIS IS NEEDED, the main region to draw inside
-        rgn=create_region(&osds[FULL_OVERLAY_ID].hand, 8, 0, OVERLAY_WIDTH, OVERLAY_HEIGHT);
+        rgn=create_region(&osds[FULL_OVERLAY_ID].hand, XOffs, 0, OVERLAY_WIDTH, OVERLAY_HEIGHT);
         if (verbose)
-            printf("Create_region PixelFormat:%d Size: %d:%d results: %d \r\n", PIXEL_FORMAT_DEFAULT, OVERLAY_WIDTH,OVERLAY_HEIGHT, rgn);
+            printf("Create_region PixelFormat:%d Size: %d:%d X_Offset:%d results: %d \r\n", PIXEL_FORMAT_DEFAULT, OVERLAY_WIDTH,OVERLAY_HEIGHT, XOffs, rgn);
 
         //LOGO TEST, for TEST ONLY, loads a file for several seconds as overlay
         char img[32];//test to show a simple files
@@ -1539,11 +1531,18 @@ static void InitMSPHook(){
                 if (bitmapFnt.u32Width*(cols+1)  > bitmap.u32Width + bitmapFnt.u32Width )
                     cols = (bitmap.u32Width / bitmapFnt.u32Width) -1;
 
+                if (PIXEL_FORMAT_DEFAULT == PIXEL_FORMAT_I4)//i4 sigmastar
                 for (int i=0; i<cols ; i++ )
                     copyRectI4(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
                                 bitmap.pData,bitmap.u32Width, bitmap.u32Height,
                                 0,i * fontPageHeight, bitmapFnt.u32Width, fontPageHeight,
                                 i*bitmapFnt.u32Width,0);                
+                else //assume PIXEL_FORMAT_1555
+                for (int i=0; i<cols ; i++ )
+                     copyRectARGB1555(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
+                                bitmap.pData,bitmap.u32Width, bitmap.u32Height,
+                                0,i * fontPageHeight, bitmapFnt.u32Width, fontPageHeight,
+                                i*bitmapFnt.u32Width,0);
             
                 /* Test load BMP image and show it on the screen 
                 bitmap.pData = loadPngToBMPI4(img, &bitmap.u32Width, &bitmap.u32Height);
@@ -1557,13 +1556,20 @@ static void InitMSPHook(){
                     //set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);//bitmap must match region dimensions!
                     
                     set_bitmapEx(osds[FULL_OVERLAY_ID].hand, &bitmap, PIXEL_FORMAT_BitsPerPixel);
+                #elif __GOKE__
+                     if (verbose)
+                        printf("Set Font Review %d:%d", bitmap.u32Width, bitmap.u32Height);
 
-                #else
+                    set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);//bitmap must match region dimensions!
+                #elif _x86
                     sfRenderWindow_clear(window, sfColor_fromRGB(255, 255, 0));
                     
                     unsigned char* rgbaData = malloc(bitmap.u32Width * bitmap.u32Height * 4);  // Allocate memory for RGBA data          
-                    ConvertI4ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height,&g_stPaletteTable);    
-
+                    if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4)
+                        ConvertI4ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height,&g_stPaletteTable);    
+                    else
+                        Convert1555ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height);  
+                          
                     //test simple load PNG file and show it
                     //free(rgbaData);
                     //int width,height;

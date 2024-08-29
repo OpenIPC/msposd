@@ -51,6 +51,7 @@
         "iterator": "c",
         "charconv": "c",
         "ratio": "c",
-        "type_traits": "c"
+        "type_traits": "c",
+        "hi_math.h": "c"
     }
 }

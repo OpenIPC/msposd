@@ -893,6 +893,7 @@ void copyRectARGB1555(
 
     // Calculate the width of the rectangle in bytes
     uint32_t rowSizeInBytes = width * sizeof(uint16_t);
+    rowSizeInBytes=getRowStride(width,16);
 
     for (uint32_t y = 0; y < height; ++y) {
         // Calculate the source and destination pointers for the current row
@@ -1719,6 +1720,43 @@ void fillRegionI4(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int
         }
     }
 }
+
+void convertRGBAToARGB1555(
+    uint8_t* srcBitmap, uint32_t width, uint32_t height, 
+    uint16_t* destBitmap)
+{
+    int u32Stride = getRowStride(width, 16);  // ARGB1555 uses 2 bytes per pixel
+
+    for (uint32_t u32Y = 0; u32Y < height; ++u32Y) {
+        for (int32_t u32X = 0; u32X < width; ++u32X) {
+            uint32_t srcIndex = (u32Y * width + u32X) * 4;  // Calculate the source index (4 bytes per pixel)
+            
+            // Extract RGBA values
+            uint8_t r = srcBitmap[srcIndex + 0];
+            uint8_t g = srcBitmap[srcIndex + 1];
+            uint8_t b = srcBitmap[srcIndex + 2];
+            uint8_t a = srcBitmap[srcIndex + 3];
+
+            // Convert to ARGB1555 format
+            uint16_t pixel = 0;
+
+            // Set alpha bit (1 bit)
+            if (a > 127) {  // Assuming any alpha value above 127 is considered opaque
+                pixel |= 0x8000;  // Set the alpha bit (1 << 15)
+            }
+
+            // Set red (5 bits), green (5 bits), and blue (5 bits)
+            pixel |= (r >> 3) << 10;  // Red: take the top 5 bits
+            pixel |= (g >> 3) << 5;   // Green: take the top 5 bits
+            pixel |= (b >> 3);        // Blue: take the top 5 bits
+
+            // Write the pixel to the destination bitmap
+            uint32_t destIndex = u32Y * (u32Stride / 2) + u32X;  // 2 bytes per pixel in ARGB1555
+            destBitmap[destIndex] = pixel;
+        }
+    }
+}
+
 
    
 

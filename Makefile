@@ -20,19 +20,22 @@ BUILD = $(CC) $(SRCS) -I $(SDK)/include -L$(DRV) $(CFLAGS) $(LDFLAGS) $(LIB) $(L
 
 
 clean:
-	rm -f *.o osd-x86 osd-goke osd-hisi osd-star6b0 osd-star6e msposd
+	rm -f *.o x86 goke hisi star6b0 star6e msposd
 
 
 goke:
 	$(eval SDK = ./sdk/gk7205v300)
-	$(eval LIB = -ldnvqe -lgk_api -lhi_mpi -lsecurec -lupvqe -lvoice_engine)
+	
+	$(eval LIB = -ldl -ldnvqe -lgk_api -lhi_mpi -lsecurec -lupvqe -lvoice_engine -ldnvqe)
 	$(eval TARGET = goke)
+	$(eval OUT = goke)
 	$(BUILD)
 
 hisi:
 	$(eval SDK = ./sdk/hi3516ev300)
 	$(eval LIB = -D__GOKE__ -ldnvqe -lmpi -lsecurec -lupvqe -lVoiceEngine)
 	$(eval TARGET = hisi)
+	$(eval OUT = hisi)
 	$(BUILD)
 
 star6b0:

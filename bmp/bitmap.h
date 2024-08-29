@@ -126,17 +126,21 @@ typedef struct MI_RGN_PaletteTable_s
         uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable);
     void Convert1555ToRGBA(unsigned short* bitmap1555, unsigned char* rgbaData, unsigned int width, unsigned int height);
     void convertBitmap1555ToI4(
-    uint16_t* srcBitmap, uint32_t width, uint32_t height, 
-    uint8_t* destBitmap,int singleColor);
+        uint16_t* srcBitmap, uint32_t width, uint32_t height, 
+        uint8_t* destBitmap,int singleColor);
 
     void convertRGBAToI4(
-    uint8_t* srcBitmap, uint32_t width, uint32_t height, 
-    uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable);
+        uint8_t* srcBitmap, uint32_t width, uint32_t height, 
+        uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable);
+        
+    void convertRGBAToARGB1555(
+        uint8_t* srcBitmap, uint32_t width, uint32_t height, 
+        uint16_t* destBitmap);
 
 
     void convertBitmap1555ToI4_Works_blurry(
-    uint16_t* srcBitmap, uint32_t width, uint32_t height, 
-    uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable);
+        uint16_t* srcBitmap, uint32_t width, uint32_t height, 
+        uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable);
 
     void ConvertI8ToRGBA(uint8_t* bitmapI8, uint8_t* rgbaData, uint32_t width, uint32_t height, MI_RGN_PaletteElement_t* palette);
 
