@@ -1153,13 +1153,13 @@ int getRowStride(int width, int BitsPerPixel){
 
 void convertBitmap1555ToI4(
     uint16_t* srcBitmap, uint32_t width, uint32_t height, 
-    uint8_t* destBitmap, int transparentColor)
+    uint8_t* destBitmap, int singleColor)
 {
     MI_RGN_PaletteTable_t* paletteTable=&g_stPaletteTable;
     // Calculate the number of bytes required per line without padding
 
-    if (transparentColor ==-1)//The color that we assume as transparent
-        transparentColor=15;
+    if (singleColor ==-1)//The color that we assume as transparent
+        singleColor=15;
     unsigned char  u8Value = 0;
     uint32_t  u32Stride =   (width + 1) / 2;    
 
@@ -1179,23 +1179,19 @@ void convertBitmap1555ToI4(
             uint32_t srcIndex = u32Y * width + u32X;  // Calculate the source index, but what if it is odd ?
           //  srcIndex = u32Y*SourceStride/2 + u32X; 
            uint8_t paletteIndex = 15;
-           if (transparentColor==COLOR_WHITE || transparentColor==COLOR_BLACK)
+           if (singleColor>=0 && singleColor<15)
                 paletteIndex = findClosestPaletteIndexBW(srcBitmap[srcIndex], paletteTable); 
             else                
                 paletteIndex = findClosestPaletteIndex8(srcBitmap[srcIndex], paletteTable);
             
-            if (paletteIndex == 0)//Sigmastar reserved
+            if (paletteIndex == 0)//Sigmastar reserved, just in case
                 paletteIndex=8;//black           
 
             //convert to black and white
-            if (transparentColor==COLOR_WHITE)//all colors become white, leave only black and gray
-                if (paletteIndex!=15 /*&& paletteIndex!=COLOR_GRAY_Light && paletteIndex!=COLOR_GRAY_Dark*/)
-                    paletteIndex=COLOR_BLACK;
+            if (paletteIndex!=15 & paletteIndex>=0){                
+                    paletteIndex=singleColor;                
+             }
 
-            //transparentColor==COLOR_BLACK means only one color font - white !
-            if (transparentColor==COLOR_BLACK)
-                if ( paletteIndex!=15)
-                    paletteIndex=COLOR_WHITE;
 
             // No Fucking idea why this is different for x86 and Sigmastar, BUT !!!
             //SigmaStar I4 format needs it reversit 4bit pairs.   0x0A, 0x0B needs to be 0XBA

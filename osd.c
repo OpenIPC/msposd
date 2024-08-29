@@ -836,7 +836,15 @@ static void fill(char* str)
             //Ugly
             msg_layout=value%10;
             msg_colour=value/10;
-            // Skip the $Fxx part in the input string
+            if (msg_colour==0)
+                msg_colour=COLOR_WHITE;
+            else if (msg_colour==1)
+                msg_colour=COLOR_BLACK;
+            else                
+                // 1=Red, Green, Blue, Yellow ,Magenta, 6=Cyan
+                msg_colour--;
+            
+            
             ipos += 3;
         }
 
@@ -924,8 +932,8 @@ bool DrawText(){
         if (PIXEL_FORMAT_DEFAULT==3){//convert to I4 and copy over the main overlay            
 																									  
             uint8_t* destBitmap =  (uint8_t*)malloc(bitmapText.u32Height*getRowStride(bitmapText.u32Width , PIXEL_FORMAT_BitsPerPixel));                                  
-						   
-            convertBitmap1555ToI4(bitmapText.pData, bitmapText.u32Width , bitmapText.u32Height, destBitmap, (msg_colour==0)?COLOR_BLACK:COLOR_WHITE);      
+
+            convertBitmap1555ToI4(bitmapText.pData, bitmapText.u32Width , bitmapText.u32Height, destBitmap, msg_colour);      
                     
             free(bitmapText.pData);//free ARGB1555 bitmap
             //This is inefficient, we use 4 times more memory, but the buffer size is small
@@ -1231,7 +1239,7 @@ int GetMajesticVideoConfig(){
             inVideo0Section = true;
 
         // If we're in the video0 section, look for the size parameter
-        if (inVideo0Section && line[0] != '#') {
+        if (inVideo0Section && strlen(line)>10 /*&& line[0] != '#'*/ && strstr(line, "#")<15) {
             if (strstr(line, "size:") != NULL) {
                 // Extract the value after "size:"
                 sscanf(line, " size: %49s", sizeValue); // Extract the size value with a buffer limit
@@ -1254,16 +1262,14 @@ int GetMajesticVideoConfig(){
         if (sscanf(sizeValue, "%dx%d", &width, &height) == 2) {
             printf("Majestic width:%d,height:%d\n", width, height);
         } else {
-            printf("Failed to parse size value. %s\n",sizeValue);
-            height = 1080;
+            printf("Failed to parse video size in Majestic, assume 720p! %s\n",sizeValue);
+            height = 720;
         }
 
     } else {
         printf("Size parameter not found in Video0 section.\n");
     }
-
     return height;
-
 }
 
 

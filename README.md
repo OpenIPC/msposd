@@ -22,7 +22,7 @@ Usage: msposd [OPTIONS]
  --help           Display this help
 ```
 
-### Additional options.
+###  Options.
 Forwarding of MSP packets via UDP.  
 Can monitor RC Channels values in FC and call the script `channels.sh` (located at /usr/bin or /usr/sbin).Will passing the channel number and its value to it as $1 and $2 parameters. This allows for controlling the camera via the Remote Control Transmitter.  
 AHI (Artificial Horizon Indicator) ladder - Graphical AHI , that is drawn over the standard OSD.  
@@ -36,9 +36,9 @@ Extra params withing the message to be shown:
 - &C - CPU Usage percent  
 - &t - Time  
 - &Fxx - Set text font size (10 to 99)  
-- &Lxx - Set text colour (first digit 0- white, 1 - black) and postion on the screen(second digit)  0-TopLeft, 1-TopCenter, 2-TopRight, 3-TopMoving,4-BottomLeft, 5-BottomCenter, 6-BottomRight, 7-BottomMoving   
+- &Lxx - Set text colour (first digit 0- white, 1 - black, 2- red, 3 - green, 4 - blue, 5 - yellow, 6 - magenta, 7 - cyan) and postion on the screen(second digit)  0-TopLeft, 1-TopCenter, 2-TopRight, 3-TopMoving,4-BottomLeft, 5-BottomCenter, 6-BottomRight, 7-BottomMoving   
  
-### Example:
+### Usage Example:
 
 ```
 msposd  --master /dev/ttyS2 --baudrate 115200 --channels 7 --out 127.0.0.1:14555 -osd -r 20 --ahi 1 -v
