@@ -104,6 +104,9 @@ int serial_fd;
 int socket_fd;
 int compressed_fd;
 
+/// @brief Will skip char on the left to allow for smaller matrix and overlay area
+int SkipXChar=0;
+
 int font_pages=2;
 static uint8_t serial_passthrough = 1;
 static uint8_t compress = 0;
@@ -153,6 +156,7 @@ extern int AHI_Enabled;
 extern void showchannels(int count);
 extern void ProcessChannels();
 extern uint16_t channels[18];
+extern int matrix_size;
 extern int GetTempSigmaStar();
 
 
@@ -322,8 +326,8 @@ static const display_info_t fhd_display_info = {
 36*50=1800
 54*18=972
 */
-#define MAX_OSD_WIDTH 50
-#define MAX_OSD_HEIGHT 18
+#define MAX_OSD_WIDTH 54
+#define MAX_OSD_HEIGHT 20
 
 // for x86 preview only
 
@@ -677,11 +681,7 @@ int y_end = 500;
                 // Draw 6 rectangles in a line
                 for (int i = 0; i < fragments; i++) {
                     // Calculate the X position for the current rectangle
-                    int rect_x = start_x + i * (rect_width + spacing) + spacing/2;
-                    // Draw the rectangle
-                    //drawRectangleI4(bmpBuff.pData, rect_x, y, rect_width, rect_height, COLOR_WHITE, 1);//border with AA
-                    //drawRectangleI4(bmpBuff.pData, rect_x, y, rect_width, rect_height , m_color, 100);//solid
-                    //drawRectangleI4(bmpBuff.pData, rect_x, y, rect_width, rect_height, COLOR_WHITE, 1);//border with AA
+                    int rect_x = start_x + i * (rect_width + spacing) + spacing/2;                    
                     //drawRectangleI4(bmpBuff.pData, rect_x, y, rect_width, 0, COLOR_WHITE, 4);//border with AA
                     drawLine(bmpBuff.pData, rect_x, y, rect_x + rect_width, y, COLOR_WHITE, 3);
                     //drawFilledRectangleI4AA(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, rect_x, y, rect_width, rect_height);
@@ -1122,6 +1122,7 @@ static void draw_character(uint32_t x, uint32_t y, uint16_t c)
     {
         return;
     }
+
     character_map[x][y] = c;
 }
 
@@ -1295,33 +1296,6 @@ static void InitMSPHook(){
     font_path = "";//.bmp
     #endif 
  
-    
-    int height = GetMajesticVideoConfig(&majestic_width);
-    //height=1080;
-    
-    if (height<1000 && height>400){
-        font_suffix = "_hd";
-        //OVERLAY_WIDTH=1200;
-        //OVERLAY_HEIGHT=700;
-        current_display_info = hd_display_info;
-        current_display_info.font_width = 24;
-        current_display_info.font_height = 36;
-        OVERLAY_WIDTH = current_display_info.font_width * (current_display_info.char_width);
-        OVERLAY_HEIGHT =current_display_info.font_height * (current_display_info.char_height+2);
-
-    }else{
-        //OVERLAY_WIDTH=1840;
-        //OVERLAY_HEIGHT=1000;
-        current_display_info = fhd_display_info;
-        OVERLAY_WIDTH = current_display_info.font_width * (current_display_info.char_width+0);
-        OVERLAY_WIDTH=1840;//must be multiple of 8 !!!! Give some extra area to draw custom code
-        OVERLAY_HEIGHT =current_display_info.font_height * (current_display_info.char_height+1);
-    }
-    printf("Video Mode %dp. Characters matrix : %d:%d, Fontsize:%d:%d\r\n",
-        height,current_display_info.char_width,current_display_info.char_height,current_display_info.font_width, current_display_info.font_height);
-
-    snprintf(font_load_name, 255, "%sfont%s.png", font_path, font_suffix);
-
 
     PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_1555;//ARGB1555 format, 16 bits per pixel 
     PIXEL_FORMAT_BitsPerPixel = 16;    
@@ -1335,28 +1309,63 @@ static void InitMSPHook(){
         PIXEL_FORMAT_BitsPerPixel = 4;   
     #endif
 
-    //Uncomment to test for Goke / Hisilicon
-    if(false){//THIS Allows to text 1555 format on x86 and SigmStar!!!
-        PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_1555;//ARGB1555 format, 16 bits per pixel 
-        PIXEL_FORMAT_BitsPerPixel = 16;
+
+    int height = GetMajesticVideoConfig(&majestic_width);
+    
+    //Get video resolution
+    if (height<1000 && height>400){
+        font_suffix = "_hd";
+        current_display_info = hd_display_info;       
+    }else{
+        current_display_info = fhd_display_info;
+        font_suffix = "";      
     }
+
+    snprintf(font_load_name, 255, "%sfont%s.png", font_path, font_suffix);
+    
+    //printf("Loadding %s Mode %dp. Characters matrix : %d:%d, Fontsize:%d:%d\r\n", font_load_name,
+    //    height,current_display_info.char_width,current_display_info.char_height,current_display_info.font_width, current_display_info.font_height);
+    printf("Loading %s for %dp mode\r\n", font_load_name, height);
 
     if (bitmapFnt.pData!=NULL)//if called by mistake
         free(bitmapFnt.pData);
 
     bitmapFnt.pData=(void *)loadPngToBMP(font_load_name,&bitmapFnt.u32Width,&bitmapFnt.u32Height);
     bitmapFnt.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
-
     
-    font_pages = bitmapFnt.u32Width/current_display_info.font_width;
-
-    printf("Font %s character size:%d:%d \r\n",font_load_name,current_display_info.font_width,current_display_info.font_height);
     if (bitmapFnt.u32Width==0 || bitmapFnt.u32Height==0){
         printf("Can't find font file : %s \r\n OSD Disabled! \r\n",font_load_name);
         return;
     }
-    int rgn=0;   
 
+    font_pages = bitmapFnt.u32Width/current_display_info.font_width;
+    
+    if (matrix_size==1){//Predefined size for matrix, standard
+          current_display_info.char_width =  50;
+          current_display_info.char_height = 18;  
+    }/*else if (matrix_size==2){//Predefined size for  smaller matrix, for performance
+          current_display_info.char_width =  36;
+          current_display_info.char_height = 12;  
+          SkipXChar=10;
+    }*/else if (font_pages>2){//BetaFlight!!!
+          current_display_info.char_width =  53;//53
+          current_display_info.char_height = 20;          
+    }else{//INAV
+          current_display_info.char_width =  53;//53
+          current_display_info.char_height = 20;          
+    }
+
+    OVERLAY_WIDTH = current_display_info.font_width * (current_display_info.char_width);//must be multiple of 8 !!!
+    OVERLAY_WIDTH = (OVERLAY_WIDTH + 7) & ~7;
+    OVERLAY_HEIGHT =current_display_info.font_height * (current_display_info.char_height);
+
+
+    printf("Glyph size:%d:%d on a %d:%d matrix. Overlay %d:%d \r\n",current_display_info.font_width,current_display_info.font_height,
+        current_display_info.char_width,current_display_info.char_height,
+        OVERLAY_WIDTH,OVERLAY_HEIGHT
+    );
+
+    int rgn=0;   
 
     osds = mmap(NULL, sizeof(*osds) * MAX_OSD,
                 PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
@@ -1372,7 +1381,7 @@ static void InitMSPHook(){
     }  
 
     #ifdef _x86
-        sfVideoMode videoMode = {OVERLAY_WIDTH+20, OVERLAY_HEIGHT+20, 32};
+        sfVideoMode videoMode = {OVERLAY_WIDTH, OVERLAY_HEIGHT, 32};
         window = sfRenderWindow_create(videoMode, "MSP OSD", 0, NULL);
         sfRenderWindow_display(window);
     #endif
@@ -1515,7 +1524,7 @@ static void InitMSPHook(){
             if (true){//Split and show a review of the selected font for several seconds
                 prepared=1;
                 
-                bitmap.enPixelFormat-PIXEL_FORMAT_DEFAULT;
+                bitmap.enPixelFormat = PIXEL_FORMAT_DEFAULT;
                 int preview_height=current_display_info.font_height * current_display_info.char_height;
                 int cols=bitmapFnt.u32Height / preview_height;/*OVERLAY_HEIGH*/;
                 int rows=preview_height/    current_display_info.font_height;
@@ -1551,14 +1560,14 @@ static void InitMSPHook(){
                 
                 #ifdef __SIGMASTAR__   
                     if (verbose)
-                        printf("Set Font Review %d:%d", bitmap.u32Width, bitmap.u32Height);
+                        printf("Set SS Font Review %d:%d", bitmap.u32Width, bitmap.u32Height);
                     //For some reason this fails...?!
                     //set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);//bitmap must match region dimensions!
                     
                     set_bitmapEx(osds[FULL_OVERLAY_ID].hand, &bitmap, PIXEL_FORMAT_BitsPerPixel);
                 #elif __GOKE__
                      if (verbose)
-                        printf("Set Font Review %d:%d", bitmap.u32Width, bitmap.u32Height);
+                        printf("Set Goke Font Review %d:%d", bitmap.u32Width, bitmap.u32Height);
 
                     set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);//bitmap must match region dimensions!
                 #elif _x86

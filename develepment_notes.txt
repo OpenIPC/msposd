@@ -28,3 +28,7 @@ scp ./release/star6e/msposd root@192.168.1.88:/usr/bin/msposd
 
 on the camera
 msposd --channels 7 --master /dev/ttyS2 --baudrate 115200  --osd -r 30
+
+#show text
+echo "Custom Message... &L04 &F22 CPU:&C &B temp:&T" >/tmp/MSPOSD.msg
+echo "Custom Message... &L03 &F28 CPU:&C &B temp:&T" >./MSPOSD.msg

@@ -18,6 +18,7 @@ Usage: msposd [OPTIONS]
  -d --wfb         Monitors wfb.log file and reports errors via HUD messages
  -s --osd         Parse MSP and draw OSD over the video
  -a --ahi         Draw graphic AHI, mode [0-No, 2-Simple 1-Ladder, 3-LadderEx]
+ -x --matrix      OSD matrix [0- 53:20 , 1- 50:18 chars]
  -v --verbose     Show debug info
  --help           Display this help
 ```
@@ -55,7 +56,7 @@ The program will read from /etc/majestic.yaml and will select the type of font t
 
 ### To install:
 Copy msposd for the architecture you need on the cam.  
-Prebuild binaries for x86 and SigmaStar are at release/ folder.  
+Prebuild binaries for x86, SigmaStar, Goke and Hisilicon are at release/ folder.  
 ```
 curl -L -o msposd https://raw.githubusercontent.com/openipc/msposd/main/release/star6e/msposd
 chmod 755 /usr/bin/msposd

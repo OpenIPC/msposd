@@ -673,7 +673,7 @@ uint8_t findClosestPaletteIndexRGBA(uint8_t *color, MI_RGN_PaletteTable_t* palet
     uint8_t g = *(color+1);
     uint8_t b = *(color+2);
     uint8_t a = *(color+3);
-    if (a<128)//transparency treshold
+    if (a<64)//transparency treshold, was 128
         return 15;//transparent
     else if (r>77)
         bestIndex = 0;

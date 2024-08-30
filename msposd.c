@@ -40,6 +40,8 @@ bool verbose = false;
 bool ParseMSP = false;
 int MSP_PollRate=20;
 
+int matrix_size=0;
+
 int AHI_Enabled=1;
 
 const char *default_master = "/dev/ttyAMA0";
@@ -94,6 +96,7 @@ static void print_usage()
  "	-d --wfb         Monitors wfb.log file and reports errors via HUD messages\n"
  "	-s --osd         Parse MSP and draw OSD over the video\n"
  "	-a --ahi         Draw graphic AHI, mode [0-No, 2-Simple 1-Ladder, 3-LadderEx]\n"
+ "	-x --matrix      OSD matrix (0 - 53:20 , 1- 50:18 chars)\n"
  "	-v --verbose     Show debug infot\n"	       
  "	--help           Display this help\n",
 
@@ -938,6 +941,7 @@ int main(int argc, char **argv)
 		{ "refreshrate", required_argument, NULL, 'r' },				
 		{ "folder", required_argument, NULL, 'f' },						
 		{ "persist", required_argument, NULL, 'p' },
+		{ "matrix", required_argument, NULL, 'x' },
 		{ "osd", no_argument, NULL, 'd' },	
 		{ "verbose", no_argument, NULL, 'v' },		
 		{ "temp", no_argument, NULL, 't' },						
@@ -996,6 +1000,10 @@ int main(int argc, char **argv)
 		case 'w':
 			wait_after_bash = atoi(optarg);			
 			LastStart=get_current_time_ms();
+			break;
+
+		case 'x':
+			matrix_size = atoi(optarg);						
 			break;
 
 		case 'r':

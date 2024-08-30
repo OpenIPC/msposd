@@ -5,14 +5,16 @@ if [[ "$1" == *"star6b0" ]]; then
 	CC=cortex_a7_thumb2_hf-gcc13-musl-4_9
 elif [[ "$1" == *"star6e" ]]; then
 	CC=cortex_a7_thumb2_hf-gcc13-glibc-4_9
+	STRIP=toolchain/$CC/arm-openipc-linux-gnueabihf/bin/strip
 elif [[ "$1" == *"goke" ]]; then
 	CC=cortex_a7_thumb2-gcc13-musl-4_9
+	STRIP=toolchain/$CC/arm-openipc-linux-musleabi/bin/strip
 elif [[ "$1" == *"hisi" ]]; then
 	CC=cortex_a7_thumb2-gcc13-musl-4_9
+	STRIP=toolchain/$CC/arm-openipc-linux-musleabi/bin/strip
 fi
 
 GCC=$PWD/toolchain/$CC/bin/arm-linux-gcc
-STRIP=toolchain/$CC/arm-openipc-linux-gnueabihf/bin/strip
 
 if [ ! -e toolchain/$CC ]; then
 	wget -c -q --show-progress $DL/$CC.tgz -P $PWD
@@ -28,9 +30,11 @@ fi
 if [ "$1" = "goke" ]; then
 	DRV=$PWD/firmware/general/package/goke-osdrv-gk7205v200/files/lib
 	make -C . -B CC=$GCC DRV=$DRV $1
+	$STRIP release/$1/msposd
 elif [ "$1" = "hisi" ]; then
 	DRV=$PWD/firmware/general/package/hisilicon-osdrv-hi3516ev200/files/lib
 	make -C . -B CC=$GCC DRV=$DRV $1
+	$STRIP release/$1/msposd
 elif [ "$1" = "star6b0" ]; then
 	DRV=$PWD/firmware/general/package/sigmastar-osdrv-infinity6b0/files/lib
 	make -C . -B CC=$GCC DRV=$DRV $1

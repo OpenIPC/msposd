@@ -20,11 +20,20 @@ static void copyimage(SFT_Image *dest, const SFT_Image *source, int x0, int y0, 
     {
         for (int x = 0; x < source->width; x++)
         {
+            /* we do not need gray scale when we work with only 16 colors
             double t = s[x] * inv255;
             unsigned short r = (1.0 - t) * ((d[x] & 0x7C00) >> 10) + t * maskr;
             unsigned short g = (1.0 - t) * ((d[x] & 0x3E0) >> 5) + t * maskg;
             unsigned short b = (1.0 - t) * (d[x] & 0x1F) + t * maskb;
             d[x] = ((t > 0.0) << 15) | (r << 10) | (g << 5) | b;
+            */
+            unsigned char pixel = s[x];
+             //If the pixel is not zero (assuming non-zero means black)            
+            if (pixel > 64)  // 128 makes them too thin...
+                d[x] = 0x8000;  // Set pixel to opaque black (ARGB1555: 1000 0000 0000 0000)
+            else            
+                d[x] = 0x0000;  // Set pixel to transparent (ARGB1555: 0000 0000 0000 0000)
+            
         }
         d += dest->width;  //rowStride
         s += source->width;
