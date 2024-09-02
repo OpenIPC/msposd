@@ -58,14 +58,14 @@ The program will read from /etc/majestic.yaml and will select the type of font t
 Copy msposd for the architecture you need on the cam.  
 Prebuild binaries for x86, SigmaStar, Goke and Hisilicon are at release/ folder.  
 ```
-curl -L -o msposd https://raw.githubusercontent.com/openipc/msposd/main/release/star6e/msposd
+curl -L -o /usr/bin/msposd https://raw.githubusercontent.com/openipc/msposd/main/release/star6e/msposd
 chmod 755 /usr/bin/msposd
 ```
 Don't forget to copy the font files for you flight controller firmware!  https://github.com/openipc/msposd/tree/main/fonts  
 For INAV these would be:
 ```
-curl -L -o font.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/inav/font.png
-curl -L -o font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/inav/font_hd.png
+curl -L -o /usr/bin/font.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/inav/font.png
+curl -L -o /usr/bin/font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/inav/font_hd.png
 ```
 Start msposd or reference it in OpenIPC scripts.  
 
