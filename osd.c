@@ -990,12 +990,12 @@ static void draw_screenBMP(){
         bmpBuff.enPixelFormat=PIXEL_FORMAT_DEFAULT;
         bmpBuff.u32Width= OVERLAY_WIDTH;   //current_display_info.font_width * current_display_info.char_width;
         bmpBuff.u32Height = OVERLAY_HEIGHT;//current_display_info.font_height * current_display_info.char_height;
-        //bmpBuff.pData = malloc( PIXEL_FORMAT_BitsPerPixel  * bmpBuff.u32Height * bmpBuff.u32Width / 8);
-        bmpBuff.pData = malloc( PIXEL_FORMAT_BitsPerPixel  * bmpBuff.u32Height * getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));
+        //bmpBuff.pData = malloc( bmpBuff.u32Height * bmpBuff.u32Width / 8);
+        bmpBuff.pData = malloc( bmpBuff.u32Height * getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));
         
     }else
-        bmpBuff.pData = memset(bmpBuff.pData, PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4 ? 0xFF : 0x00 , PIXEL_FORMAT_BitsPerPixel  * bmpBuff.u32Height * getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));
-        //bmpBuff.pData = memset(bmpBuff.pData,  0xFF , PIXEL_FORMAT_BitsPerPixel  * bmpBuff.u32Height * getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));
+        bmpBuff.pData = memset(bmpBuff.pData, PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4 ? 0xFF : 0x00 , bmpBuff.u32Height * getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));
+        //bmpBuff.pData = memset(bmpBuff.pData,  0xFF , bmpBuff.u32Height * getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));
 
     bmpBuff.enPixelFormat =  PIXEL_FORMAT_DEFAULT;//  PIXEL_FORMAT_DEFAULT ;//PIXEL_FORMAT_1555;
 
@@ -1134,7 +1134,8 @@ static void clear_screen()
     if (font_pages>2 || (get_time_ms() - LastCleared)>2500) {//no faster than 0.5 per second
         memset(character_map, 0, sizeof(character_map));
         if (bmpBuff.pData!=NULL)//Set whole BMP as transparant, Palette index 0xF if 4bit
-            bmpBuff.pData = memset(bmpBuff.pData, 0xFF , (bmpBuff.u32Height * bmpBuff.u32Width * PIXEL_FORMAT_BitsPerPixel / 8) );
+            memset(bmpBuff.pData, PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4 ? 0xFF : 0x00 , bmpBuff.u32Height * getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));        
+            //bmpBuff.pData = memset(bmpBuff.pData, 0xFF , (bmpBuff.u32Height * bmpBuff.u32Width * PIXEL_FORMAT_BitsPerPixel / 8) );
 
         LastCleared=(get_time_ms());
         //printf("%lu Clear screen\n",(uint32_t)(LastCleared%10000));
@@ -1531,8 +1532,8 @@ static void InitMSPHook(){
                 int fontPageHeight=rows * current_display_info.font_height;//OVERLAY_HEIGHT;;
                 bitmap.u32Height = preview_height;//rows * current_display_info.font_height;//OVERLAY_HEIGHT;
                 bitmap.u32Width = OVERLAY_WIDTH;//bitmapFnt.u32Width * cols;                    
-                bitmap.pData = (unsigned char*)malloc(PIXEL_FORMAT_BitsPerPixel * bitmap.u32Height * getRowStride(bitmap.u32Width , PIXEL_FORMAT_BitsPerPixel));
-                memset(bitmap.pData, 0, PIXEL_FORMAT_BitsPerPixel * bitmap.u32Height * getRowStride(bitmap.u32Width , PIXEL_FORMAT_BitsPerPixel));
+                bitmap.pData = (unsigned char*)malloc(bitmap.u32Height * getRowStride(bitmap.u32Width , PIXEL_FORMAT_BitsPerPixel));
+                memset(bitmap.pData, 0, bitmap.u32Height * getRowStride(bitmap.u32Width , PIXEL_FORMAT_BitsPerPixel));
                 //bmp.u32Width=current_display_info.font_width * current_display_info.char_width;
                 //bmp.u32Height = current_display_info.font_height * current_display_info.char_height;
                 //bmp.pData = malloc( PIXEL_FORMAT_BitsPerPixel  * bmp.u32Height * getRowStride(bmp.u32Width , PIXEL_FORMAT_BitsPerPixel));
