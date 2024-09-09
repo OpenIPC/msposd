@@ -641,9 +641,11 @@ static void serial_read_cb(struct bufferevent *bev, void *arg)
 			last_stat=(get_time_ms());
 			if (stat_screen_refresh_count==0)
 				stat_screen_refresh_count++;
-			if (verbose)
+			if (verbose){
 				printf("UART Events:%u MessagesTTL:%u AttitMSGs:%u Bytes/Sec:%u FPS:%u, avg time per frame ms:%d | %d | %d | \n",stat_pckts,stat_msp_msgs,stat_msp_msg_attitude, 
 					stat_bytes, stat_screen_refresh_count,stat_draw_overlay_1/stat_screen_refresh_count,stat_draw_overlay_2/stat_screen_refresh_count,stat_draw_overlay_3/stat_screen_refresh_count);
+				showchannels(18);
+			}
 			stat_screen_refresh_count=0;
 			stat_pckts=0;
 			stat_bytes=0;
@@ -865,6 +867,9 @@ static int handle_data(const char *port_name, int baudrate,
 	signal(SIGUSR1, sendtestmsg);
 
 	serial_bev = bufferevent_socket_new(base, serial_fd, 0);
+	/* Trigger the read callback only whenever there is at least 16 bytes of data in the buffer. */
+	//So that the read event is not triggered so often
+    bufferevent_setwatermark(serial_bev, EV_READ, 16, 0);
 	bufferevent_setcb(serial_bev, serial_read_cb, NULL, serial_event_cb,
 			  base);
 	bufferevent_enable(serial_bev, EV_READ);	 

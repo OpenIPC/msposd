@@ -179,7 +179,7 @@ static void rx_msp_callback(msp_msg_t *msp_message)
               //memcpy(&channels[0], &msp_message->payload[0],32);
               	memcpy(&channels[0], &msp_message->payload[0], 16 * sizeof(uint16_t));	
 
-	            showchannels(16);		
+	            //showchannels(18);		
             	ProcessChannels();
               break;
          }
@@ -392,7 +392,12 @@ uint64_t get_time_ms() // in milliseconds
     return ts.tv_sec * 1000LL + ts.tv_nsec / 1000000;
 }
 
+/// @brief We keep the main font glyphs here
 BITMAP bitmapFnt;
+
+/// @brief Extra font glyphs with smaller size
+BITMAP bmpFntSmall;
+
 uint16_t character_map[MAX_OSD_WIDTH][MAX_OSD_HEIGHT];
 
 struct osd *osds;//regions over the overlay
@@ -581,7 +586,7 @@ int y_end = 500;
                     n=-k-180;
                 }
                 if (abs(n)>20)//pitch higher than 30 degree.
-                    m_color=COLOR_MAGENTA;
+                    m_color=COLOR_YELLOW;
                 if (abs(n)>40)//pitch higher than 30 degree.
                     m_color=COLOR_RED;
 
@@ -968,6 +973,53 @@ bool DrawText(){
     return true;
 }
 
+                
+
+/// @brief This will try to calculate the position for a small 720p icon on a 1080p screen.
+/// @param fnt 
+/// @param s_left 
+/// @param s_top 
+/// @param s_width 
+/// @param s_height 
+/// @param d_x 
+/// @param d_y 
+/// @param x 
+/// @param y 
+/// @param c 
+/// @param page 
+/// @return 
+bool Convert2SmallGlyph(BITMAP *fnt ,  u_int16_t *s_left, u_int16_t *s_top, u_int16_t *s_width, u_int16_t * s_height, u_int16_t *d_x, u_int16_t * d_y,
+                    int x, int y,int c, int page){
+
+
+    int font_width=24;
+    int font_height=36;
+    
+    if ((y>1 && y<18 && y!=9 & y!=10) && (x < 20 || x > 32)){// Row 0,1 and 18,19 will be normal height
+  
+        *fnt=bmpFntSmall;
+        *s_left = page*font_width;
+        *s_top =  font_height * c;
+        *s_width=font_width;
+        *s_height=font_height;
+
+        if (x>32){//right align
+            *d_x = 52 * 36 - ((52-x) * font_width);
+        }else
+            *d_x= x * font_width ;
+
+        if (y>10)//bottom align
+            *d_y=  20 * 54 - (2*(54-36)) - ((20-y) * font_height);
+        else
+            *d_y= (2*(54-36)) + y * font_height; //offset for the first 2 lines that are normal height
+
+        return true;
+    }
+
+    return false;
+}
+
+
 static void draw_screenBMP(){
     
     if (cntr++<0 )//skip in the beginning to show to font preview
@@ -999,7 +1051,7 @@ static void draw_screenBMP(){
 
     bmpBuff.enPixelFormat =  PIXEL_FORMAT_DEFAULT;//  PIXEL_FORMAT_DEFAULT ;//PIXEL_FORMAT_1555;
 
-
+    bool try_smaller_font=false;
     for (int y = 0; y < current_display_info.char_height; y++){
         for (int x = 0; x < current_display_info.char_width; x++){
 
@@ -1024,19 +1076,26 @@ static void draw_screenBMP(){
                 //the location in the screen bmp where we will place the character glyph
                 u_int16_t d_x=x * current_display_info.font_width + X_OFFSET;
                 u_int16_t d_y=y * current_display_info.font_height;
+                BITMAP fnt=bitmapFnt;
+                
+                if (matrix_size>10 && bmpFntSmall.u32Width>0 && try_smaller_font || y==0)
+                    Convert2SmallGlyph(&fnt, &s_left,&s_top,&s_width,&s_height, &d_x, &d_y, x,y, c, page);
+
+                if (y==0)//If there is no symbol on first line, assume this is statisctics screen.
+                    try_smaller_font=true;
 
                 if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_1555)                
-                 copyRectARGB1555(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
+                 copyRectARGB1555(fnt.pData,fnt.u32Width,fnt.u32Height,
                                  bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
                                  s_left,s_top,s_width,s_height,
                                  d_x,d_y);
                 else if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4)   
-                copyRectI4(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
+                copyRectI4(fnt.pData,fnt.u32Width,fnt.u32Height,
                                 bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
                                 s_left,s_top,s_width,s_height,
                                 d_x,d_y);
                 else                                
-                copyRectI8(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
+                copyRectI8(fnt.pData,fnt.u32Width,fnt.u32Height,
                                 bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
                                 s_left,s_top,s_width,s_height,
                                 d_x,d_y);
@@ -1333,13 +1392,15 @@ static void InitMSPHook(){
 
     bitmapFnt.pData=(void *)loadPngToBMP(font_load_name,&bitmapFnt.u32Width,&bitmapFnt.u32Height);
     bitmapFnt.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
-    
+        
+
     if (bitmapFnt.u32Width==0 || bitmapFnt.u32Height==0){
         printf("Can't find font file : %s \r\n OSD Disabled! \r\n",font_load_name);
         return;
     }
 
     font_pages = bitmapFnt.u32Width/current_display_info.font_width;
+    printf("Font file res %d:%d pages:%d\r\n", bitmapFnt.u32Width,bitmapFnt.u32Height, font_pages);
     
     if (matrix_size==1){//Predefined size for matrix, standard
           current_display_info.char_width =  50;
@@ -1354,6 +1415,17 @@ static void InitMSPHook(){
     }else{//INAV
           current_display_info.char_width =  53;//53
           current_display_info.char_height = 20;          
+    }
+    //new mode, showing smaller icons in FHD mode
+    if (matrix_size>10){
+        snprintf(font_load_name, 255, "%sfont%s.png", font_path, "_hd");
+        printf("Loading small size glyphs %s for %dp mode\r\n", font_load_name, height);
+
+        if (bmpFntSmall.pData!=NULL)//if called by mistake
+            free(bmpFntSmall.pData);
+
+        bmpFntSmall.pData=(void *)loadPngToBMP(font_load_name,&bmpFntSmall.u32Width,&bmpFntSmall.u32Height);
+        bmpFntSmall.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8        
     }
 
     OVERLAY_WIDTH = current_display_info.font_width * (current_display_info.char_width);//must be multiple of 8 !!!
@@ -1670,6 +1742,8 @@ static void CloseMSP(){
         free(bitmapFnt.pData);
     if (bmpBuff.pData!=NULL)
         free(bmpBuff.pData);
+    if (bmpFntSmall.pData!=NULL)
+        free(bmpFntSmall.pData);
         
     int res_mun=munmap(osds, sizeof(*osds) * MAX_OSD);
 

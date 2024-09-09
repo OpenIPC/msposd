@@ -36,3 +36,7 @@ echo "Custom Message... &L03 &F28 CPU:&C &B temp:&T" >./MSPOSD.msg
 #betaflight fonts download
 curl -L -o /usr/bin/font.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/betaflight/font.png
 curl -L -o /usr/bin/font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/betaflight/font_hd.png
+
+--matrix 11 
+will enable second font size - small font for FHD mode.
+Will Line 1,2, 10,11, 19,20 will be Large font, the rest will be small, and aligned to the adjacent corner.

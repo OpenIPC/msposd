@@ -975,7 +975,8 @@ void copyRectI4(
     if (srcX + width > srcWidth || srcY + height > srcHeight ||
         destX + width > destWidth || destY + height > destHeight) {
         // Handle error: the rectangle is out of bounds
-        printf("Error copyRectI4 to %d : %d\r\n", destX, destY);
+        printf("Error copyRectI4 from %d:%d  to %d:d  srcWidth:%d, srcHeight:%d, destWidth:%d, destHeight:%d \r\n",srcX,srcY, destX, destY,
+            srcWidth, srcHeight, destWidth, destHeight);
         return;
     }
 
