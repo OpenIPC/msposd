@@ -17,16 +17,26 @@ Usage: msposd [OPTIONS]
  -t --temp        Read SoC temperature
  -d --wfb         Monitors wfb.log file and reports errors via HUD messages
  -s --osd         Parse MSP and draw OSD over the video
- -a --ahi         Draw graphic AHI, mode [0-No, 2-Simple 1-Ladder, 3-LadderEx]
- -x --matrix      OSD matrix [0- 53:20 , 1- 50:18 chars]
+ -a --ahi         Draw graphic AHI, mode [0-No, 2-Simple 1-Ladder, 3-LadderEx (home indicator on ladder)]
+ -x --matrix      OSD matrix [0- 53:20 , 1- 50:18 chars, 11 Variable font size]
  -v --verbose     Show debug info
  --help           Display this help
 ```
 
+**Support for two font sizes.** (on FullHD mode only!)  
+set --matrix  to a value 11 or higher, each value represents a template to be used to map the OSD config.  
+```--matrix 11``` will use template 1. (click for a video sample)  
+<a href="https://youtu.be/uKa1P8-Soxw">
+    <img src="pics/OSD_Variable_font.jpg" alt="Video sample" width="300"/>
+</a>  
+All the OSD symbols in the red rectangles will be rendered using smaller font size. They will be aligned to the outer corner of each rectangle (up-left for the upper left one).
+
+
 ###  Options.
 Forwarding of MSP packets via UDP.  
 Can monitor RC Channels values in FC and call the script `channels.sh` (located at /usr/bin or /usr/sbin).Will passing the channel number and its value to it as $1 and $2 parameters. This allows for controlling the camera via the Remote Control Transmitter.  
-AHI (Artificial Horizon Indicator) ladder - Graphical AHI , that is drawn over the standard OSD.  
+AHI (Artificial Horizon Indicator) ladder - Graphical AHI , that is drawn over the standard OSD. 
+
 **Show custom mesage and diagnostics** on screen when text is written to file /tmp/MSPOSD.msg 
 ```
 echo "Custom Message... &L04 &F22 CPU:&C &B temp:&T" >/tmp/MSPOSD.msg
@@ -57,16 +67,25 @@ The program will read from /etc/majestic.yaml and will select the type of font t
 ### To install:
 Copy msposd for the architecture you need on the cam.  
 Prebuild binaries for x86, SigmaStar, Goke and Hisilicon are at release/ folder.  
+**For SigmaStar** based SoC (ssc338q, sc30kq) :
 ```
 curl -L -o /usr/bin/msposd https://raw.githubusercontent.com/openipc/msposd/main/release/star6e/msposd
 chmod 755 /usr/bin/msposd
 ```
-Don't forget to copy the font files for you flight controller firmware!  https://github.com/openipc/msposd/tree/main/fonts  
-For INAV these would be:
+Copy the font files for you flight controller firmware INAV/ Betaflight / ArduPilot from here  https://github.com/openipc/msposd/tree/main/fonts   
+Choose one of the following below.   
+**For INAV**:
 ```
 curl -L -o /usr/bin/font.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/inav/font.png
 curl -L -o /usr/bin/font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/inav/font_hd.png
 ```
+
+**For Betaflight**:
+```
+curl -L -o /usr/bin/font.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/betaflight/font.png
+curl -L -o /usr/bin/font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/betaflight/font_hd.png
+```
+
 Start msposd or reference it in OpenIPC scripts.  
 
 ### Acknowledgements:

@@ -114,6 +114,10 @@ static uint8_t no_btfl_hd = 0;
 
 static int16_t last_pitch = 0;
 static int16_t last_roll = 0;
+static int16_t last_heading=0; 
+
+static int16_t last_directionToHome=0;
+static int16_t last_distanceToHome=0;
 
 static int16_t last_RC_Channels[16];
 
@@ -170,10 +174,24 @@ static void rx_msp_callback(msp_msg_t *msp_message)
 
             last_pitch = *(int16_t*)&msp_message->payload[2];
             last_roll = *(int16_t*)&msp_message->payload[0];
+            last_heading = *(int16_t*)&msp_message->payload[4];
             stat_msp_msg_attitude++;
            //printf("\n Got MSG_ATTITUDE            pitch:%d  roll:%d\n", pitch, roll);
            break;
          }
+
+        case MSP_COMP_GPS: {
+            /*
+	GPS_distanceToHome	UINT 16	unit: meter
+GPS_directionToHome	UINT 16	unit: degree (range [-180;+180])
+GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS fix is not dependent of this)
+            */
+            last_distanceToHome = *(int16_t*)&msp_message->payload[0];
+            last_directionToHome = *(int16_t*)&msp_message->payload[2];            
+            //stat_msp_msg_attitude++;
+           //printf("\n Got MSG_ATTITUDE            pitch:%d  roll:%d\n", pitch, roll);
+           break;
+        }
         case MSP_RC: {
               //printf("Got MSP_RC \n");
               //memcpy(&channels[0], &msp_message->payload[0],32);
@@ -455,6 +473,7 @@ int y_end = 500;
 
  }
 
+ /// @brief Ugly implementation. To do : clear from bmp format dependant code
  static void draw_Ladder(){
     if (PIXEL_FORMAT_DEFAULT!=PIXEL_FORMAT_I4)
         return;
@@ -467,8 +486,11 @@ int y_end = 500;
     //Point img_center = {OVERLAY_WIDTH/2, OVERLAY_HEIGHT/2};  // Center of the image (example)
     //Point original_point = {600, 500};  // Example point
     //Point original_point2 = {1300, 500};  // Example point
-     
-    
+
+
+    int TiltY= - 150;//pixels offset on the vertical, negative value means up, this is camera nose-down angle in pixels
+    //to do, make this in degrees
+
     const bool horizonInvertPitch = false;
     const bool horizonInvertRoll = false;
     double horizonWidth = 3;
@@ -496,7 +518,7 @@ int y_end = 500;
         pitch_degree=pitch_degree*-1;
     }   
 
-    int TiltY= - 100;//pixels offset on the vertical, negative value means up
+    
     const int pos_x= OVERLAY_WIDTH/2;
     const int pos_y= (OVERLAY_HEIGHT/2)  + TiltY;
     const int width_ladder= 100*horizonWidth;
@@ -692,9 +714,74 @@ int y_end = 500;
                     //drawFilledRectangleI4AA(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, rect_x, y, rect_width, rect_height);
                     
                 }
-             }
+
+                if (AHI_Enabled==3){
+                    uint32_t xHome, yHome;
+
+                    int home_offset = last_directionToHome - last_heading;
+
+                    // Normalize to range [-180, 180]
+                    if (home_offset > 180) {
+                        home_offset -= 360;
+                    } else if (home_offset < -180) {
+                        home_offset += 360;
+                    }
+
+                    // home is out of AHI range
+                    if  (abs(home_offset)>90){                                          
+                        if  (home_offset<0){ //(left < right){
+                            //painter->drawText(pos_x-width_ladder*2.5/2+1, y_label, "\uf015");
+                            xHome=start_x;
+                        } else{
+                            xHome=start_x+width_ladder*2.5;
+                            //painter->drawText(pos_x+width_ladder*2.5/2-22, y_label, "\uf015");
+                        }
+                    }else{
+                        double K = (double)((double)home_offset+90) /180;//this is from 0 to 1
+                        if (K==0)//just in case
+                            K=1;
+                        xHome = (start_x + (K*((double)width_ladder)*2.5));
+                    }
+
+                    
+                    int c=10;//Home(small house) symbol to be shown for INAV
+                    if (font_pages>2)//tha same symbol for betflight
+                        c=17; 
+                    //Find the coordinates if the the rectangle in the Font Bitmap
+                    u_int16_t s_left = /*page*/0*current_display_info.font_width;
+                    u_int16_t s_top = current_display_info.font_height * c;
+                    u_int16_t s_width = current_display_info.font_width;
+                    u_int16_t s_height = current_display_info.font_height; 
+
+                    BITMAP btmp=bitmapFnt;
+                    if (matrix_size>10 && bmpFntSmall.u32Width>0){
+                        btmp=bmpFntSmall;
+                        s_width=24;
+                        s_height=36;
+                        s_left = 0*s_width;
+                        s_top =  s_height * c;
+                        btmp=bmpFntSmall;
+                    }
+                    uint32_t xR, yR;
+                    ApplyTransform(xHome - (s_width/2) , y - s_height,  &xR, &yR);
+                    
+                    //xR = (xR + 7) & ~7;//Round up to 8
+                    xR = (xR + 3) & ~3;//Round up to 4, otherwise I4 bitmap image copy distorts the glyph !!!
+
+                    if (xR>0 && xR<OVERLAY_WIDTH && yR>0 && yR<OVERLAY_HEIGHT){
+                        copyRectI4(btmp.pData,btmp.u32Width,btmp.u32Height,
+                                bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
+                                s_left,s_top,s_width,s_height,
+                                xR,yR);
+                    }
+
+                }
+
+            }
         }
-    }
+    }//draw ladder
+
+
 
  
  }
@@ -1056,7 +1143,7 @@ static void draw_screenBMP(){
         for (int x = 0; x < current_display_info.char_width; x++){
 
             if (AbortNow){//There is request to close app, do not copy to buffer since it may be disposed already.
-                printf("Drawing aborted. \r\n");
+                printf("Drawing aborted! \r\n");
                 return;
             }
 
@@ -1485,7 +1572,7 @@ static void InitMSPHook(){
         #endif
 
         if (true/*!access(img, F_OK)*/){    
-            cntr= - 100;                
+            cntr= - 30; //skip first 50 draw requests from the FC to show the preview, about 3 seconds
             BITMAP bitmap;                                
             int prepared=0;
             if (false){//Load a BITMAP and show it on the screen

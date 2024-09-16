@@ -1,5 +1,3 @@
-
-
 # to compile for desktop
 sudo apt-get update
 sudo apt-get install libevent-dev
@@ -24,10 +22,10 @@ make osd-x86 VERBOSE=1
 cc msposd.c -I ./include -L/usr/lib/x86_64-linux-gnu/  -lcsfml-graphics -lcsfml-window -lcsfml-system -O1 -g -fsanitize=address -fno-omit-frame-pointer -Wall -Wextra -D_x86 -g -fsanitize=address -levent_core -o msposd
 
 
-scp ./release/star6e/msposd root@192.168.1.88:/usr/bin/msposd
+scp -o ./release/star6e/msposd root@192.168.1.88:/usr/bin/msposd
 
 on the camera
-msposd --channels 7 --master /dev/ttyS2 --baudrate 115200  --osd -r 30
+msposd --channels 7 --master /dev/ttyS2 --baudrate 115200  --osd --matrix 11 --ahi 3 -r 30
 
 #show text
 echo "Custom Message... &L04 &F22 CPU:&C &B temp:&T" >/tmp/MSPOSD.msg
@@ -40,3 +38,6 @@ curl -L -o /usr/bin/font_hd.png https://raw.githubusercontent.com/openipc/msposd
 --matrix 11 
 will enable second font size - small font for FHD mode.
 Will Line 1,2, 10,11, 19,20 will be Large font, the rest will be small, and aligned to the adjacent corner.
+
+--ahi 3
+Enhanced AHI ladder, home indicator on the main AHI line

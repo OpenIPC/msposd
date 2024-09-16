@@ -626,6 +626,8 @@ static long last_stat=0;
 
 static void serial_read_cb(struct bufferevent *bev, void *arg)
 {
+	if (AbortNow)//Abort request by user pending...
+		return;
 	struct evbuffer *input = bufferevent_get_input(bev);
 	int packet_len, in_len;
 	struct event_base *base = arg;	
@@ -773,8 +775,13 @@ static void send_variant_request2(int serial_fd) {
 		construct_msp_command(buffer, MSP_RC, NULL, 0, MSP_OUTBOUND);
     	res = write(serial_fd, &buffer, sizeof(buffer));
 	}else if (AHI_Enabled){
-		construct_msp_command(buffer, MSP_ATTITUDE, NULL, 0, MSP_OUTBOUND);
-    	res = write(serial_fd, &buffer, sizeof(buffer));
+		if (AHI_Enabled==3 && VariantCounter%13==1){
+			construct_msp_command(buffer, MSP_COMP_GPS, NULL, 0, MSP_OUTBOUND);
+    		res = write(serial_fd, &buffer, sizeof(buffer));
+		}else{//this is called at every POLL, skipping every 5th and every 13th.
+			construct_msp_command(buffer, MSP_ATTITUDE, NULL, 0, MSP_OUTBOUND);
+    		res = write(serial_fd, &buffer, sizeof(buffer));
+		}
 	}
 
 	

@@ -10,6 +10,7 @@
 #define MSP_CMD_STATUS 101
 #define MSP_CMD_RC 105
 
+#define MSP_COMP_GPS  107
 #define MSP_ATTITUDE  108
 #define MSP_RC  105
 

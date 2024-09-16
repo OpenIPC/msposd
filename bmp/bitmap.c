@@ -1315,6 +1315,22 @@ void rotate_point(Point original, Point img_center, double angle_degrees, Point 
 }
 
 
+void ApplyTransform(int posX0, int posY0, uint32_t *posX_R, uint32_t *posY_R){
+    uint32_t width = Transform_OVERLAY_WIDTH;
+    uint32_t height=Transform_OVERLAY_HEIGHT;
+    // Apply Transform
+    int OffsY = sin((Transform_Pitch) * (M_PI / 180.0)) * 400;
+    Point img_center = {Transform_OVERLAY_WIDTH / 2, Transform_OVERLAY_HEIGHT / 2};  // Center of the image
+    // Define the four corners of the rectangle before rotation
+    Point A = {posX0, posY0-OffsY};    
+    // Rotate each corner around the center
+    Point rotated_A;
+    rotate_point(A, img_center, Transform_Roll, &rotated_A);
+    *posX_R=rotated_A.x;
+    *posY_R=rotated_A.y;
+    
+}
+
 
 void drawLine(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1, uint8_t color, int thickness) {
 
