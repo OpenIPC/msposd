@@ -150,6 +150,7 @@ static void copy_to_msp_frame_buffer(void *buffer, uint16_t size) {
 static int stat_msp_msgs=0;
 static int stat_msp_msg_attitude=0;
 static int stat_screen_refresh_count=0;
+static int stat_skipped_frames=0;
 static int stat_draw_overlay_1=0, stat_draw_overlay_2=0, stat_draw_overlay_3=0;
 
 extern bool AbortNow;
@@ -162,6 +163,8 @@ extern void ProcessChannels();
 extern uint16_t channels[18];
 extern int matrix_size;
 extern int GetTempSigmaStar();
+extern int SendWfbLogToGround();
+extern bool monitor_wfb;
 
 
 static void rx_msp_callback(msp_msg_t *msp_message)
@@ -561,14 +564,6 @@ int y_end = 500;
          //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder,pos_y,px+width_ladder,pos_y, COLOR_GREEN);
          //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder,pos_y,px+width_ladder,pos_y, COLOR_GREEN);
     }
-/*
-    painter->translate(width()/2,height()/2);
-    painter->rotate(roll_degree*-1);
-    painter->translate((width()/2)*-1,(height()/2)*-1);
-*/
- 
-
-    
 
     int ratio = horizonSpacing; //pixels per degree
     int vrange = horizonRange; //total vertical range in degrees
@@ -786,11 +781,13 @@ int y_end = 500;
  
  }
 
+static int droppedTTL=0;
+static bool first_wfb_read=true;
 
 static void fill(char* str)
 {
     unsigned int rxb_l, txb_l, cpu_l[6];
-    char out[80] = "";
+    char out[180] = "";
     char param = 0;
     int ipos = 0, opos = 0;
 
@@ -875,22 +872,33 @@ static void fill(char* str)
             sprintf(c, "%.1fMb FPS:%d", megabits,(unsigned int)fps);
                         
             strcat(out, c);
+            opos += strlen(c);
             
-        }
-        /*
-        else if (str[ipos + 1] == 'M')
+        }else if (str[ipos + 1] == 'p')
         {
-            ipos++;
-            struct sysinfo si;
-            sysinfo(&si);
-
-            char m[16];
-            short used = (si.freeram + si.bufferram) / 1024 / 1024;
-            short total = si.totalram / 1024 / 1024;
-            sprintf(m, "%d/%dMB", used, total);
-            strcat(out, m);
-            opos += strlen(m);
-        } */
+            ipos++;            
+            char c[80];              
+            monitor_wfb=true;      
+            int dropped = SendWfbLogToGround();            
+            if (first_wfb_read){
+                dropped=0;
+                droppedTTL=0;
+            }
+                 
+            first_wfb_read=false;
+            droppedTTL+=dropped;
+            // Print the value with one digit after the decimal point
+            if (dropped==0)
+                sprintf(c, "d=%d", droppedTTL);
+            else{
+                sprintf(c, "+ %d ! Dropped=%d ", dropped,droppedTTL);   
+                if (verbose)                  
+                    printf("WFB_NG Dropped UDP packets: %d\r\n",dropped);
+            }
+            strcat(out, c); 
+            opos += strlen(c);                 
+        }
+       
         else if (str[ipos + 1] == 't')
         {
             ipos++;
@@ -941,8 +949,6 @@ static void fill(char* str)
             
             ipos += 3;
         }
-
-
         else if (str[ipos + 1] == '&') {
             ipos++;
             strcat(out, "&");
@@ -950,7 +956,7 @@ static void fill(char* str)
         }
         ipos++; 
     }
-    strncpy(str, out, 80);
+    strncpy(str, out, 180);
 }
 
 #ifdef   _x86
@@ -1113,6 +1119,7 @@ static void draw_screenBMP(){
         return ;
 	if ( (get_time_ms() - LastDrawn  ) < MinTimeBetweenScreenRefresh){//Set some delay to keep CPU load low
         // printf("%lu DrawSkipped LastDrawn:%lu\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)LastDrawn);
+        stat_skipped_frames++;
 		return ;
     }
 

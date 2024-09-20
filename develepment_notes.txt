@@ -22,7 +22,7 @@ make osd-x86 VERBOSE=1
 cc msposd.c -I ./include -L/usr/lib/x86_64-linux-gnu/  -lcsfml-graphics -lcsfml-window -lcsfml-system -O1 -g -fsanitize=address -fno-omit-frame-pointer -Wall -Wextra -D_x86 -g -fsanitize=address -levent_core -o msposd
 
 
-scp -o ./release/star6e/msposd root@192.168.1.88:/usr/bin/msposd
+scp -O ./release/star6e/msposd root@192.168.1.88:/usr/bin/msposd
 
 on the camera
 msposd --channels 7 --master /dev/ttyS2 --baudrate 115200  --osd --matrix 11 --ahi 3 -r 30
@@ -30,6 +30,10 @@ msposd --channels 7 --master /dev/ttyS2 --baudrate 115200  --osd --matrix 11 --a
 #show text
 echo "Custom Message... &L04 &F22 CPU:&C &B temp:&T" >/tmp/MSPOSD.msg
 echo "Custom Message... &L03 &F28 CPU:&C &B temp:&T" >./MSPOSD.msg
+echo "40fps/MCS3/15Mb imx415_tipo.bin qpDelta:-6 &L05 &F22 CPU:&C &B temp:&T &p" >./MSPOSD.msg
+
+#test
+echo "1586 packets dropped" > ./wfb.log
 
 #betaflight fonts download
 curl -L -o /usr/bin/font.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/betaflight/font.png

@@ -76,7 +76,7 @@ Value of 3 is a compromise, 3 sequential packets for AHI change will be aggregat
 */
 int minAggPckts=3;
 
-static bool monitor_wfb=false;
+bool monitor_wfb=false;
 static int temp = false;
  
 
@@ -186,7 +186,12 @@ static void signal_cb(evutil_socket_t fd, short event, void *arg)
 #define MAX_BUFFER_SIZE 50 //Limited by mavlink
 
 static char MavLinkMsgFile[128]= "mavlink.msg";  
+
+#ifdef _x86
 static char WfbLogFile[128]= "wfb.log";  
+#else
+static char WfbLogFile[128]= "/tmp/wfb.log";  
+#endif
 
 bool Check4MavlinkMsg(char* buffer) {
     //const char *filename = MavLinkMsgFile;//"mavlink.msg";
@@ -215,12 +220,12 @@ static uint8_t system_id=1;
 static unsigned long long LastWfbSent=0;
 
 /// @brief wfb_tx output should be redirected to wfb.log. Parse it and extracted dropped packets!
-/// @return 
-static bool SendWfbLogToGround(){
+/// @return Number of dropped packets for the last period
+int SendWfbLogToGround(){
 	if (!monitor_wfb)
 		return false;
 	if ( abs(get_current_time_ms()-LastWfbSent) < 1000)//Once a second max
-		return false;
+		return 0;
 
 	LastWfbSent = abs(get_current_time_ms());		
 
@@ -230,7 +235,7 @@ static bool SendWfbLogToGround(){
     if (file == NULL) {
 		if (verbose)
         	printf("No file %s\n",WfbLogFile);
-        return false;
+        return 0;
     }
 
     char buff[200];
@@ -240,8 +245,8 @@ static bool SendWfbLogToGround(){
 UDP rxq overflow: 2 packets dropped
 UDP rxq overflow: 45 packets dropped
 */
-	if (verbose)
-		printf("Parsing file: %s\n",WfbLogFile);
+	//if (verbose)
+	// printf("Parsing file: %s\n",WfbLogFile);
 	int maxlinestoparse=0;
     // Read lines from the file and parse for dropped packets
     while (fgets(buff, sizeof(buff), file) != NULL) {        
@@ -264,7 +269,7 @@ UDP rxq overflow: 45 packets dropped
     fclose(file);
 
 	if (maxlinestoparse==0 && total_dropped_packets==0)//file was empty
-		return;
+		return 0;
 
     //remove(WfbLogFile) // This will break console output in the file!    
 		
@@ -273,26 +278,28 @@ UDP rxq overflow: 45 packets dropped
     	fclose(file);   
 	     
 	
-    sprintf(msg_buf,"%d video pckts dropped!\n", total_dropped_packets);
-	printf("%s",msg_buf);
-	
-    mavlink_message_t message;
- 	
-    mavlink_msg_statustext_pack_chan(
-        system_id,
-        MAV_COMP_ID_SYSTEM_CONTROL,
-        MAVLINK_COMM_1,
-        &message,
-		4,  	// 4 - Warning, 5 - Error
-		msg_buf,
-		0,0);
-
-    uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
-    const int len = mavlink_msg_to_send_buffer(buffer, &message);
+	if (false /*out_sock>0*/){//if we have outbound socket for mavlink, but now if available it is used for MSP
+		sprintf(msg_buf,"%d video pckts dropped!\n", total_dropped_packets);
+		printf("%s",msg_buf);
 		
-	sendto(out_sock, buffer, len, 0, (struct sockaddr *)&sin_out, sizeof(sin_out));
+		mavlink_message_t message;
+		
+		mavlink_msg_statustext_pack_chan(
+			system_id,
+			MAV_COMP_ID_SYSTEM_CONTROL,
+			MAVLINK_COMM_1,
+			&message,
+			4,  	// 4 - Warning, 5 - Error
+			msg_buf,
+			0,0);
 
-	return true;    
+		uint8_t buffer[MAVLINK_MAX_PACKET_LEN];
+		const int len = mavlink_msg_to_send_buffer(buffer, &message);
+			
+		sendto(out_sock, buffer, len, 0, (struct sockaddr *)&sin_out, sizeof(sin_out));
+	}
+
+	return total_dropped_packets;    
 
 }
 
@@ -644,8 +651,8 @@ static void serial_read_cb(struct bufferevent *bev, void *arg)
 			if (stat_screen_refresh_count==0)
 				stat_screen_refresh_count++;
 			if (verbose){
-				printf("UART Events:%u MessagesTTL:%u AttitMSGs:%u Bytes/Sec:%u FPS:%u, avg time per frame ms:%d | %d | %d | \n",stat_pckts,stat_msp_msgs,stat_msp_msg_attitude, 
-					stat_bytes, stat_screen_refresh_count,stat_draw_overlay_1/stat_screen_refresh_count,stat_draw_overlay_2/stat_screen_refresh_count,stat_draw_overlay_3/stat_screen_refresh_count);
+				printf("UART Events:%u MessagesTTL:%u AttitMSGs:%u Bytes/Sec:%u FPS:%u(skipped:%d), avg time per frame ms:%d | %d | %d | \n",stat_pckts,stat_msp_msgs,stat_msp_msg_attitude, 
+					stat_bytes, stat_screen_refresh_count, stat_skipped_frames, stat_draw_overlay_1/stat_screen_refresh_count,stat_draw_overlay_2/stat_screen_refresh_count,stat_draw_overlay_3/stat_screen_refresh_count);
 				showchannels(18);
 			}
 			stat_screen_refresh_count=0;
@@ -656,6 +663,7 @@ static void serial_read_cb(struct bufferevent *bev, void *arg)
 			stat_draw_overlay_1=0;
 			stat_draw_overlay_2=0;
 			stat_draw_overlay_3=0;
+			stat_skipped_frames=0;
     	}
 		stat_pckts++;
 		stat_bytes+=packet_len;
