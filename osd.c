@@ -439,6 +439,10 @@ static bool osd_msg_enabled = false;
 //This will be where we will copy font icons and then pass to Display API  to render over video.
 BITMAP bmpBuff;
 
+/// @brief Pointer to the canvas memory with bmp data
+void* directBmp;
+bool useDirectBMPBuffer=false;
+
 int x_start = 600;
 int y_start = 500;
 int x_end = 1300;
@@ -710,9 +714,8 @@ int y_end = 500;
                     
                 }
 
-                if (AHI_Enabled==3){
+                if (AHI_Enabled==3){//Draw home
                     uint32_t xHome, yHome;
-
                     int home_offset = last_directionToHome - last_heading;
 
                     // Normalize to range [-180, 180]
@@ -724,12 +727,10 @@ int y_end = 500;
 
                     // home is out of AHI range
                     if  (abs(home_offset)>90){                                          
-                        if  (home_offset<0){ //(left < right){
-                            //painter->drawText(pos_x-width_ladder*2.5/2+1, y_label, "\uf015");
+                        if  (home_offset<0){ //(left < right){                            
                             xHome=start_x;
                         } else{
-                            xHome=start_x+width_ladder*2.5;
-                            //painter->drawText(pos_x+width_ladder*2.5/2-22, y_label, "\uf015");
+                            xHome=start_x+width_ladder*2.5;                            
                         }
                     }else{
                         double K = (double)((double)home_offset+90) /180;//this is from 0 to 1
@@ -986,12 +987,11 @@ bool DrawText(){
             return false;
         }
         LastOSDMsgParsed = get_time_ms();//Do not parse and read variable too often
-    }
-    
+    }    
     bool res=false;   
     int result;
     
-    char out[80];
+    char out[180];
     size_t bytesRead=0;
     FILE *file=NULL;    
     file = fopen(FECFile, "rb");
@@ -1005,7 +1005,7 @@ bool DrawText(){
     }
     if (osd_msg_enabled==false)
         return;
-
+    
     uint64_t timems=get_time_ms();
     if(osds[FULL_OVERLAY_ID].updt == 1 || 
         (timems - LastOSDMsgParsed) > 1000){//Update varaibles in Message and render the text as BMP
@@ -1054,14 +1054,13 @@ bool DrawText(){
     if (msg_layout%4==3)//moving
         posX=20 + ((timems/16)%(bmpBuff.u32Width - bitmapText.u32Width - 40))& ~1;
     posY=(msg_layout/4)==0? 0 : (bmpBuff.u32Height - bitmapText.u32Height) - 2;
-
+    
     if (bitmapText.pData!=NULL && bitmapText.enPixelFormat ==  PIXEL_FORMAT_DEFAULT){
         copyRectI4(bitmapText.pData,bitmapText.u32Width,bitmapText.u32Height,
                                 bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
                                 //0,0,bitmapText.u32Width,bitmapText.u32Height,
                                 0,0,bitmapText.u32Width ,bitmapText.u32Height,
                                 posX,posY);
-
     }
     return true;
 }
@@ -1132,12 +1131,17 @@ static void draw_screenBMP(){
     LastDrawn= get_time_ms();
 
     if (bmpBuff.pData==NULL){
-        //bmpBuff.u32Width = 
+        
         bmpBuff.enPixelFormat=PIXEL_FORMAT_DEFAULT;
         bmpBuff.u32Width= OVERLAY_WIDTH;   //current_display_info.font_width * current_display_info.char_width;
         bmpBuff.u32Height = OVERLAY_HEIGHT;//current_display_info.font_height * current_display_info.char_height;
         //bmpBuff.pData = malloc( bmpBuff.u32Height * bmpBuff.u32Width / 8);
-        bmpBuff.pData = malloc( bmpBuff.u32Height * getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));
+        if (useDirectBMPBuffer){            
+            bmpBuff.pData = get_directBMP(osds[FULL_OVERLAY_ID].hand);           
+            //clear the image, since it contains the last one
+            memset(bmpBuff.pData, PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4 ? 0xFF : 0x00 , bmpBuff.u32Height * getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));           
+        }else
+            bmpBuff.pData = malloc( bmpBuff.u32Height * getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));    
         
     }else
         bmpBuff.pData = memset(bmpBuff.pData, PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4 ? 0xFF : 0x00 , bmpBuff.u32Height * getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));
@@ -1147,6 +1151,7 @@ static void draw_screenBMP(){
 
     bool try_smaller_font=false;
     for (int y = 0; y < current_display_info.char_height; y++){
+        
         for (int x = 0; x < current_display_info.char_width; x++){
 
             if (AbortNow){//There is request to close app, do not copy to buffer since it may be disposed already.
@@ -1178,16 +1183,19 @@ static void draw_screenBMP(){
                 if (y==0)//If there is no symbol on first line, assume this is statisctics screen.
                     try_smaller_font=true;
 
+                //if (cntr<40)
+                //    printf("Using direct canvas memory mode! size:%d:%d  stride:\r\n ",bmpBuff.u32Width,bmpBuff.u32Height,getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));
                 if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_1555)                
                  copyRectARGB1555(fnt.pData,fnt.u32Width,fnt.u32Height,
                                  bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
                                  s_left,s_top,s_width,s_height,
                                  d_x,d_y);
                 else if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4)   
-                copyRectI4(fnt.pData,fnt.u32Width,fnt.u32Height,
-                                bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
-                                s_left,s_top,s_width,s_height,
-                                d_x,d_y);
+                 copyRectI4(fnt.pData,fnt.u32Width,fnt.u32Height,
+                                 bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
+                                 s_left,s_top,s_width,s_height,
+                                 d_x,d_y);
+                           
                 else                                
                 copyRectI8(fnt.pData,fnt.u32Width,fnt.u32Height,
                                 bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
@@ -1201,12 +1209,13 @@ static void draw_screenBMP(){
     }
 
     uint64_t step2=get_time_ms();  
-
+    
     if (AHI_Enabled==2)
         draw_AHI();
     
     if (AHI_Enabled==1 || AHI_Enabled>2)
         draw_Ladder();   
+    
 
     //strcpy(osds[FULL_OVERLAY_ID].text,"$M $B Test");//"$M $B Test");
     DrawText();
@@ -1248,11 +1257,22 @@ static void draw_screenBMP(){
     
  
 
+#elif __GOKE__
+
+    set_bitmap(osds[FULL_OVERLAY_ID].hand, &bmpBuff);
+    
 #else
    int id=0;
    // printf("%lu set_bitmapB for:%d | %d ms\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn));
     
-    set_bitmap(osds[FULL_OVERLAY_ID].hand, &bmpBuff);
+    if (useDirectBMPBuffer){
+        int s32Ret = MI_RGN_UpdateCanvas(osds[FULL_OVERLAY_ID].hand);
+        bmpBuff.pData=NULL;//we must reset it so that we get it the next iteration to draw!
+        if (verbose&& s32Ret!=0)
+            printf("MI_RGN_UpdateCanvas failed: %d!\n",s32Ret);
+    }else
+        set_bitmap(osds[FULL_OVERLAY_ID].hand, &bmpBuff);
+
     //printf("%lu set_bitmapB for:%u | %u   | %u ms\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn) , (uint32_t)(get_time_ms() - step2),(uint32_t)(get_time_ms() - step3));
 
 #endif
@@ -1524,6 +1544,13 @@ static void InitMSPHook(){
 
     OVERLAY_WIDTH = current_display_info.font_width * (current_display_info.char_width);//must be multiple of 8 !!!
     OVERLAY_WIDTH = (OVERLAY_WIDTH + 7) & ~7;
+
+/*
+On sigmastar the BMP row stride is aligned to 8 bytes, that is 16 pixels in PIXEL_FORMAT_I4
+*/
+    if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4)
+        OVERLAY_WIDTH = (OVERLAY_WIDTH + 15) & ~15;//for sigmastar I4 must be multiple of 16, since this is 8 bytes
+
     OVERLAY_HEIGHT =current_display_info.font_height * (current_display_info.char_height);
 
 
@@ -1579,7 +1606,7 @@ static void InitMSPHook(){
         #endif
 
         if (true/*!access(img, F_OK)*/){    
-            cntr= - 30; //skip first 50 draw requests from the FC to show the preview, about 3 seconds
+            cntr= - 30; //skip first 40 draw requests from the FC to show the preview, about 3 seconds
             BITMAP bitmap;                                
             int prepared=0;
             if (false){//Load a BITMAP and show it on the screen
@@ -1696,19 +1723,16 @@ static void InitMSPHook(){
                 int cols=bitmapFnt.u32Height / preview_height;/*OVERLAY_HEIGH*/;
                 int rows=preview_height/    current_display_info.font_height;
                 int fontPageHeight=rows * current_display_info.font_height;//OVERLAY_HEIGHT;;
-                bitmap.u32Height = preview_height;//rows * current_display_info.font_height;//OVERLAY_HEIGHT;
+                bitmap.u32Height = OVERLAY_HEIGHT;//preview_height;//rows * current_display_info.font_height;//OVERLAY_HEIGHT;
                 bitmap.u32Width = OVERLAY_WIDTH;//bitmapFnt.u32Width * cols;                    
                 bitmap.pData = (unsigned char*)malloc(bitmap.u32Height * getRowStride(bitmap.u32Width , PIXEL_FORMAT_BitsPerPixel));
                 memset(bitmap.pData, 0, bitmap.u32Height * getRowStride(bitmap.u32Width , PIXEL_FORMAT_BitsPerPixel));
-                //bmp.u32Width=current_display_info.font_width * current_display_info.char_width;
-                //bmp.u32Height = current_display_info.font_height * current_display_info.char_height;
-                //bmp.pData = malloc( PIXEL_FORMAT_BitsPerPixel  * bmp.u32Height * getRowStride(bmp.u32Width , PIXEL_FORMAT_BitsPerPixel));
 
                 if (bitmapFnt.u32Width*(cols+1)  > bitmap.u32Width + bitmapFnt.u32Width )
                     cols = (bitmap.u32Width / bitmapFnt.u32Width) -1;
 
                 if (PIXEL_FORMAT_DEFAULT == PIXEL_FORMAT_I4)//i4 sigmastar
-                for (int i=0; i<cols ; i++ )
+                for (int i=0; i< cols ; i++ )
                     copyRectI4(bitmapFnt.pData,bitmapFnt.u32Width,bitmapFnt.u32Height,
                                 bitmap.pData,bitmap.u32Width, bitmap.u32Height,
                                 0,i * fontPageHeight, bitmapFnt.u32Width, fontPageHeight,
@@ -1730,8 +1754,22 @@ static void InitMSPHook(){
                         printf("Set SS Font Review %d:%d", bitmap.u32Width, bitmap.u32Height);
                     //For some reason this fails...?!
                     //set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);//bitmap must match region dimensions!
-                    
-                    set_bitmapEx(osds[FULL_OVERLAY_ID].hand, &bitmap, PIXEL_FORMAT_BitsPerPixel);
+                     
+                    //works in one step
+                    // set_bitmapEx(osds[FULL_OVERLAY_ID].hand, &bitmap, PIXEL_FORMAT_BitsPerPixel);
+
+                    //This is how direct image memory works in sigmastar
+                    void* bmp=get_directBMP(osds[FULL_OVERLAY_ID].hand);
+                    memcpy(bmp, bitmap.pData,bitmap.u32Height * getRowStride(bitmap.u32Width , PIXEL_FORMAT_BitsPerPixel));
+                    MI_RGN_UpdateCanvas(osds[FULL_OVERLAY_ID].hand);
+
+                    if (true){
+                        useDirectBMPBuffer=true;                        
+                        printf("USING DIRECT VIDEO MEM MODE!!!\r\n");
+                       
+                    }else
+                        useDirectBMPBuffer=false;
+
                 #elif __GOKE__
                      if (verbose)
                         printf("Set Goke Font Review %d:%d", bitmap.u32Width, bitmap.u32Height);
@@ -1777,9 +1815,7 @@ static void InitMSPHook(){
             if (prepared){
                 if (verbose)
                     printf("set_LOGO with u32Height:%d enPixelFormat %d\n",bitmap.u32Height, bitmap.enPixelFormat);                   
-                int s32Ret=set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);
-                if(s32Ret!=0)
-                    printf("ERROR set_bitmap%d \n",s32Ret);  
+
 
                 free(bitmap.pData);
             }
@@ -1789,7 +1825,7 @@ static void InitMSPHook(){
                 printf("No logo file %s \n",img);
     
 
-     if (enable_fast_layout){ //fast_overlay , can be smaller     
+     if (enable_fast_layout){ //fast_overlay , OBSOLETE, to be deleted     
         fcX= 18; fcW=16;
         fcY= 6 ; fcH=8;  
         int fY=54;
@@ -1834,7 +1870,7 @@ static void CloseMSP(){
 
     if (bitmapFnt.pData!=NULL)
         free(bitmapFnt.pData);
-    if (bmpBuff.pData!=NULL)
+    if (bmpBuff.pData!=NULL&& !useDirectBMPBuffer)
         free(bmpBuff.pData);
     if (bmpFntSmall.pData!=NULL)
         free(bmpFntSmall.pData);

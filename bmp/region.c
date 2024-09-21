@@ -332,35 +332,49 @@ int set_bitmap(int handle, BITMAP *bitmap)
     return s32Ret;
 }
 
-int set_bitmapEx(int handle, BITMAP *bitmap, int BitsPerPixel){
+/// @brief Returns a pointer to BMP directly in the video overlay region, so no need to create a buffer and copy it later!
+/// @param handle 
+/// @return 
+void* get_directBMP(int handle){
+#ifdef __SIGMASTAR__    
+    MI_RGN_CanvasInfo_t stCanvasInfo;
+    memset(&stCanvasInfo,0,sizeof(stCanvasInfo));                         
+    int s32Ret = GetCanvas(handle, &stCanvasInfo); 
+    //printf("OSD Handle:%d  CanvasStride: %d , Canvas size : %d:%d\r\n", handle, stCanvasInfo.u32Stride, stCanvasInfo.stSize.u32Width, stCanvasInfo.stSize.u32Height);
+    return   (void *)(stCanvasInfo.virtAddr); 
+#endif    
+    return NULL;
+}
+
+ int set_bitmapEx(int handle, BITMAP *bitmap, int BitsPerPixel){
     int s32Ret=0;
 #ifdef __SIGMASTAR__
     int byteWidth = getRowStride(bitmap->u32Width,BitsPerPixel);
     MI_RGN_CanvasInfo_t stCanvasInfo; 
     memset(&stCanvasInfo,0,sizeof(stCanvasInfo));                         
     s32Ret = GetCanvas(handle, &stCanvasInfo);                                       
-    printf("OSD Handle:%d GetCanvas:%d  CanvasStride: %d , BMP_Stride:%d Size: %d:%d \r\n", handle,s32Ret,
-    stCanvasInfo.u32Stride, byteWidth, bitmap->u32Width,bitmap->u32Height);
-    
-    
+    printf("OSD Handle:%d GetCanvas:%d  CanvasStride: %d , BMP_Stride:%d BMP_Size: %d:%d , Canvas size : %d:%d\r\n", handle,s32Ret,
+    stCanvasInfo.u32Stride, byteWidth, bitmap->u32Width,bitmap->u32Height, stCanvasInfo.stSize.u32Width, stCanvasInfo.stSize.u32Height);
 
 
     for (int i = 0; i < bitmap->u32Height; i++)                    
         memcpy((void *)(stCanvasInfo.virtAddr + i * (stCanvasInfo.u32Stride)), bitmap->pData + i * byteWidth, byteWidth);
 
-    //This tests direct copy to overlay - will further speed up!
-    //DrawBitmap1555ToI4(bitmap.pData, bitmap.u32Width , bitmap.u32Height, destBitmap, &g_stPaletteTable, (void *)stCanvasInfo.virtAddr,stCanvasInfo.u32Stride);
-    /* this draws a line directly into the OSD memory
-    for (int y = 0; y < bitmap.u32Height/2; y++)                           
-        for (int x = 0; x < 5; x+=2)
-            ST_OSD_DrawPoint((void *)stCanvasInfo.virtAddr,stCanvasInfo.u32Stride, x,y, 3 );//y%14+1
-    */
+    //memcpy((void *)(stCanvasInfo.virtAddr) , bitmap->pData , bitmap->u32Height * byteWidth);
+
 
     s32Ret = MI_RGN_UpdateCanvas(handle);
+    
     if (verbose)
         printf("MI_RGN_UpdateCanvas completed byteWidth:%d!\n",byteWidth);
+
+    //this will break, the pointer to memory is no longer valid!
+    //memset((void *)(stCanvasInfo.virtAddr), PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4 ? 0xFF : 0x00 , bitmap->u32Height * getRowStride(bitmap->u32Width , BitsPerPixel));
+
+
+    return   (void *)(stCanvasInfo.virtAddr); 
 #endif
-return   s32Ret;   
+return NULL;   
 }
 
 int unload_region(int *handle)
@@ -399,9 +413,10 @@ int s32Ret =0;
      int s32Result = MI_RGN_GetCanvasInfo(handle, stCanvasInfo);
      if (s32Result != MI_RGN_OK)    
          return s32Result;
-    if (verbose)
-        printf("MI_RGN_GetCanvas stride:%d  stSize:%d:%d  ePixelFmt:%d !\n", 
-    stCanvasInfo->u32Stride, stCanvasInfo->stSize.u32Width , stCanvasInfo->stSize.u32Height , stCanvasInfo->ePixelFmt);
+
+    //if (verbose)
+    //    printf("MI_RGN_GetCanvas stride:%d  stSize:%d:%d  ePixelFmt:%d !\n", 
+   // stCanvasInfo->u32Stride, stCanvasInfo->stSize.u32Width , stCanvasInfo->stSize.u32Height , stCanvasInfo->ePixelFmt);
     return 0;     
  }
 

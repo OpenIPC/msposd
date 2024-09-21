@@ -72,7 +72,7 @@ Prebuild binaries for x86, SigmaStar, Goke and Hisilicon are at release/ folder.
 curl -L -o /usr/bin/msposd https://raw.githubusercontent.com/openipc/msposd/main/release/star6e/msposd
 chmod 755 /usr/bin/msposd
 ```
-Copy the font files for you flight controller firmware INAV/ Betaflight / ArduPilot from here  https://github.com/openipc/msposd/tree/main/fonts   
+Copy the font files for your flight controller firmware INAV/ Betaflight/ ArduPilot from here  https://github.com/openipc/msposd/tree/main/fonts   
 Choose one of the following below.   
 **For INAV**:
 ```
@@ -86,10 +86,10 @@ curl -L -o /usr/bin/font.png https://raw.githubusercontent.com/openipc/msposd/ma
 curl -L -o /usr/bin/font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/betaflight/font_hd.png
 ```
 
-Start msposd or reference it in OpenIPC scripts.  
+Start msposd or reference it in OpenIPC boot scripts.  
 
 ### Acknowledgements:
-- Default fonts included in this project are created by SNEAKY_FPV.  These and other excellent additional fonts can be found here: https://sites.google.com/view/sneaky-fpv/home
+- Default fonts included in this project are created by SNEAKY_FPV.  These and other excellent additional fonts can be found here: https://sites.google.com/view/sneaky-fpv/home  
 This work is based on these projects:
 - https://github.com/fpv-wtf/msp-osd
 - https://github.com/OpenIPC/osd

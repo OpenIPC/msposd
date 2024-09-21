@@ -991,7 +991,7 @@ void copyRectI4(
         uint32_t byteWidth = width / 2;  // Number of bytes to copy per row
         for (uint32_t y = 0; y < height; ++y) {
             uint8_t* srcRow = srcBitmap + (srcY + y) * (srcWidth / 2) + srcByteOffset;
-            uint8_t* destRow = destBitmap + (destY + y) * (destWidth / 2) + destByteOffset;
+            uint8_t* destRow = destBitmap + (destY + y) * (destWidth / 2) + destByteOffset;            
             memcpy(destRow, srcRow, byteWidth);
         }
     } else {
@@ -1150,7 +1150,13 @@ typedef unsigned char   MI_U8;
 
 int getRowStride(int width, int BitsPerPixel){
     int rowLength = width * BitsPerPixel;
-    return  (rowLength + 32 - ((rowLength-1) % 32)) >> 3;
+    int stride = (rowLength + 32 - ((rowLength-1) % 32)) >> 3;
+
+#ifdef __SIGMASTAR__
+    //This is fundamential difference for sigmastar, since the BMP we get for the font is aligned with a different stride?!    
+    //stride = (stride + 7) & ~7;//Round up to 8    
+#endif    
+    return  stride;
 }
 
 void convertBitmap1555ToI4(
@@ -1223,7 +1229,7 @@ void convertRGBAToI4(
     unsigned char u8Value = 0;
     int u32Stride = getRowStride(width, 4);
 
-   // printf("I4 %d:%d Stride:%d\n", width, height, u32Stride);
+    printf("I4 %d:%d Stride:%d\n", width, height, u32Stride);
 
     for (uint32_t u32Y = 0; u32Y < height; ++u32Y) {
         for (int32_t u32X = 0; u32X < width; ++u32X) {
@@ -1275,7 +1281,7 @@ void setPixelI4(uint8_t* bmpData, uint32_t width, uint32_t x, uint32_t y, uint8_
 
     // Determine if it's the high nibble or low nibble
 #ifdef __SIGMASTAR__    
-    if (x % 2 == 1) {
+    if (x % 2 == 1) {        
 #else  
     if (x % 2 == 0) {
 #endif        
