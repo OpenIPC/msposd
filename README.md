@@ -88,6 +88,24 @@ curl -L -o /usr/bin/font_hd.png https://raw.githubusercontent.com/openipc/msposd
 
 Start msposd or reference it in OpenIPC boot scripts.  
 
+### Diagnosing
+Q: _I see a static map of all characters on the screen but no realtime OSD_.
+A: There are no data being received by the cam.  
+    - Check your wiring. You need Tx/Rx/Gnd wires.  Data lines must be crossed (Rx goes to Tx ).  
+    - Check Inav/Ardu config. Enable MSP and OSD where needed! There is a separate option for OSD in INAV. Do not enable mavlink and msp on a single UART. (This is a bug in BF). Do not start msposd twice.  
+    - On the cam. execute ```top``` , find the line for msposd, copy it (the whole line!) . Then ```killall msposd```, add   ```-v``` to the end of the line and start it.  
+    Take a look at the console logs:  
+
+<a href="pics/diag_1.png">
+  <img src="pics/diag_1.png" alt="Diagram Thumbnail" width="350"/>
+</a>  
+
+If they are stuck at step 1, there is no data on te UART. If there is data past step 1, but OSD is not visible, the data is not the format expected - MSP Display Port.
+
+Q: _OSD changes, but I see strange symbols on the screen_.
+A: Download the appropriate font set for you flight controller software. Check for loose connectors, speed settings and make sure you have ground wire between the FC and the cam.
+
+
 ### Acknowledgements:
 - Default fonts included in this project are created by SNEAKY_FPV.  These and other excellent additional fonts can be found here: https://sites.google.com/view/sneaky-fpv/home  
 This work is based on these projects:

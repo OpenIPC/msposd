@@ -153,6 +153,9 @@ static int stat_screen_refresh_count=0;
 static int stat_skipped_frames=0;
 static int stat_draw_overlay_1=0, stat_draw_overlay_2=0, stat_draw_overlay_3=0;
 
+static uint64_t last_MSP_ATTITUDE=0;
+static int stat_attitudeDelay=0;
+
 extern bool AbortNow;
 extern bool verbose;
 extern struct sockaddr_in sin_out;//= {.sin_family = AF_INET,};
@@ -165,6 +168,15 @@ extern int matrix_size;
 extern int GetTempSigmaStar();
 extern int SendWfbLogToGround();
 extern bool monitor_wfb;
+
+uint64_t get_time_ms() // in milliseconds
+{
+    struct timespec ts;
+    int rc = clock_gettime(1 /*CLOCK_MONOTONIC*/, &ts);
+    //if (rc < 0) 
+//		return get_current_time_ms_Old();
+    return ts.tv_sec * 1000LL + ts.tv_nsec / 1000000;
+}
 
 
 static void rx_msp_callback(msp_msg_t *msp_message)
@@ -179,6 +191,7 @@ static void rx_msp_callback(msp_msg_t *msp_message)
             last_roll = *(int16_t*)&msp_message->payload[0];
             last_heading = *(int16_t*)&msp_message->payload[4];
             stat_msp_msg_attitude++;
+            stat_attitudeDelay=get_time_ms() - last_MSP_ATTITUDE;
            //printf("\n Got MSG_ATTITUDE            pitch:%d  roll:%d\n", pitch, roll);
            break;
          }
@@ -402,15 +415,6 @@ void move_cursor(int row, int col) {
 void draw_character_on_console(int row, int col, char ch) {
     move_cursor(row, col);
     printf("%c", ch);
-}
-
-uint64_t get_time_ms() // in milliseconds
-{
-    struct timespec ts;
-    int rc = clock_gettime(1 /*CLOCK_MONOTONIC*/, &ts);
-    //if (rc < 0) 
-//		return get_current_time_ms_Old();
-    return ts.tv_sec * 1000LL + ts.tv_nsec / 1000000;
 }
 
 /// @brief We keep the main font glyphs here
@@ -1260,7 +1264,7 @@ static void draw_screenBMP(){
 #elif __GOKE__
 
     set_bitmap(osds[FULL_OVERLAY_ID].hand, &bmpBuff);
-    
+
 #else
    int id=0;
    // printf("%lu set_bitmapB for:%d | %d ms\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn));

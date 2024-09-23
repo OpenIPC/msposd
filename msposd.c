@@ -651,7 +651,7 @@ static void serial_read_cb(struct bufferevent *bev, void *arg)
 			if (stat_screen_refresh_count==0)
 				stat_screen_refresh_count++;
 			if (verbose){
-				printf("UART Events:%u MessagesTTL:%u AttitMSGs:%u Bytes/Sec:%u FPS:%u(skipped:%d), avg time per frame ms:%d | %d | %d | \n",stat_pckts,stat_msp_msgs,stat_msp_msg_attitude, 
+				printf("UART Events:%u MessagesTTL:%u AttitMSGs:%u(%dms) Bytes/S:%u FPS:%u(skipped:%d), avg time per frame ms:%d | %d | %d | \n",stat_pckts,stat_msp_msgs,stat_msp_msg_attitude, (stat_attitudeDelay / (stat_msp_msg_attitude+1) ),
 					stat_bytes, stat_screen_refresh_count, stat_skipped_frames, stat_draw_overlay_1/stat_screen_refresh_count,stat_draw_overlay_2/stat_screen_refresh_count,stat_draw_overlay_3/stat_screen_refresh_count);
 				showchannels(18);
 			}
@@ -786,12 +786,12 @@ static void send_variant_request2(int serial_fd) {
 		if (AHI_Enabled==3 && VariantCounter%13==1){
 			construct_msp_command(buffer, MSP_COMP_GPS, NULL, 0, MSP_OUTBOUND);
     		res = write(serial_fd, &buffer, sizeof(buffer));
-		}else{//this is called at every POLL, skipping every 5th and every 13th.
+		}else{//this is called at every POLL, skipping every 5th and every 13th, that is 15 times per second
 			construct_msp_command(buffer, MSP_ATTITUDE, NULL, 0, MSP_OUTBOUND);
     		res = write(serial_fd, &buffer, sizeof(buffer));
+			last_MSP_ATTITUDE=get_time_ms();
 		}
 	}
-
 	
 	if (MSP_PollRate <= ++VariantCounter){//poll every one second
 		construct_msp_command(buffer, MSP_CMD_FC_VARIANT, NULL, 0, MSP_OUTBOUND);
