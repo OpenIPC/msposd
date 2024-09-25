@@ -105,6 +105,8 @@ If they are stuck at step 1, there is no data on te UART. If there is data past 
 Q: _OSD changes, but I see strange symbols on the screen_.  
 A: Download the appropriate font set for you flight controller software. Check for loose connectors, speed settings and make sure you have ground wire between the FC and the cam.
 
+Q: _AHI is shown but is not updated, even though msposd has "--ahi 1" argument. Telemetry is working._
+A: Check your connections, specifically Camera's TX <-> FC RX. Camera needs to request extra data from Flight controller for this feature to work.
 
 ### Acknowledgements:
 - Default fonts included in this project are created by SNEAKY_FPV.  These and other excellent additional fonts can be found here: https://sites.google.com/view/sneaky-fpv/home  
