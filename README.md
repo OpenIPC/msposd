@@ -106,8 +106,8 @@ Save this log to show it if requested.
 Q: _OSD changes, but I see strange symbols on the screen_.  
 A: Download the appropriate font set for you flight controller software. Check for loose connectors, speed settings and make sure you have ground wire between the FC and the cam.
 
-Q: _AHI is shown but is not updated, even though msposd has "--ahi 1" argument. Telemetry is working._
-A: Check your connections, specifically Camera's TX <-> FC RX. Camera needs to request extra data from Flight controller for this feature to work.
+Q: _With Betaflight, if AHI is shown but is not updated, even though msposd has "--ahi 1" argument and the telemetry is working._
+A: Check your connections, specifically Camera's TX <-> FC RX. Camera needs to request extra data from Flight controller for this feature to work. Betaflight can be configured to allow readonly mode, but then extra features like RC channels control and AHI will not work.
 
 ### Acknowledgements:
 - Default fonts included in this project are created by SNEAKY_FPV.  These and other excellent additional fonts can be found here: https://sites.google.com/view/sneaky-fpv/home  
