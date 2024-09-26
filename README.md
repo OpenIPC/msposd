@@ -100,7 +100,8 @@ A: There are no data being received by the cam.
   <img src="pics/diag_1.png" alt="Diagram Thumbnail" width="350"/>
 </a>  
 
-If they are stuck at step 1, there is no data on te UART. If there is data past step 1, but OSD is not visible, the data is not the format expected - MSP Display Port.
+If they are stuck at step 1, there is no data on the UART. If there are lines past step 1, but OSD is not visible, the signal is not the format expected - MSP Display Port. Take a look in values in yellow, how much MSP packets were extracted from the signal, the total amount of bytes per second etc.
+Save this log to show it if requested.
 
 Q: _OSD changes, but I see strange symbols on the screen_.  
 A: Download the appropriate font set for you flight controller software. Check for loose connectors, speed settings and make sure you have ground wire between the FC and the cam.
