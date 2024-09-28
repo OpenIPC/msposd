@@ -10,7 +10,7 @@ Usage: msposd [OPTIONS]
  -m --master      Serial port to receive MSP (%s by default)
  -b --baudrate    Serial port baudrate (%d by default)
  -o --output	  UDP endpoint to forward aggregated MSP messages
- -c --channels    RC Channel to listen for commands (0 by default) and exec channels.sh
+ -c --channels    RC Channel to listen for commands (0 by default) and exec channels.sh. This option can be repeated to allow listening for several channels.
  -w --wait        Delay after each command received (2000ms default)
  -r --fps         Max MSP Display refresh rate(1..50)
  -p --persist     How long a channel value must persist to generate a command - for multiposition switches (0ms default)
@@ -52,9 +52,9 @@ Extra params withing the message to be shown:
 ### Usage Example:
 
 ```
-msposd  --master /dev/ttyS2 --baudrate 115200 --channels 7 --out 127.0.0.1:14555 -osd -r 20 --ahi 1 -v
+msposd  --master /dev/ttyS2 --baudrate 115200 -c 7 -c 9 --out 127.0.0.1:14555 -osd -r 20 --ahi 1 -v
 ```
-Read on  UART2 with baudrade 115200 and listen for value changes of RC channel 7 that come from the Remote Control via Flight Controller.
+Read on  UART2 with baudrade 115200 and listen for value changes of RC channel 7 and channel 9 that come from the Remote Control via Flight Controller.
 Every time the value is changed with more than 5% the bash script ```channels.sh {Channel} {Value}``` will be started with the provided parameters.  
 Forward MSP to UDP port 14555 so that it can be handled by wfb-ng and sent to the ground.
 Draw an Artificial Horizon Indicator (AHI) Ladder with color-coded vertical steps.

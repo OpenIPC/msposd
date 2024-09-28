@@ -22,8 +22,8 @@ video0:
   enabled: true
   bitrate: 14000
   codec: h265
-  size: 1920x1080
-#  size: 1280x720
+#  size: 1920x1080
+  size: 1280x720
 #  size: 3840x2160
 #  size: 1920x1080
 #  size: 2944x1656
