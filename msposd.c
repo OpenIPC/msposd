@@ -55,18 +55,12 @@ const int RC_CHANNELS_RAW = 35; //RC_CHANNELS_RAW ( #35 ) for ExpressLRS,Crossfi
 //if we gonna use MSP parsing
 msp_state_t *rx_msp_state;
 
-//RC channel number to monitor, not zero based, first is 1
-uint8_t rc_channel_no = 0;
-
-
 struct bufferevent *serial_bev;
 struct sockaddr_in sin_out = {
 	.sin_family = AF_INET,
 };
 int out_sock;
 
-long wait_after_bash=2000; //Time to wait between bash script starts.
-int ChannelPersistPeriodmMS=2000;//time needed for a RC channel value to persist to execute a commands
 
 long aggregate=1;
 /*
@@ -88,7 +82,7 @@ static void print_usage()
  "	-m --master      Serial port to receive MSP (%s by default)\n"
  "	-b --baudrate    Serial port baudrate (%d by default)\n"
  "	-o --output	  	 UDP endpoint to forward aggregated MSP messages (%s)\n"
- "	-c --channels    RC Channel to listen for commands (0 by default) and exec channels.sh\n"
+ "	-c --channels    RC Channel to listen for commands (0 by default) and exec channels.sh. This command can be repeated. Channel values are 1-based.\n"
  "	-w --wait        Delay after each command received(2000ms default)\n"
  "	-r --fps         Max MSP Display refresh rate(5..50)\n"
  "	-p --persist     How long a channel value must persist to generate a command - for multiposition switches (0ms default)\n"
@@ -461,54 +455,83 @@ unsigned long long get_current_time_ms_simple() {
 
 uint16_t channels[18];
 
-//how long a RC value should stay at one level to issue a command
+// Channel monitoring:
 
-static uint64_t LastStart=0;//
-static unsigned long LastValue=0;
-uint16_t NewValue;
-static uint64_t NewValueStart=0;
-unsigned int ChannelCmds=0;
+// Maximum number of channels to monitor.
+#define kChannelCount 16
+// Whether the channel monitoring was enabled.
+bool rc_channel_mon_enabled = false;
+// A boolean array that defines which channels are monitored.
+// Setting a value to "true" will make this program run /usr/bin/channels.sh 
+// if the channel value changes.
+static bool rc_channel_mon[kChannelCount] = {0};
+
+//Time to wait between bash script starts.
+long wait_after_bash=2000;
+
+//how long a RC value should stay at one level to issue a command
+int ChannelPersistPeriodMS=2000;
+
+static uint64_t LastStart[kChannelCount] = {0};//
+static unsigned long LastValue[kChannelCount] = {0};
+uint16_t NewValue[kChannelCount] = {0};
+static uint64_t NewValueStart[kChannelCount] = {0};
+
+unsigned int ChannelCmds[kChannelCount] = {0};
 static uint64_t mavpckts_ttl=0;
 
-void ProcessChannels(){
-	//rc_channel_no , not zero based, 1 is first
+
+void ProcessChannel(int rc_channel_no){
+	//rc_channel_no, zero based
 	uint16_t val=0;
-	if (rc_channel_no<1 || rc_channel_no>16  /* || (mavpckts_ttl<100*/ ) //wait in the beginning for the values to settle
+	if (rc_channel_no<0 || rc_channel_no>15  /* || (mavpckts_ttl<100*/ ) //wait in the beginning for the values to settle
 		return;
 
-	if ( abs(get_current_time_ms()-LastStart) < wait_after_bash)		
+
+	if ( abs(get_current_time_ms()-LastStart[rc_channel_no]) < wait_after_bash)		
 		return;
-	
-	val=channels[rc_channel_no-1];
-	
-	if (abs(val-NewValue)>32 && ChannelPersistPeriodmMS>0){
+
+	val=channels[rc_channel_no];
+
+	if (abs(val-NewValue[rc_channel_no])>32 && ChannelPersistPeriodMS>0){
 		//We have a new value, let us wait for it to persist
-		NewValue=val;
-		NewValueStart=get_current_time_ms();		
+		NewValue[rc_channel_no]=val;
+		NewValueStart[rc_channel_no]=get_current_time_ms();		
 		return;
 	}else
-		if (abs(get_current_time_ms()-NewValueStart)<ChannelPersistPeriodmMS)		
+		if (abs(get_current_time_ms()-NewValueStart[rc_channel_no])<ChannelPersistPeriodMS)		
 			return;//New value should remain "stable" for a second before being approved					
-		else{}//New value persisted for more THAN ChannelPersistPeriodmMS					
+		else{}//New value persisted for more THAN ChannelPersistPeriodMS					
 
-	if (abs(val-LastValue)<32)//the change is too small	
+	if (abs(val-LastValue[rc_channel_no])<32)//the change is too small	
 		return;	
 	
-	NewValue=val;
-	LastValue=val;
+	NewValue[rc_channel_no]=val;
+	LastValue[rc_channel_no]=val;
 	
 	char buff[60];
-    sprintf(buff, "/usr/bin/channels.sh %d %d &", rc_channel_no, val);
 
-	printf("Starting(%d): %s n",ChannelCmds,buff);
-	LastStart=get_current_time_ms();
+	// For compatibility purposes, channels.sh is called with 1-based channel argument.
+    sprintf(buff, "/usr/bin/channels.sh %d %d &", rc_channel_no + 1, val);
+
+	printf("Starting(%d): %s \n",ChannelCmds[rc_channel_no],buff);
+	LastStart[rc_channel_no]=get_current_time_ms();
     
-	if (ChannelCmds>0){//intentionally skip the first command, since when stating  it will always receive some channel value and execute the script
+	if (ChannelCmds[rc_channel_no]>0){
+		//intentionally skip the first command, since when starting  it will always receive some channel value and execute the script
     	system(buff);
-		
 	}
-	ChannelCmds++;
+
+	printf("Started(%d): %s \n",ChannelCmds[rc_channel_no],buff);
+	ChannelCmds[rc_channel_no]++;
 	
+}
+
+void ProcessChannels(){
+	for (int i=0; i < kChannelCount; ++i) {
+		if (rc_channel_mon[i])
+			ProcessChannel(i);
+	}
 }
 
 void showchannels(int count){
@@ -525,7 +548,6 @@ void handle_msg_id_rc_channels_raw(const mavlink_message_t* message){
 	mavlink_msg_rc_channels_raw_decode(message, &rc_channels);	
 	memcpy(&channels[0], &rc_channels.chan1_raw, 8 * sizeof(uint16_t));	
 	showchannels(8);
-		
 	ProcessChannels();
 }
 
@@ -687,7 +709,7 @@ static void serial_read_cb(struct bufferevent *bev, void *arg)
 			}
 
 			//Let's try to parse the stream	
-			if (aggregate>0 || rc_channel_no>0)//if no RC channel control needed, only forward the data
+			if (aggregate>0 || rc_channel_mon_enabled)//if no RC channel control needed, only forward the data
 				process_mavlink(data,packet_len, arg);//Let's try to parse the stream		
 		}
 		evbuffer_drain(input, packet_len);		
@@ -779,7 +801,7 @@ static void send_variant_request2(int serial_fd) {
 	int res=0;
 
 
-	if (rc_channel_no>0 && VariantCounter%5==1){//once every 5 cycles, 4 times per second
+	if (rc_channel_mon_enabled && VariantCounter%5==1){//once every 5 cycles, 4 times per second
 		construct_msp_command(buffer, MSP_RC, NULL, 0, MSP_OUTBOUND);
     	res = write(serial_fd, &buffer, sizeof(buffer));
 	}else if (AHI_Enabled){
@@ -948,6 +970,12 @@ if (temp_tmr) {
 	return ret;
 }
 
+void resetLastStartValues() {
+	for (int i=0; i < kChannelCount; ++i) {
+		LastStart[i] = get_current_time_ms();
+	}
+}
+
 int main(int argc, char **argv)
 {
 	const struct option long_options[] = {
@@ -980,6 +1008,8 @@ int main(int argc, char **argv)
 	printf("Ver: %s\n", VERSION_STRING);
 	int opt;
 	int long_index = 0;
+	int rc_channel_no = 0;
+
 	while ((opt = getopt_long_only(argc, argv, "", long_options, &long_index)) != -1) {
 		switch (opt) {
 		case 'm':
@@ -1004,9 +1034,13 @@ int main(int argc, char **argv)
 			if(rc_channel_no == 0) 
 				printf("rc_channels  monitoring disabled\n");
 			else 
+			{
 				printf("Monitoring RC channel %d \n", rc_channel_no);
-			
-			LastStart=get_current_time_ms();
+				rc_channel_mon_enabled = true;
+				// The array is zero-based, so substract 1 from the index:
+				rc_channel_mon[rc_channel_no-1] = true;
+			}
+			resetLastStartValues();
 			break;
 
 		case 'f':
@@ -1019,7 +1053,7 @@ int main(int argc, char **argv)
 			break;
 		case 'w':
 			wait_after_bash = atoi(optarg);			
-			LastStart=get_current_time_ms();
+			resetLastStartValues();
 			break;
 
 		case 'x':
@@ -1033,12 +1067,12 @@ int main(int argc, char **argv)
 				r=r%100;
 			}
 			MinTimeBetweenScreenRefresh = 1000/atoi(optarg);			
-			LastStart=get_current_time_ms();
+			resetLastStartValues();
 			break;
 
 		case 'p':
-			ChannelPersistPeriodmMS = atoi(optarg);			
-			LastStart=get_current_time_ms();
+			ChannelPersistPeriodMS = atoi(optarg);			
+			resetLastStartValues();
 			break;
 
 		case 't':		
@@ -1094,7 +1128,3 @@ int main(int argc, char **argv)
 
 	return handle_data(port_name, baudrate, out_addr);
 }
-
-
-
-
