@@ -72,7 +72,6 @@ int minAggPckts=3;
 
 bool monitor_wfb=false;
 static int temp = false;
- 
 
 static void print_usage()
 {
@@ -818,6 +817,11 @@ static void send_variant_request2(int serial_fd) {
 	if (MSP_PollRate <= ++VariantCounter){//poll every one second
 		construct_msp_command(buffer, MSP_CMD_FC_VARIANT, NULL, 0, MSP_OUTBOUND);
 		res = write(serial_fd, &buffer, sizeof(buffer));
+
+		// Poll for mspVTX
+		construct_msp_command(buffer, MSP_GET_VTX_CONFIG, NULL, 0, MSP_OUTBOUND);
+		res = write(serial_fd, &buffer, sizeof(buffer));
+
 		//usleep(20*1000);
 		VariantCounter=0;
 	}
@@ -872,6 +876,10 @@ static int handle_data(const char *port_name, int baudrate,
 
 	cfmakeraw(&options);
 	tcsetattr(serial_fd, TCSANOW, &options);
+
+	// tell the fc what vtx config we support
+    printf("Setup mspVTX ...\n");
+    msp_set_vtx_config(serial_fd);
 
 	out_sock = socket(AF_INET, SOCK_DGRAM, 0);
 

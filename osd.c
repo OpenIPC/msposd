@@ -9,6 +9,9 @@
 #include <time.h>
 #include <math.h>
 
+#include <sys/ioctl.h>
+#include <net/if.h>
+#include <linux/wireless.h>
 
 #include "osd/msp/msp.h"
 #include "osd/msp/msp_displayport.h"
@@ -116,6 +119,29 @@ static int16_t last_distanceToHome=0;
 
 static int16_t last_RC_Channels[16];
 
+// https://github.com/betaflight/betaflight/blob/master/src/main/msp/msp.c#L1949
+typedef struct
+{
+    uint8_t vtxType;
+    uint8_t band;
+    uint8_t channel;
+    uint8_t power;
+    uint8_t pitmode;
+    // uint16_t freq; // This doesnt work and bytes are missing after memcpy.
+    uint8_t freqLSB;
+    uint8_t freqMSB;
+    uint8_t deviceIsReady;
+    uint8_t lowPowerDisarm;
+    // uint16_t pitModeFreq; // This doesnt work and bytes are missing after memcpy.
+    uint8_t pitModeFreqLSB;
+    uint8_t pitModeFreqMSB;
+    uint8_t vtxTableAvailable;
+    uint8_t bands;
+    uint8_t channels;
+    uint8_t powerLevels;
+} mspVtxConfigStruct;
+
+
 static void send_display_size(int serial_fd) {
     uint8_t buffer[8];
     uint8_t payload[2] = {MAX_DISPLAY_X, MAX_DISPLAY_Y};
@@ -173,6 +199,107 @@ uint64_t get_time_ms() // in milliseconds
     return ts.tv_sec * 1000LL + ts.tv_nsec / 1000000;
 }
 
+
+// Function to convert frequency to human-readable format
+double get_frequency_value(struct iwreq *wrq) {
+    return (double) wrq->u.freq.m * pow(10, wrq->u.freq.e - 6);  // Convert to MHz
+}
+
+double get_frequency(const char *iface) {
+    int sock;
+    struct iwreq wrq;
+
+    // Open a socket for ioctl communication
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+        perror("socket");
+        return -1;
+    }
+
+    // Prepare the iwreq structure
+    memset(&wrq, 0, sizeof(struct iwreq));
+    strncpy(wrq.ifr_name, iface, IFNAMSIZ);  // Interface name
+
+    // Perform the ioctl to get frequency
+    if (ioctl(sock, SIOCGIWFREQ, &wrq) < 0) {
+        perror("ioctl");
+        close(sock);
+        return -1;
+    }
+
+    close(sock);
+
+    // Convert the frequency to a human-readable value (MHz)
+    double freq_mhz = get_frequency_value(&wrq);
+    return freq_mhz;
+}
+
+int set_frequency(const char *iface, double freq_mhz) {
+    int sock;
+    struct iwreq wrq;
+
+    // Open a socket for ioctl communication
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+        perror("socket");
+        return -1;
+    }
+
+    // Prepare the iwreq structure
+    memset(&wrq, 0, sizeof(struct iwreq));
+    strncpy(wrq.ifr_name, iface, IFNAMSIZ);  // Set interface name
+
+    // Convert the frequency to the format required by the ioctl
+    wrq.u.freq.m = (int)freq_mhz;       // Frequency in MHz (e.g., 5180 for 5.180 GHz)
+    wrq.u.freq.e = 6;                   // Exponent for MHz (6 = 10^6, representing MHz)
+    wrq.u.freq.i = 0;                   // Frequency flags (optional, can be 0)
+
+    // Perform the ioctl to set the frequency
+    if (ioctl(sock, SIOCSIWFREQ, &wrq) < 0) {
+        perror("ioctl");
+        close(sock);
+        return -1;
+    }
+
+    close(sock);
+    return 0;
+}
+
+int get_power_level(const char *iface) {
+    int sock;
+    struct iwreq wrq;
+
+    // Open a socket for ioctl communication
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+        perror("socket");
+        return -1;
+    }
+
+    // Prepare the iwreq structure
+    memset(&wrq, 0, sizeof(struct iwreq));
+    strncpy(wrq.ifr_name, iface, IFNAMSIZ);  // Set interface name
+
+    // Perform the ioctl to get the power level
+    if (ioctl(sock, SIOCGIWTXPOW, &wrq) < 0) {
+        perror("ioctl");
+        close(sock);
+        return -1;
+    }
+
+    // Extract the power level in dBm
+    int power_dbm = wrq.u.txpower.value;
+
+    // Check if the power is expressed in dBm (wrq.u.txpower.flags & IW_TXPOW_DBM)
+    if (wrq.u.txpower.flags & IW_TXPOW_DBM) {
+        printf("Power level of %s: %d dBm\n", iface, power_dbm);
+    } else {
+        printf("Power level of %s is not in dBm, value: %d\n", iface, power_dbm);
+    }
+
+    close(sock);
+    return 0;
+}
 
 static void rx_msp_callback(msp_msg_t *msp_message)
 {
@@ -272,6 +399,18 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
                         DEBUG_PRINT("Sent display size to FC\n");
                     }
                 }
+            }
+            break;
+        }
+        case MSP_GET_VTX_CONFIG: {
+			mspVtxConfigStruct *in_mspVtxConfigStruct = msp_message->payload;
+            uint16_t frequency = (in_mspVtxConfigStruct->freqMSB << 8) | in_mspVtxConfigStruct->freqLSB;
+            //get_power_level("wlan0");
+            double current_frequency = get_frequency("wlan0");
+			printf("mspVTX Band: %i, Channel: %i, wanted Frequency: %u, set Frequency: %.0f\n",in_mspVtxConfigStruct->band, in_mspVtxConfigStruct->channel, frequency, current_frequency);
+            if (frequency != (uint16_t)current_frequency) {
+                printf("mspVTX executing channel change\n");
+                set_frequency("wlan0", (double)frequency);
             }
             break;
         }

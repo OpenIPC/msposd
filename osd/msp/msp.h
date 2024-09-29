@@ -23,6 +23,23 @@
 #define MSP_CMD_SET_OSD_CANVAS 188
 
 
+#define MSP_GET_VTX_CONFIG 0x58 // 88  //out message
+#define MSP_SET_VTX_CONFIG 0x59 // 89  // in message
+#define MSP_SET_VTXTABLE_BAND           227 //in message          set vtxTable band/channel data (one band at a time)
+#define MSP_SET_VTXTABLE_POWERLEVEL     228 //in message          set vtxTable powerLevel data (one powerLevel at a time)
+
+#define BAND_NAME_LENGTH                8
+#define POWER_LEVEL_LABEL_LENGTH        3
+#define NUM_POWER_LEVELS                8 // betaflight has max 8 powerlevels, will remove 40 from the default wfb-ng list
+
+#define CHANNEL_COUNT                   8
+#define BAND_COUNT                      7
+#define IS_FACTORY_BAND                 0
+#define FREQ_TABLE_SIZE 56
+#define FREQ_LABEL_SIZE 56
+
+
+
 typedef enum {
     MSP_ERR_NONE,
     MSP_ERR_HDR,
