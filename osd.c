@@ -142,6 +142,9 @@ typedef struct
 } mspVtxConfigStruct;
 
 
+extern bool vtxMenuActive;
+extern bool armed;
+
 static void send_display_size(int serial_fd) {
     uint8_t buffer[8];
     uint8_t payload[2] = {MAX_DISPLAY_X, MAX_DISPLAY_Y};
@@ -307,6 +310,13 @@ static void rx_msp_callback(msp_msg_t *msp_message)
     DEBUG_PRINT("FC->AU MSP msg %d with data len %d \n", msp_message->cmd, msp_message->size);
     stat_msp_msgs++;
     switch(msp_message->cmd) {
+
+        case MSP_CMD_STATUS: {
+            // we need the armed state
+            armed = (msp_message->payload[6] & 0x01);
+            if (armed) vtxMenuActive = false;
+        }
+
          case MSP_ATTITUDE: {
 
             last_pitch = *(int16_t*)&msp_message->payload[2];
@@ -342,7 +352,7 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
          
         case MSP_CMD_DISPLAYPORT: {
 //TEST CHANGE            
-            if (true) {
+            if ( ! vtxMenuActive ) {
                 // This was an MSP DisplayPort message and we're in compressed mode, so pass it off to the DisplayPort handlers.
                 displayport_process_message(display_driver, msp_message);
            // } else {
@@ -363,6 +373,8 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
                         fb_cursor = 0;
                     }
                 }
+            } else {
+                print_current_state(display_driver); // i have no clue why this works only here
             }
             break;
         }
@@ -407,7 +419,7 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
             uint16_t frequency = (in_mspVtxConfigStruct->freqMSB << 8) | in_mspVtxConfigStruct->freqLSB;
             //get_power_level("wlan0");
             double current_frequency = get_frequency("wlan0");
-			printf("mspVTX Band: %i, Channel: %i, wanted Frequency: %u, set Frequency: %.0f\n",in_mspVtxConfigStruct->band, in_mspVtxConfigStruct->channel, frequency, current_frequency);
+			//printf("mspVTX Band: %i, Channel: %i, wanted Frequency: %u, set Frequency: %.0f\n",in_mspVtxConfigStruct->band, in_mspVtxConfigStruct->channel, frequency, current_frequency);
             if (frequency != (uint16_t)current_frequency) {
                 printf("mspVTX executing channel change\n");
                 set_frequency("wlan0", (double)frequency);
@@ -425,7 +437,7 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
         }
     }
 }
- 
+
 
 /* MSP DisplayPort handlers for compressed mode */
 

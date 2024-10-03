@@ -34,7 +34,8 @@
 
 #define MAX_MTU 9000
 
-
+bool vtxMenuActive = false;
+bool armed = false;
 bool AbortNow=false;
 bool verbose = false;
 bool ParseMSP = false;
@@ -72,6 +73,7 @@ int minAggPckts=3;
 
 bool monitor_wfb=false;
 static int temp = false;
+
 
 static void print_usage()
 {
@@ -486,6 +488,8 @@ void ProcessChannel(int rc_channel_no){
 	if (rc_channel_no<0 || rc_channel_no>15  /* || (mavpckts_ttl<100*/ ) //wait in the beginning for the values to settle
 		return;
 
+	if (!armed)
+		handle_stickcommands(channels);
 
 	if ( abs(get_current_time_ms()-LastStart[rc_channel_no]) < wait_after_bash)		
 		return;
@@ -738,7 +742,36 @@ static void serial_event_cb(struct bufferevent *bev, short events, void *arg)
 	}
 }
 
-
+// Callback function to handle keyboard input
+// void stdin_read_callback(int fd, short event, void *arg) {
+//     char buffer[256];
+//     ssize_t n = read(fd, buffer, sizeof(buffer) - 1);
+    
+//     if (n > 0 && ! armed) {
+//         buffer[n] = '\0';  // Null-terminate the input
+//         printf("You typed: %s\n", buffer);
+// 		if (buffer[0] == 'm') {
+// 			printf("Disableing msposd");
+// 			vtxMenuActive = true;
+//   	    	init_state_manager();
+// 		}
+// 		if (buffer[0] == 'x') {
+// 			printf("Enableing msposd");
+// 			vtxMenuActive = false;
+// 		}
+//         if (buffer[0] == 'w') {
+//             move_selection(-1); // Move up
+//         } else if (buffer[0] == 's') {
+//             move_selection(1); // Move down
+//         } else if (buffer[0] == 'a') {
+//             change_option(-1); // Decrease the selected option
+//         } else if (buffer[0] == 'd') {
+//             change_option(1); // Increase the selected option
+//         } else if (buffer[0] == 'e') {
+//             handle_selection();
+//         }	
+//     }
+// }
  
 
 static void* setup_temp_mem(off_t base, size_t size)
@@ -821,6 +854,10 @@ static void send_variant_request2(int serial_fd) {
 		// Poll for mspVTX
 		construct_msp_command(buffer, MSP_GET_VTX_CONFIG, NULL, 0, MSP_OUTBOUND);
 		res = write(serial_fd, &buffer, sizeof(buffer));
+
+		//poll for FC_STATUS
+		construct_msp_command(buffer, MSP_CMD_STATUS, NULL, 0, MSP_OUTBOUND);
+	    res = write(serial_fd, &buffer, sizeof(buffer));
 
 		//usleep(20*1000);
 		VariantCounter=0;
@@ -919,6 +956,12 @@ static int handle_data(const char *port_name, int baudrate,
 			  base);
 	bufferevent_enable(serial_bev, EV_READ);	 
 
+
+    // Set up an event for stdin (file descriptor 0)
+    //struct event *stdin_event = event_new(base, STDIN_FILENO, EV_READ | EV_PERSIST, stdin_read_callback, base);
+
+    // Add the event to the event loop
+    //event_add(stdin_event, NULL);
 
 	if (temp) {
 		if (GetTempSigmaStar()>-90){
