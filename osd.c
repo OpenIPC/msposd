@@ -419,9 +419,9 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
             uint16_t frequency = (in_mspVtxConfigStruct->freqMSB << 8) | in_mspVtxConfigStruct->freqLSB;
             //get_power_level("wlan0");
             double current_frequency = get_frequency("wlan0");
-			//printf("mspVTX Band: %i, Channel: %i, wanted Frequency: %u, set Frequency: %.0f\n",in_mspVtxConfigStruct->band, in_mspVtxConfigStruct->channel, frequency, current_frequency);
+			printf("mspVTX Band: %i, Channel: %i, wanted Frequency: %u, set Frequency: %.0f\n",in_mspVtxConfigStruct->band, in_mspVtxConfigStruct->channel, frequency, current_frequency);
             if (frequency != (uint16_t)current_frequency) {
-                printf("mspVTX executing channel change\n");
+                printf("mspVTX executing channel change to %d\n",frequency);
                 set_frequency("wlan0", (double)frequency);
             }
             break;

@@ -49,7 +49,7 @@ uint16_t msp_data_from_msg(uint8_t message_buffer[], msp_msg_t *msg) {
     return msg->size + 6;
 }
 
-void wipeVtxTable(int serial_fd) {
+void wipeVtxTable(int serial_fd,int band, int channel) {
 
     uint8_t payload[15];
     payload[0] = 0; // idx LSB
@@ -59,8 +59,8 @@ void wipeVtxTable(int serial_fd) {
     payload[4] = 0; // lowPowerDisarm 
     payload[5] = 0; // pitModeFreq LSB
     payload[6] = 0; // pitModeFreq MSB
-    payload[7] = 6; // newBand - WLAN Channel
-    payload[8] = 3; // newChannel - 161
+    payload[7] = band; // newBand - WLAN Channel
+    payload[8] = channel; // newChannel - 161
     payload[9] = 0; // newFreq  LSB
     payload[10] = 0; // newFreq  MSB
     payload[11] = BAND_COUNT; // newBandCount  
@@ -126,34 +126,6 @@ void setVtxTablePowerLevel(int serial_fd, uint8_t idx) {
 }
 
 // mstpVTX
-// read current channel from config
-char* get_key_from_config() {
-    const char* key = "channel";
-    FILE* file = fopen("/etc/wfb.conf", "r");
-    if (file == NULL) {
-        perror("Error opening file");
-        return NULL;
-    }
-
-    char line[256];
-    char* value = NULL;
-
-    while (fgets(line, sizeof(line), file)) {
-        // Remove newline characters
-        line[strcspn(line, "\n")] = '\0';
-
-        // Look for the key at the beginning of the line
-        if (strncmp(line, key, strlen(key)) == 0 && line[strlen(key)] == '=') {
-            // Extract value (after '=')
-            value = strdup(line + strlen(key) + 1);
-            break;
-        }
-    }
-
-    fclose(file);
-    return value;
-}
-
 // i have no idea what i'm doing here. thanks chatgpt
 // read supported frequencies from wlan interface
 static int fillChannelFreqTable(struct nl_msg *msg, void *arg) {
@@ -286,14 +258,24 @@ void query_interface_for_available_frequencies() {
 void msp_set_vtx_config(int serial_fd) {
 
     //mspVTX read current frequency setting
-    char* channel = get_key_from_config();
-    printf("Current channel is: %s\n", channel);
-
     query_interface_for_available_frequencies();
 
     read_current_freq_from_interface();
 
-    wipeVtxTable(serial_fd);
+    int band=6;
+    int channel=3;
+    for (int index =0 ; index < FREQ_TABLE_SIZE; index++){
+        if (channelFreqTable[index] == frequency) {
+            // Determine band and channel using division and modulo
+            band = index / 8; // Which band (integer division)
+            channel = (index % 8) + 1; // Channel within the band (modulo)
+
+            printf("Frequency %d found in band %i, channel %d\n", frequency, band, channel);
+            break;  // Exit after finding the frequency            
+        }
+    }
+
+    wipeVtxTable(serial_fd,band,channel);
 
     for (int i = 1 ; i <= BAND_COUNT; i++) {
         setVtxTableBand(serial_fd,i);
