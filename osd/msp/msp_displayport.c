@@ -300,6 +300,22 @@ void change_option(int direction) {
         new_value = option_ranges[current_selection][1];
     }
     options[current_selection] = new_value; // Update option value
+
+    //if action menu was selected
+    switch (current_selection) {
+        case OPTION_SAVE:
+            save_settings(); // Call the save function
+            break;
+        case OPTION_REBOOT:
+            doreboot(); // Call the reboot function
+            break;
+        case OPTION_SAVEREBOOT:
+            save_settings(); // Call the save function
+            doreboot(); // Call the reboot function
+            break;
+        default:
+            break; // Handle unexpected cases if necessary
+    }    
 }
 
 void print_current_state(displayport_vtable_t *display_driver) {
