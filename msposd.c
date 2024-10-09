@@ -32,6 +32,8 @@
 
 //#include "msp/msp.cpp"
 
+#include "osd/util/settings.h"
+
 #define MAX_MTU 9000
 
 bool vtxMenuActive = false;
@@ -73,7 +75,7 @@ int minAggPckts=3;
 
 bool monitor_wfb=false;
 static int temp = false;
-
+ 
 
 static void print_usage()
 {

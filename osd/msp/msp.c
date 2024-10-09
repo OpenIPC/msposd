@@ -2,11 +2,8 @@
 #include <string.h>
 #include <stdio.h>
 #include "msp.h"
-
-#include <netlink/netlink.h>
-#include <netlink/genl/genl.h>
-#include <netlink/genl/ctrl.h>
-#include <linux/nl80211.h>
+#include "../util/interface.h"
+#include "../util/settings.h"
 
 uint8_t channelFreqLabel[FREQ_LABEL_SIZE] = {
     'B', 'A', 'N', 'D', '_', 'A', ' ', ' ', // A
@@ -125,149 +122,19 @@ void setVtxTablePowerLevel(int serial_fd, uint8_t idx) {
     write(serial_fd, &buffer, sizeof(buffer));
 }
 
-// mstpVTX
-// i have no idea what i'm doing here. thanks chatgpt
-// read supported frequencies from wlan interface
-static int fillChannelFreqTable(struct nl_msg *msg, void *arg) {
-    struct nlattr *tb_msg[NL80211_ATTR_MAX + 1];
-    struct genlmsghdr *gnlh = nlmsg_data(nlmsg_hdr(msg));
-    struct nlattr *tb_band[NL80211_BAND_ATTR_MAX + 1];
-    struct nlattr *tb_freq[NL80211_FREQUENCY_ATTR_MAX + 1];
-    struct nlattr *nl_band, *nl_freq;
-    int rem_band, rem_freq;
-
-    nla_parse(tb_msg, NL80211_ATTR_MAX, genlmsg_attrdata(gnlh, 0),
-              genlmsg_attrlen(gnlh, 0), NULL);
-
-    if (!tb_msg[NL80211_ATTR_WIPHY_BANDS]) {
-        printf("No frequency information available.\n");
-        return NL_SKIP;
-    }
-
-    int current_index=0;
-    nla_for_each_nested(nl_band, tb_msg[NL80211_ATTR_WIPHY_BANDS], rem_band) {
-        nla_parse(tb_band, NL80211_BAND_ATTR_MAX, nla_data(nl_band),
-                  nla_len(nl_band), NULL);
-
-        if (!tb_band[NL80211_BAND_ATTR_FREQS])
-            continue;
-
-        nla_for_each_nested(nl_freq, tb_band[NL80211_BAND_ATTR_FREQS], rem_freq) {
-            nla_parse(tb_freq, NL80211_FREQUENCY_ATTR_MAX, nla_data(nl_freq),
-                      nla_len(nl_freq), NULL);
-
-            if (tb_freq[NL80211_FREQUENCY_ATTR_FREQ] && !tb_freq[NL80211_FREQUENCY_ATTR_DISABLED]){
-                uint16_t freq = nla_get_u32(tb_freq[NL80211_FREQUENCY_ATTR_FREQ]);
-                if (current_index < FREQ_TABLE_SIZE) {
-                    //printf("Adding Frequency: %d MHz\n", freq);
-                    channelFreqTable[current_index++] = freq;
-                } else {
-                   printf("Skipping Frequency: %d MHz vtxtable is full\n", freq);
-                }
-            }
-        }
-    }
-    if ( current_index > 0 ) {
-        // at least we found one supported channel on the interface
-        // now our default band names are useless
-        // fill with gerneric band name
-        for (int band_index = 0; band_index < FREQ_LABEL_SIZE; band_index += BAND_NAME_LENGTH) {
-            channelFreqLabel[band_index]     = 'B';
-            channelFreqLabel[band_index + 1] = 'A';
-            channelFreqLabel[band_index + 2] = 'N';
-            channelFreqLabel[band_index + 3] = 'D';
-            channelFreqLabel[band_index + 4] = ' ';
-            channelFreqLabel[band_index + 5] = '1' + (band_index / BAND_NAME_LENGTH); // This appends the number '1' through '8'
-            channelFreqLabel[band_index + 6] = ' ';
-            channelFreqLabel[band_index + 7] = ' ';
-        }
-        // same goes for channel bandLetter
-        for ( int band_index = 0 ; band_index < BAND_COUNT; band_index++) {
-            bandLetter[band_index] = '1' + band_index;
-        }
-    }
-    printf("mspVTX: Total %i out of %i used.\n",current_index,FREQ_TABLE_SIZE);
-    return NL_SKIP;
-}
-
-
-// i have no idea what i'm doing here. thanks chatgpt
-void query_interface_for_available_frequencies() {
-    struct nl_sock *socket;
-    int nl80211_id;
-    struct nl_msg *msg;
-    int if_index = if_nametoindex("wlan0"); // ToDo is this always wlan0 ?
-
-    // Allocate new netlink socket
-    socket = nl_socket_alloc();
-    if (!socket) {
-        fprintf(stderr, "Failed to allocate netlink socket.\n");
-        return -1;
-    }
-
-    // Connect to generic netlink
-    if (genl_connect(socket)) {
-        fprintf(stderr, "Failed to connect to generic netlink.\n");
-        nl_socket_free(socket);
-        return -1;
-    }
-
-    // Resolve nl80211 family id
-    nl80211_id = genl_ctrl_resolve(socket, "nl80211");
-    if (nl80211_id < 0) {
-        fprintf(stderr, "nl80211 not found.\n");
-        nl_socket_free(socket);
-        return -1;
-    }
-
-    // Create message
-    msg = nlmsg_alloc();
-    if (!msg) {
-        fprintf(stderr, "Failed to allocate netlink message.\n");
-        nl_socket_free(socket);
-        return -1;
-    }
-
-    // Setup message
-    genlmsg_put(msg, 0, 0, nl80211_id, 0, 0, NL80211_CMD_GET_WIPHY, 0);
-
-    // Add interface index to message (optional, if you need a specific interface)
-    if (if_index != -1) {
-        nla_put_u32(msg, NL80211_ATTR_IFINDEX, if_index);
-    }
-
-    // Send message and process response
-    nl_socket_modify_cb(socket, NL_CB_VALID, NL_CB_CUSTOM, fillChannelFreqTable, NULL);
-
-    if (nl_send_auto(socket, msg) < 0) {
-        fprintf(stderr, "Failed to send message.\n");
-        nlmsg_free(msg);
-        nl_socket_free(socket);
-        return -1;
-    }
-
-    nl_recvmsgs_default(socket);
-
-    // Cleanup
-    nlmsg_free(msg);
-    nl_socket_free(socket);    
-
-}
-
-
 void msp_set_vtx_config(int serial_fd) {
 
     //mspVTX read current frequency setting
     query_interface_for_available_frequencies();
 
-    read_current_freq_from_interface();
+    frequency = read_current_freq_from_interface(read_setting("/etc/wfb.conf","wlan"));
 
     int band=6;
     int channel=3;
     for (int index =0 ; index < FREQ_TABLE_SIZE; index++){
         if (channelFreqTable[index] == frequency) {
             // Determine band and channel using division and modulo
-            band = index / 8; // Which band (integer division)
+            band = index / 8 + 1; // Which band (integer division)
             channel = (index % 8) + 1; // Channel within the band (modulo)
 
             printf("Frequency %d found in band %i, channel %d\n", frequency, band, channel);

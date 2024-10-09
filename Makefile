@@ -2,7 +2,7 @@
 VERSION_STRING := $(shell date +"%Y%m%d_%H%M%S")
 CFLAGS = -Wno-address-of-packed-member -DVERSION_STRING="\"$(VERSION_STRING)\""
 
-SRCS := compat.c msposd.c bmp/bitmap.c bmp/region.c bmp/lib/schrift.c bmp/text.c osd/net/network.c osd/msp/msp.c osd/msp/msp_displayport.c libpng/lodepng.c  osd/net/interface.c
+SRCS := compat.c msposd.c bmp/bitmap.c bmp/region.c bmp/lib/schrift.c bmp/text.c osd/net/network.c osd/msp/msp.c osd/msp/msp_displayport.c libpng/lodepng.c osd/util/settings.c osd/net/interface.c
 OUTPUT ?= $(PWD)
 BUILD = $(CC) $(SRCS) -I $(SDK)/include -L $(DRV) $(CFLAGS) $(LIB) -levent_core -Os -s -o $(OUTPUT)/msposd
 
