@@ -93,7 +93,7 @@ int displayport_process_message(displayport_vtable_t *display_driver, msp_msg_t 
 // VTX CAM Menu
 #define OSD_HD_COLS 53
 #define OSD_HD_ROWS 20
-#define NUM_OPTIONS 6
+#define NUM_OPTIONS 7
 #define BUFFER_SIZE 128
 
 
@@ -106,7 +106,8 @@ static const int option_ranges[NUM_OPTIONS][2] = {
     {0, 3},     // Size range example (e.g., resolution width)
     {0, 2},     // FPS range example
     {0, 0},     // Save option doesn't have a range, can be set to 0
-    {0, 0}      // Reboot option doesn't have a range, can be set to 0
+    {0, 0},      // Reboot option doesn't have a range, can be set to 0
+    {0, 0}      // Save&Reboot option doesn't have a range, can be set to 0
 
 };
 
@@ -144,11 +145,12 @@ typedef enum {
     OPTION_SIZE,
     OPTION_FPS,
     OPTION_SAVE,
-    OPTION_REBOOT
+    OPTION_REBOOT,
+    OPTION_SAVEREBOOT
 } MenuOption;
 
 // Option values
-static int options[NUM_OPTIONS] = { 0, 0, 0, 0, 0, 0 };
+static int options[NUM_OPTIONS] = { 0, 0, 0, 0, 0, 0, 0};
 
 // Labels for menu options (corresponds to the enum values)
 const char *option_labels[NUM_OPTIONS] = {
@@ -157,7 +159,8 @@ const char *option_labels[NUM_OPTIONS] = {
     "SIZE    :",
     "FPS     : ",
     "SAVE",
-    "REBOOT"
+    "REBOOT",
+    "SAVE&REBOOT",
 };
 
 const char *read_commands[NUM_OPTIONS-2] = {
@@ -336,8 +339,10 @@ void print_current_state(displayport_vtable_t *display_driver) {
                 break;
             case OPTION_REBOOT:
                 value_text = "";
-                break;                
-
+                break;
+            case OPTION_SAVEREBOOT:
+                value_text = "";
+                break;
         }
         
         // Format the display string
@@ -354,7 +359,7 @@ void print_current_state(displayport_vtable_t *display_driver) {
     // Draw the populated menu array on the OSD
     for (int row = 0; row < NUM_OPTIONS; row++) {
         for (int col = 0; col < OSD_HD_COLS; col++) {
-            display_driver->draw_character(col, row, menu_grid[row][col]);
+            display_driver->draw_character(col+5, row+5, menu_grid[row][col]);
         }
     }
     display_driver->draw_complete();
@@ -372,7 +377,7 @@ void save_settings() {
     char option_value[BUFFER_SIZE];
 
     // Iterate over each option except for SAVE and REBOOT
-    for (int i = 0; i < NUM_OPTIONS - 2; ++i) {
+    for (int i = 0; i < NUM_OPTIONS - 3; ++i) {
         // Get the current value based on the option
         const char *value_text = "";
         switch (i) {
@@ -452,6 +457,10 @@ void handle_selection() {
             save_settings(); // Call the save function
             break;
         case OPTION_REBOOT:
+            doreboot(); // Call the reboot function
+            break;
+        case OPTION_SAVEREBOOT:
+            save_settings(); // Call the save function
             doreboot(); // Call the reboot function
             break;
         default:
