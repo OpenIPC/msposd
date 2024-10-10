@@ -96,7 +96,7 @@ int displayport_process_message(displayport_vtable_t *display_driver, msp_msg_t 
 #define NUM_OPTIONS 7
 #define BUFFER_SIZE 128
 
-
+static bool newMenu = true;
 static int current_selection = 0;
 
 // Option ranges for dynamic boundaries
@@ -319,7 +319,10 @@ void change_option(int direction) {
 }
 
 void print_current_state(displayport_vtable_t *display_driver) {
-    display_driver->clear_screen();
+    if (newMenu) {
+        display_driver->clear_screen();
+        newMenu=false;
+    }
 
     // Create a 2D array to store the menu representation
     char menu_grid[NUM_OPTIONS][OSD_HD_COLS];
@@ -552,6 +555,7 @@ void handle_stickcommands(uint16_t channels[18]) {
         switch (command) {
             case VTXMENU:
                 printf("Entering vtxMenu\n");
+                newMenu = true;
                 vtxMenuActive = true;
                 init_state_manager();
                 break;
@@ -572,6 +576,7 @@ void handle_stickcommands(uint16_t channels[18]) {
                 break;           
             case EXIT:
                 printf("Exit vtxMenu\n");
+                newMenu = true;
                 vtxMenuActive = false;
                 break;
         }

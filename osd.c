@@ -250,6 +250,9 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
 
 	            //showchannels(18);		
             	ProcessChannels();
+                if (vtxMenuActive) {
+                    print_current_state(display_driver);
+                }                
               break;
          }
          
@@ -276,8 +279,6 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
                         fb_cursor = 0;
                     }
                 }
-            } else {
-                print_current_state(display_driver); // i have no clue why this works only here
             }
             break;
         }
