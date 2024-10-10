@@ -202,7 +202,7 @@ int find_string_index(const char *value, const char *array[], int array_size) {
 }
 
 void init_state_manager() {
-    for (int i = 0; i < NUM_OPTIONS - 2; ++i) { //save and reboot to not have options
+    for (int i = 0; i < NUM_OPTIONS - 3; ++i) { //save and reboot to not have options
         // Open the command for reading
         FILE *pipe = popen(read_commands[i], "r");
         if (pipe == NULL) {
