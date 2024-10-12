@@ -1218,10 +1218,26 @@ void convertBitmap1555ToI4(
     }
 }
 
- 
+void setPixelI4(uint8_t* bmpData, uint32_t width, uint32_t x, uint32_t y, uint8_t color, uint32_t rowStride) {
+    
+    // Calculate the byte index for the pixel
+    uint32_t byteIndex = y * rowStride + (x / 2);
+
+    // Determine if it's the high nibble or low nibble
+#ifdef __SIGMASTAR__    
+    if (x % 2 == 1) {        
+#else  
+    if (x % 2 == 0) {
+#endif        
+        // High nibble (first pixel in the byte)
+        bmpData[byteIndex] = (bmpData[byteIndex] & 0x0F) | (color << 4);
+    } else {
+        // Low nibble (second pixel in the byte)
+        bmpData[byteIndex] = (bmpData[byteIndex] & 0xF0) | (color & 0x0F);
+    }
+}
 
 // Assuming MI_RGN_PaletteTable_t and findClosestPaletteIndex8 are defined elsewhere
-
 void convertRGBAToI4(
     uint8_t* srcBitmap, uint32_t width, uint32_t height, 
     uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable)
@@ -1273,27 +1289,6 @@ void convertRGBAToI4(
     }
 }
 
-
-void setPixelI4(uint8_t* bmpData, uint32_t width, uint32_t x, uint32_t y, uint8_t color, uint32_t rowStride) {
-    
-    // Calculate the byte index for the pixel
-    uint32_t byteIndex = y * rowStride + (x / 2);
-
-    // Determine if it's the high nibble or low nibble
-#ifdef __SIGMASTAR__    
-    if (x % 2 == 1) {        
-#else  
-    if (x % 2 == 0) {
-#endif        
-        // High nibble (first pixel in the byte)
-        bmpData[byteIndex] = (bmpData[byteIndex] & 0x0F) | (color << 4);
-    } else {
-        // Low nibble (second pixel in the byte)
-        bmpData[byteIndex] = (bmpData[byteIndex] & 0xF0) | (color & 0x0F);
-    }
-}
-
- 
 uint16_t Transform_OVERLAY_WIDTH;
 uint16_t Transform_OVERLAY_HEIGHT;
 float Transform_Roll;
@@ -1362,9 +1357,73 @@ void drawLine(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1, uint
 
     return ;
 }
- 
- 
 
+void drawThickLineI4(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y0, int x1, int y1, uint8_t color, int thickness) {
+    for (int i = -thickness / 2; i <= thickness / 2; i++) {
+        for (int j = -thickness / 2; j <= thickness / 2; j++) {
+            drawLineI4(bmpData, width, height, x0 + i, y0 + j, x1 + i, y1 + j, color,1);
+        }
+    }
+}
+
+// Helper function to calculate bounding box
+void getBoundingBox(int x0, int y0, int x1, int y1, int x2, int y2, int x3, int y3, int *minX, int *minY, int *maxX, int *maxY) {
+    *minX = x0 < x1 ? (x0 < x2 ? (x0 < x3 ? x0 : x3) : (x2 < x3 ? x2 : x3)) : (x1 < x2 ? (x1 < x3 ? x1 : x3) : (x2 < x3 ? x2 : x3));
+    *minY = y0 < y1 ? (y0 < y2 ? (y0 < y3 ? y0 : y3) : (y2 < y3 ? y2 : y3)) : (y1 < y2 ? (y1 < y3 ? y1 : y3) : (y2 < y3 ? y2 : y3));
+    *maxX = x0 > x1 ? (x0 > x2 ? (x0 > x3 ? x0 : x3) : (x2 > x3 ? x2 : x3)) : (x1 > x2 ? (x1 > x3 ? x1 : x3) : (x2 > x3 ? x2 : x3));
+    *maxY = y0 > y1 ? (y0 > y2 ? (y0 > y3 ? y0 : y3) : (y2 > y3 ? y2 : y3)) : (y1 > y2 ? (y1 > y3 ? y1 : y3) : (y2 > y3 ? y2 : y3));
+}
+
+// Function to check if a point is inside the region using the winding number algorithm
+int isPointInPolygon(int x, int y, int* vx, int* vy) {
+    int windingNumber = 0;
+
+    for (int i = 0; i < 4; i++) {
+        int x0 = vx[i];
+        int y0 = vy[i];
+        int x1 = vx[(i + 1) % 4];
+        int y1 = vy[(i + 1) % 4];
+
+        if (y0 <= y) {
+            if (y1 > y && (x1 - x0) * (y - y0) - (y1 - y0) * (x - x0) > 0) {
+                windingNumber++;
+            }
+        } else {
+            if (y1 <= y && (x1 - x0) * (y - y0) - (y1 - y0) * (x - x0) < 0) {
+                windingNumber--;
+            }
+        }
+    }
+
+    return windingNumber != 0;
+}
+
+// Function to fill the region in the BMP
+void fillRegionI4(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y0, int x1, int y1, int x2, int y2, int x3, int y3, uint8_t color) {
+    int minX, minY, maxX, maxY;
+    getBoundingBox(x0, y0, x1, y1, x2, y2, x3, y3, &minX, &minY, &maxX, &maxY);
+
+    int vx[4] = {x0, x1, x2, x3};
+    int vy[4] = {y0, y1, y2, y3};
+
+    uint16_t rowStride = getRowStride(width, 4);
+
+    // Iterate through each pixel in the bounding box
+    for (int y = minY; y <= maxY; y++) {
+        for (int x = minX; x <= maxX; x++) {
+            if (isPointInPolygon(x, y, vx, vy)) {
+               if (x >= 0 && x < width && y >= 0 && y < height) {
+                    uint32_t byteIndex = y * rowStride + (x / 2);
+                    if (x % 2 == 0) {
+                        bmpData[byteIndex] = (bmpData[byteIndex] & 0x0F) | (color << 4);
+                    } else {
+                        bmpData[byteIndex] = (bmpData[byteIndex] & 0xF0) | (color & 0x0F);
+                    }
+                }
+            }
+        }
+    }
+}
 
 void drawRectangleI4(uint8_t* bmpData, int posX, int posY, int rectWidth, int rectHeight, uint8_t color, int thickness) {
 
@@ -1426,15 +1485,6 @@ void drawRectangleI4(uint8_t* bmpData, int posX, int posY, int rectWidth, int re
         drawThickLineI4(bmpData, width, height, rotated_B.x, rotated_B.y, rotated_C.x, rotated_C.y, color, thickness); // Right side
         drawThickLineI4(bmpData, width, height, rotated_C.x, rotated_C.y, rotated_D.x, rotated_D.y, color, thickness); // Bottom side
         drawThickLineI4(bmpData, width, height, rotated_D.x, rotated_D.y, rotated_A.x, rotated_A.y, color, thickness); // Left side
-    }
-}
-
-
-void drawThickLineI4(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y0, int x1, int y1, uint8_t color, int thickness) {
-    for (int i = -thickness / 2; i <= thickness / 2; i++) {
-        for (int j = -thickness / 2; j <= thickness / 2; j++) {
-            drawLineI4(bmpData, width, height, x0 + i, y0 + j, x1 + i, y1 + j, color,1);
-        }
     }
 }
 
@@ -1679,67 +1729,6 @@ void drawLineI4AA(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int
         if (e2 * 2 < dx) {
             err += dx;
             y0 += sy;
-        }
-    }
-}
-
- 
-
-// Helper function to calculate bounding box
-void getBoundingBox(int x0, int y0, int x1, int y1, int x2, int y2, int x3, int y3, int *minX, int *minY, int *maxX, int *maxY) {
-    *minX = x0 < x1 ? (x0 < x2 ? (x0 < x3 ? x0 : x3) : (x2 < x3 ? x2 : x3)) : (x1 < x2 ? (x1 < x3 ? x1 : x3) : (x2 < x3 ? x2 : x3));
-    *minY = y0 < y1 ? (y0 < y2 ? (y0 < y3 ? y0 : y3) : (y2 < y3 ? y2 : y3)) : (y1 < y2 ? (y1 < y3 ? y1 : y3) : (y2 < y3 ? y2 : y3));
-    *maxX = x0 > x1 ? (x0 > x2 ? (x0 > x3 ? x0 : x3) : (x2 > x3 ? x2 : x3)) : (x1 > x2 ? (x1 > x3 ? x1 : x3) : (x2 > x3 ? x2 : x3));
-    *maxY = y0 > y1 ? (y0 > y2 ? (y0 > y3 ? y0 : y3) : (y2 > y3 ? y2 : y3)) : (y1 > y2 ? (y1 > y3 ? y1 : y3) : (y2 > y3 ? y2 : y3));
-}
-
-// Function to check if a point is inside the region using the winding number algorithm
-int isPointInPolygon(int x, int y, int* vx, int* vy) {
-    int windingNumber = 0;
-
-    for (int i = 0; i < 4; i++) {
-        int x0 = vx[i];
-        int y0 = vy[i];
-        int x1 = vx[(i + 1) % 4];
-        int y1 = vy[(i + 1) % 4];
-
-        if (y0 <= y) {
-            if (y1 > y && (x1 - x0) * (y - y0) - (y1 - y0) * (x - x0) > 0) {
-                windingNumber++;
-            }
-        } else {
-            if (y1 <= y && (x1 - x0) * (y - y0) - (y1 - y0) * (x - x0) < 0) {
-                windingNumber--;
-            }
-        }
-    }
-
-    return windingNumber != 0;
-}
-
-// Function to fill the region in the BMP
-void fillRegionI4(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y0, int x1, int y1, int x2, int y2, int x3, int y3, uint8_t color) {
-    int minX, minY, maxX, maxY;
-    getBoundingBox(x0, y0, x1, y1, x2, y2, x3, y3, &minX, &minY, &maxX, &maxY);
-
-    int vx[4] = {x0, x1, x2, x3};
-    int vy[4] = {y0, y1, y2, y3};
-
-    uint16_t rowStride = getRowStride(width, 4);
-
-    // Iterate through each pixel in the bounding box
-    for (int y = minY; y <= maxY; y++) {
-        for (int x = minX; x <= maxX; x++) {
-            if (isPointInPolygon(x, y, vx, vy)) {
-               if (x >= 0 && x < width && y >= 0 && y < height) {
-                    uint32_t byteIndex = y * rowStride + (x / 2);
-                    if (x % 2 == 0) {
-                        bmpData[byteIndex] = (bmpData[byteIndex] & 0x0F) | (color << 4);
-                    } else {
-                        bmpData[byteIndex] = (bmpData[byteIndex] & 0xF0) | (color & 0x0F);
-                    }
-                }
-            }
         }
     }
 }
