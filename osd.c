@@ -1464,7 +1464,7 @@ static void InitMSPHook(){
     char *font_suffix;
     char font_load_name[255];
     font_suffix="";
-    font_path = "/usr/bin/";   
+    font_path = "/usr/share/fonts/";   
      #ifdef _x86
     font_path = "";//.bmp
     #endif 
