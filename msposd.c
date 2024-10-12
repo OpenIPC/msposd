@@ -41,6 +41,7 @@ bool armed = false;
 bool AbortNow=false;
 bool verbose = false;
 bool ParseMSP = false;
+bool mspVTXenabled = false;
 int MSP_PollRate=20;
 
 int matrix_size=0;
@@ -94,6 +95,7 @@ static void print_usage()
  "	-s --osd         Parse MSP and draw OSD over the video\n"
  "	-a --ahi         Draw graphic AHI, mode [0-No, 2-Simple 1-Ladder, 3-LadderEx]\n"
  "	-x --matrix      OSD matrix (0 - 53:20 , 1- 50:18 chars)\n"
+ "	-1 --mspvtx      Enable mspvtx support\n"
  "	-v --verbose     Show debug infot\n"	       
  "	--help           Display this help\n",
 
@@ -873,9 +875,11 @@ static void send_variant_request2(int serial_fd) {
 		construct_msp_command(buffer, MSP_CMD_FC_VARIANT, NULL, 0, MSP_OUTBOUND);
 		res = write(serial_fd, &buffer, sizeof(buffer));
 
-		// Poll for mspVTX
-		construct_msp_command(buffer, MSP_GET_VTX_CONFIG, NULL, 0, MSP_OUTBOUND);
-		res = write(serial_fd, &buffer, sizeof(buffer));
+		if (mspVTXenabled) {
+			// Poll for mspVTX
+			construct_msp_command(buffer, MSP_GET_VTX_CONFIG, NULL, 0, MSP_OUTBOUND);
+			res = write(serial_fd, &buffer, sizeof(buffer));
+		}		
 
 		//poll for FC_STATUS
 		construct_msp_command(buffer, MSP_CMD_STATUS, NULL, 0, MSP_OUTBOUND);
@@ -937,9 +941,10 @@ static int handle_data(const char *port_name, int baudrate,
 	tcsetattr(serial_fd, TCSANOW, &options);
 
 	// tell the fc what vtx config we support
-    printf("Setup mspVTX ...\n");
-    msp_set_vtx_config(serial_fd);
-
+	if (mspVTXenabled) {
+		printf("Setup mspVTX ...\n");
+		msp_set_vtx_config(serial_fd);
+	}
 	out_sock = socket(AF_INET, SOCK_DGRAM, 0);
 
  	if (!parse_host_port(out_addr,
@@ -1066,7 +1071,8 @@ int main(int argc, char **argv)
 		{ "osd", no_argument, NULL, 'd' },	
 		{ "verbose", no_argument, NULL, 'v' },		
 		{ "temp", no_argument, NULL, 't' },						
-		{ "wfb", no_argument, NULL, 'j' },					
+		{ "wfb", no_argument, NULL, 'j' },
+		{ "mspvtx", no_argument, NULL, '1' },							
 		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
@@ -1155,7 +1161,9 @@ int main(int argc, char **argv)
 		case 'j':		
 			monitor_wfb = true;
 			break;
-
+		case '1':		
+			mspVTXenabled = true;
+			break;
 		case 'v':
 			verbose = true;
 			printf("Verbose mode!");
