@@ -119,18 +119,6 @@ void print_current_state(displayport_vtable_t *display_driver) {
     display_menu(display_driver, current_section, selected_option);
 }
 
-void doreboot() {
-    printf("Rebooting system ...\n");
-
-    // Sync filesystems to ensure no data loss
-    sync(); 
-
-    // Call the reboot system call with the "restart" command
-    if (reboot(LINUX_REBOOT_CMD_RESTART) == -1) {
-        perror("Reboot failed");
-    }    
-}
-
 //Stick command handleing
 //stolen from hdzero
 

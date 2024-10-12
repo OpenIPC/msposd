@@ -8,3 +8,4 @@
 
 void display_menu(displayport_vtable_t *display_driver,MenuSection *section, int selected_option);
 void clear_vtx_menu();
+void doreboot();

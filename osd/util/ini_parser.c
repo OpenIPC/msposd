@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include "ini_parser.h"
+#include "../msp/vtxmenu.h"
+
+extern MenuSection *current_section;
 
 // Helper function to split the list of values in a comma-separated list
 void split_values(const char *values, char (*value_list)[20], int *value_count) {
@@ -112,10 +115,9 @@ void save_value_to_system(const char *save_command, const char *value) {
 }
 
 // Function to save all current values of options in a section
-void save_all_changes(void *data) {
+void save_all_changes() {
 
-    // Cast the generic pointer back to MenuSection*
-    MenuSection *section = (MenuSection *)data;
+    MenuSection *section = current_section;
 
     for (int i = 0; i < section->option_count; i++) {
         MenuOption *option = &section->options[i];
@@ -150,15 +152,18 @@ void save_all_changes(void *data) {
     }
 }
 
-void add_save_option(MenuSection *section) {
-    MenuOption save_option;
-    strcpy(save_option.name, "Save");
-    strcpy(save_option.lable, "SAVE EXIT");
-    save_option.type = MENU_OPTION_COMMAND;
-    save_option.command_function = save_all_changes;  // Function to save all changes
+void add_option(MenuSection *section, const char *name, const char *label, void (*command_function)(void)) {
+    MenuOption option;
+    // Copy name and label dynamically
+    strncpy(option.name, name, MAX_NAME_LENGTH - 1);
+    option.name[MAX_NAME_LENGTH - 1] = '\0';  // Ensure null termination
+    strncpy(option.lable, label, MAX_LABLE_LENGTH - 1);
+    option.lable[MAX_LABLE_LENGTH - 1] = '\0';  // Ensure null termination
+    option.type = MENU_OPTION_COMMAND;
+    option.command_function = command_function;  // Function to save all changes
 
     // Add the save option to the section's list of options
-    section->options[section->option_count++] = save_option;
+    section->options[section->option_count++] = option;
 }
 
 int parse_ini(const char *filename, MenuSystem *menu_system) {
@@ -188,9 +193,6 @@ int parse_ini(const char *filename, MenuSystem *menu_system) {
 
         // Check for section header
         if (line[0] == '[') {
-            if (current_section > 0) {
-                add_save_option(current_section);
-            }
             current_section = &menu_system->sections[menu_system->section_count++];
             sscanf(line + 1, "%[^]]", current_section->name);
             current_section->option_count = 0;
@@ -275,8 +277,12 @@ int parse_ini(const char *filename, MenuSystem *menu_system) {
         }
     }
 
-    // Last section also need a save button
-    add_save_option(current_section);
+    // Add programmatic commands
+    for (int s = 1;s<menu_system->section_count;s++) {
+        MenuSection *cs = &menu_system->sections[s];
+        add_option(cs,"Save","SAVE",save_all_changes);
+    }
+    add_option(&menu_system->sections[0],"Reboot","REBOOT",doreboot);
 
     fclose(file);
     return 0;

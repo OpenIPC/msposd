@@ -1,4 +1,8 @@
 #include <stdio.h>
+#include <unistd.h>
+#include <sys/reboot.h>
+#include <linux/reboot.h>  // For LINUX_REBOOT_CMD_RESTART
+
 #include "msp_displayport.h"
 #include "vtxmenu.h"
 #include "../util/ini_parser.h"
@@ -15,18 +19,21 @@ void display_menu(displayport_vtable_t *display_driver,MenuSection *section, int
         clearNextDraw = false;
     }
 
+    int menu_offset_cols = 4;
+    int menu_offset_row = 2;
+
     // Create a 2D array to store the menu representation
-    char menu_grid[section->option_count][OSD_HD_COLS];
+    char menu_grid[section->option_count+1][OSD_HD_COLS-menu_offset_cols];
     
     // Initialize the 2D array to empty spaces
-    for (int i = 0; i < section->option_count; ++i) {
-        memset(menu_grid[i], ' ', OSD_HD_COLS); // Fill each row with spaces
-        menu_grid[i][OSD_HD_COLS - 1] = '\0'; // Ensure null termination for each string row
+    for (int i = 0; i < section->option_count+1; ++i) {
+        memset(menu_grid[i], ' ', OSD_HD_COLS-menu_offset_cols); // Fill each row with spaces
+        //menu_grid[i][OSD_HD_COLS - 1] = '\0'; // Ensure null termination for each string row
     }
 
     int current_row=0;
     printf("\n=== %s ===\n", section->name);
-    snprintf(menu_grid[current_row++], OSD_HD_COLS, "=== %s ===", section->name);
+    snprintf(menu_grid[current_row++], OSD_HD_COLS-menu_offset_cols, "=== %s ===", section->name);
 
     for (int i = 0; i < section->option_count; i++) {
         char row_selectd[3] = "  ";
@@ -45,23 +52,22 @@ void display_menu(displayport_vtable_t *display_driver,MenuSection *section, int
                 int value_count;
                 split_values(option->values, value_list, &value_count);
                 printf("%s: %s\n",option->lable, value_list[section->current_value_index[i]]);
-                snprintf(menu_grid[current_row++], OSD_HD_COLS, "%s%s: %s", row_selectd,option->lable, value_list[section->current_value_index[i]]);
+                snprintf(menu_grid[current_row++], OSD_HD_COLS-menu_offset_cols, "%s%s: %s", row_selectd,option->lable, value_list[section->current_value_index[i]]);
                 break;
             }
             case MENU_OPTION_RANGE: {
                 printf("%s: %d\n", option->lable, section->current_value_index[i]);
-                snprintf(menu_grid[current_row++], OSD_HD_COLS, "%s%s: %d", row_selectd, option->lable, section->current_value_index[i]);
+                snprintf(menu_grid[current_row++], OSD_HD_COLS-menu_offset_cols, "%s%s: %d", row_selectd, option->lable, section->current_value_index[i]);
                 break;
 
             }
             case MENU_OPTION_SUBMENU:
                 printf("[%s]\n", option->lable);
-                snprintf(menu_grid[current_row++], OSD_HD_COLS, "%s[%s]", row_selectd, option->lable);
+                snprintf(menu_grid[current_row++], OSD_HD_COLS-menu_offset_cols, "%s[%s]", row_selectd, option->lable);
                 break;
             case MENU_OPTION_COMMAND:
                 printf("[%s]\n", option->lable);
-                //snprintf(menu_grid[current_row++], OSD_HD_COLS, "%s[%s]", row_selectd, option->lable);
-                //snprintf(menu_grid[current_row++], OSD_HD_COLS, "%s[SAVE]", row_selectd);
+                snprintf(menu_grid[current_row++], OSD_HD_COLS-menu_offset_cols, "%s[%s]", row_selectd, option->lable);
                 break;
             default:
                 printf("\n");
@@ -70,10 +76,23 @@ void display_menu(displayport_vtable_t *display_driver,MenuSection *section, int
     }
 
     // Draw the populated menu array on the OSD
-    for (int row = 0; row < section->option_count; row++) {
-        for (int col = 0; col < OSD_HD_COLS; col++) {
-            display_driver->draw_character(col+4, row+4, menu_grid[row][col]);
+    for (int row = 0; row < section->option_count+1; row++) {
+        for (int col = 0; col < OSD_HD_COLS-menu_offset_cols; col++) {
+            display_driver->draw_character(col+menu_offset_cols, row+menu_offset_row, menu_grid[row][col]);
         }
     }
     display_driver->draw_complete();
+}
+
+
+void doreboot() {
+    printf("Rebooting system ...\n");
+
+    // Sync filesystems to ensure no data loss
+    sync(); 
+
+    // Call the reboot system call with the "restart" command
+    if (reboot(LINUX_REBOOT_CMD_RESTART) == -1) {
+        perror("Reboot failed");
+    }    
 }
