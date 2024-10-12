@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <unistd.h>
+#include <string.h>
 #include <sys/reboot.h>
 #include <linux/reboot.h>  // For LINUX_REBOOT_CMD_RESTART
 
