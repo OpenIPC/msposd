@@ -6,7 +6,6 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/poll.h>
 #include <time.h>
 #include <math.h>
 
@@ -28,9 +27,6 @@
 
 
 #define X_OFFSET 0
-
-#define PORT 7654
-
 #define CLOCK_MONOTONIC 1
 
 /*------------------------------------------------------------------------------------------------------*/
@@ -39,7 +35,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
-#include <sys/poll.h>
 #include <time.h>
  
 
@@ -541,7 +536,7 @@ int y_end = 500;
 
         //painter->setPen(m_color);
         // Line always drawn in the center to have some orientation where the center is
-        const auto line_w= 100*horizonWidth * 0.2;
+        int line_w = 100 * horizonWidth * 0.2;
         //const auto circle_r= 100*horizonWidth * 0.05;
         //painter->drawLine(width()/2-(line_w/2),height()/2,width()/2+(line_w/2),height()/2);
         //painter->drawEllipse(QPointF(width()/2,height()/2),circle_r,circle_r);
@@ -626,7 +621,7 @@ int y_end = 500;
                 if ((i > 0)) {
                     //Upper ladders
                     // default to stroke strength of 2 (I think it is pixels)
-                    const auto stroke_s=2*ladder_stroke_faktor;
+                    int stroke_s = 2 * ladder_stroke_faktor;
         
 
                     //left upper cap
@@ -651,7 +646,7 @@ int y_end = 500;
                     // Lower ladders
                     // default to stroke strength of 2 (I think it is pixels)
                     
-                    const auto stroke_s=2*ladder_stroke_faktor;
+                    int stroke_s = 2 * ladder_stroke_faktor;
 
                     //left to right
                     //left lower cap                    
@@ -693,7 +688,7 @@ int y_end = 500;
             } else { // i==0
                 //Main AHI Line
                 // default to stroke strength of 3 - a bit bigger than the non center lines
-                const auto stroke_s=4*ladder_stroke_faktor;
+                int stroke_s = 4 * ladder_stroke_faktor;
 
                 
                 int rect_height = 5;            // Height of the rectangles (as per your original code)
@@ -1008,7 +1003,7 @@ bool DrawText(){
         osd_msg_enabled=true;
     }
     if (osd_msg_enabled==false)
-        return;
+        return false;
     
     uint64_t timems=get_time_ms();
     if(osds[FULL_OVERLAY_ID].updt == 1 || 
