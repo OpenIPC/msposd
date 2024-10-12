@@ -8,6 +8,12 @@
 #include "../util/ini_parser.h"
 
 bool clearNextDraw = false;
+extern bool vtxMenuActive;
+
+
+void exitVTXMenu(){
+    vtxMenuActive = false;
+}
 
 void clear_vtx_menu() {
     clearNextDraw = true;

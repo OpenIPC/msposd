@@ -283,6 +283,7 @@ int parse_ini(const char *filename, MenuSystem *menu_system) {
         add_option(cs,"Save","SAVE",save_all_changes);
     }
     add_option(&menu_system->sections[0],"Reboot","REBOOT",doreboot);
+    add_option(&menu_system->sections[0],"Exit","EXIT",exitVTXMenu);
 
     fclose(file);
     return 0;
