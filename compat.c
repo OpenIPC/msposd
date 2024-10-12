@@ -28,7 +28,9 @@
 #include <pthread.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
+
 int __ctype_b;
+int __stdin;
 
 #ifndef _x86
 int __fgetc_unlocked(FILE *stream) {
