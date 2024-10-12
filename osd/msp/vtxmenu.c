@@ -44,11 +44,9 @@ void display_menu(displayport_vtable_t *display_driver,MenuSection *section, int
     for (int i = 0; i < section->option_count; i++) {
         char row_selectd[3] = "  ";
         if (i == selected_option) {
-            printf(" > ");
             snprintf(row_selectd, 3, " > ");
         }
         else {
-            printf("   ");
             snprintf(row_selectd, 3, "   ");
         }
         MenuOption *option = &section->options[i];
@@ -57,24 +55,28 @@ void display_menu(displayport_vtable_t *display_driver,MenuSection *section, int
                 char value_list[MAX_OPTIONS][20];
                 int value_count;
                 split_values(option->values, value_list, &value_count);
-                printf("%s: %s\n",option->lable, value_list[section->current_value_index[i]]);
+                printf("%s%s: %s\n",row_selectd, option->lable, value_list[section->current_value_index[i]]);
                 snprintf(menu_grid[current_row++], OSD_HD_COLS-menu_offset_cols, "%s%s: %s", row_selectd,option->lable, value_list[section->current_value_index[i]]);
                 break;
             }
             case MENU_OPTION_RANGE: {
-                printf("%s: %d\n", option->lable, section->current_value_index[i]);
+                printf("%s%s: %d\n",row_selectd, option->lable, section->current_value_index[i]);
                 snprintf(menu_grid[current_row++], OSD_HD_COLS-menu_offset_cols, "%s%s: %d", row_selectd, option->lable, section->current_value_index[i]);
                 break;
 
             }
-            case MENU_OPTION_SUBMENU:
-                printf("[%s]\n", option->lable);
-                snprintf(menu_grid[current_row++], OSD_HD_COLS-menu_offset_cols, "%s[%s]", row_selectd, option->lable);
+            case MENU_OPTION_SUBMENU: {
+                int len = strlen(option->lable) + strlen(row_selectd);
+                printf("%s%s%*s>\n", row_selectd, option->lable, 30 - len, "");
+                snprintf(menu_grid[current_row++], OSD_HD_COLS-menu_offset_cols, "%s%s%*s>", row_selectd, option->lable, MAX_VTX_MENU_COLS - len,"");
                 break;
-            case MENU_OPTION_COMMAND:
-                printf("[%s]\n", option->lable);
-                snprintf(menu_grid[current_row++], OSD_HD_COLS-menu_offset_cols, "%s[%s]", row_selectd, option->lable);
+            }
+            case MENU_OPTION_COMMAND: {
+                int len = strlen(option->lable) + strlen(row_selectd);
+                printf("%s%s%*s>\n",row_selectd, option->lable, 30 - len, "");
+                snprintf(menu_grid[current_row++], OSD_HD_COLS-menu_offset_cols, "%s%s%*s>", row_selectd, option->lable, MAX_VTX_MENU_COLS - len,"");
                 break;
+            }
             default:
                 printf("\n");
                 break;
