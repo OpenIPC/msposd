@@ -10,6 +10,8 @@
 bool clearNextDraw = false;
 extern bool vtxMenuActive;
 
+extern MenuSection *current_section;
+extern int selected_option;
 
 void exitVTXMenu(){
     vtxMenuActive = false;
@@ -103,4 +105,11 @@ void doreboot() {
     if (reboot(LINUX_REBOOT_CMD_RESTART) == -1) {
         perror("Reboot failed");
     }    
+}
+
+
+void runCustomCommand() {
+    printf("Running custom command: %s\n",current_section->options[selected_option].read_command);
+    char output[MAX_VALUE_LENGTH] = "";
+    run_command(current_section->options[selected_option].read_command, output, sizeof(output));
 }

@@ -11,3 +11,4 @@ void display_menu(displayport_vtable_t *display_driver,MenuSection *section, int
 void clear_vtx_menu();
 void doreboot();
 void exitVTXMenu();
+void runCustomCommand();

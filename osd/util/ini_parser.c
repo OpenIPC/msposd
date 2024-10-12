@@ -275,6 +275,22 @@ int parse_ini(const char *filename, MenuSystem *menu_system) {
             strcpy(option->name, option_name);
             strcpy(option->lable, option_lable);
         }
+        // parse command only options
+        else if (line[0] == 'C') {
+            char option_name[MAX_NAME_LENGTH];
+            char option_lable[MAX_LABLE_LENGTH];
+            char option_command[MAX_LABLE_LENGTH];
+            // Split the line into name and value
+            sscanf(line, "%[^=]=%[^:]:%[^\n]", option_name, option_lable, option_command);
+
+            // Add option to the current section
+            MenuOption *option = &current_section->options[current_section->option_count++];
+            option->type = MENU_OPTION_COMMAND;
+            strcpy(option->name, option_name);
+            strcpy(option->lable, option_lable);
+            strcpy(option->read_command, option_command); //store command in read command, we onle need one
+            option->command_function = runCustomCommand;
+        }
     }
 
     // Add programmatic commands

@@ -46,5 +46,6 @@ typedef struct {
 void split_values(const char *values, char (*value_list)[20], int *value_count);
 int parse_ini(const char *filename, MenuSystem *menu_system);
 void print_menu_system_state(MenuSystem *menu_system);
+void run_command(const char *command, char *output, int output_size);
 
 #endif // INI_PARSER_H
