@@ -753,24 +753,44 @@ static void serial_event_cb(struct bufferevent *bev, short events, void *arg)
 //         buffer[n] = '\0';  // Null-terminate the input
 //         printf("You typed: %s\n", buffer);
 // 		if (buffer[0] == 'm') {
-// 			printf("Disableing msposd");
+// 			printf("Disableing msposd\n");
 // 			vtxMenuActive = true;
 //   	    	init_state_manager();
 // 		}
-// 		if (buffer[0] == 'x') {
-// 			printf("Enableing msposd");
+// 		if (buffer[0] == 'q') {
+// 			printf("Enableing msposd\n");
 // 			vtxMenuActive = false;
 // 		}
 //         if (buffer[0] == 'w') {
-//             move_selection(-1); // Move up
+// 			uint16_t channels[18];
+// 			channels[0] = 1500;
+// 			channels[1] = 2000;
+// 			channels[2] = 1500;
+// 			channels[3] = 1500;
+// 		    handle_stickcommands(channels); // Move up
 //         } else if (buffer[0] == 's') {
-//             move_selection(1); // Move down
+// 			uint16_t channels[18];
+// 			channels[0] = 1500;
+// 			channels[1] = 1000;
+// 			channels[2] = 1500;
+// 			channels[3] = 1500;
+// 		    handle_stickcommands(channels);// Move down
 //         } else if (buffer[0] == 'a') {
-//             change_option(-1); // Decrease the selected option
+// 			uint16_t channels[18];
+// 			channels[0] = 1000;
+// 			channels[1] = 1500;
+// 			channels[2] = 1500;
+// 			channels[3] = 1500;
+// 		    handle_stickcommands(channels);// Move left
 //         } else if (buffer[0] == 'd') {
-//             change_option(1); // Increase the selected option
+//  			uint16_t channels[18];
+// 			channels[0] = 2000;
+// 			channels[1] = 1500;
+// 			channels[2] = 1500;
+// 			channels[3] = 1500;
+// 		    handle_stickcommands(channels);// Move right
 //         } else if (buffer[0] == 'e') {
-//             handle_selection();
+//             //unused
 //         }	
 //     }
 // }
