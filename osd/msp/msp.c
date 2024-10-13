@@ -1,9 +1,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include "msp.h"
 #include "../util/interface.h"
 #include "../util/settings.h"
+
+extern bool verbose;
 
 uint8_t channelFreqLabel[FREQ_LABEL_SIZE] = {
     'B', 'A', 'N', 'D', '_', 'A', ' ', ' ', // A
@@ -137,7 +140,7 @@ void msp_set_vtx_config(int serial_fd) {
             band = index / 8 + 1; // Which band (integer division)
             channel = (index % 8) + 1; // Channel within the band (modulo)
 
-            printf("Frequency %d found in band %i, channel %d\n", frequency, band, channel);
+            if (verbose) printf("Frequency %d found in band %i, channel %d\n", frequency, band, channel);
             break;  // Exit after finding the frequency            
         }
     }

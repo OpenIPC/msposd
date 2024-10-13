@@ -324,7 +324,7 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
 
             double current_frequency = read_current_freq_from_interface(read_setting("/etc/wfb.conf","wlan"));
 
-			printf("mspVTX Band: %i, Channel: %i, wanted Frequency: %u, set Frequency: %.0f\n",in_mspVtxConfigStruct->band, in_mspVtxConfigStruct->channel, frequency, current_frequency);
+			if (verbose) printf("mspVTX Band: %i, Channel: %i, wanted Frequency: %u, set Frequency: %.0f\n",in_mspVtxConfigStruct->band, in_mspVtxConfigStruct->channel, frequency, current_frequency);
 
             if (frequency != (uint16_t)current_frequency) {
                 int channel = 0;
@@ -332,7 +332,7 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
                     if (fc_list[i].frequency == frequency)
                         channel = fc_list[i].channel;
                 }
-                printf("mspVTX executing channel change to channel %d\n",channel);
+                if (verbose) printf("mspVTX executing channel change to channel %d\n",channel);
 
                 set_frequency(read_setting("/etc/wfb.conf","wlan"), channel);
 

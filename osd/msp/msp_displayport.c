@@ -15,6 +15,7 @@ MenuSection *current_section;
 int current_section_index = 0;
 int selected_option = 0;
 
+extern bool verbose;
 
 static void process_draw_string(displayport_vtable_t *display_driver, uint8_t *payload) {
     if(!display_driver || !display_driver->draw_character) return;
@@ -184,7 +185,7 @@ void handle_stickcommands(uint16_t channels[18]) {
 
         switch (command) {
             case VTXMENU:
-                printf("Entering vtxMenu\n");
+                if (verbose) printf("Entering vtxMenu\n");
                 newMenu = true;
                 vtxMenuActive = true;
                 init_state_manager();
@@ -268,7 +269,7 @@ void handle_stickcommands(uint16_t channels[18]) {
                 //handle_selection();
                 break;           
             case EXIT:
-                printf("Exit vtxMenu\n");
+                if (verbose) printf("Exit vtxMenu\n");
                 newMenu = true;
                 vtxMenuActive = false;
                 break;
