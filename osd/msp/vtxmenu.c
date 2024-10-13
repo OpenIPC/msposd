@@ -69,6 +69,12 @@ void display_menu(displayport_vtable_t *display_driver,MenuSection *section, int
                 break;
 
             }
+            case MENU_OPTION_FLOATRANGE: {
+                if (verbose) printf("%s%s: %.1f\n",row_selectd, option->lable, section->current_value_index[i] / 10.0f);
+                snprintf(menu_grid[current_row++], OSD_HD_COLS-menu_offset_cols, "%s%s: %.1f", row_selectd, option->lable, section->current_value_index[i] / 10.0f);
+                break;
+
+            }            
             case MENU_OPTION_SUBMENU: {
                 int len = strlen(option->lable) + strlen(row_selectd);
                 if (verbose) printf("%s%s%*s>\n", row_selectd, option->lable, 30 - len, "");

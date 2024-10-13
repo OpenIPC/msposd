@@ -51,11 +51,25 @@ void print_menu_system_state(MenuSystem *menu_system) {
                         section->current_value_index[j], option->min, option->max);
                     break;
                 }
+                case MENU_OPTION_FLOATRANGE: {
+                    // If it's a range, display the current value
+                    printf(" (FloatRange): Current Value: %.1f (Min: %.1f, Max: %.1f)\n", 
+                        section->current_value_index[j] / 10.0f, option->min / 10.0f, option->max / 10.0f);
+                    break;
+                }
                 case MENU_OPTION_SUBMENU: {
                     // If it's a submenu link, display the name of the linked submenu
                     printf(" (Submenu Link): Links to: %s\n", option->name);
                     break;
                 }
+                case MENU_OPTION_COMMAND: {
+                    // If it's a submenu link, display the name of the linked submenu
+                    if (option->command_function == runCustomCommand)
+                        printf(" (Command): Command to run: %s\n", option->read_command);
+                    else
+                        printf(" (Command): %s\n",option->lable);
+                    break;
+                }                
                 default: {
                     // Generic case for unsupported option types (if any)
                     printf(" (Unknown Option Type)\n");                
@@ -142,6 +156,10 @@ void save_all_changes() {
                     // For range options, just store the current value as a string
                     snprintf(value, sizeof(value), "%d", section->current_value_index[i]);
                     break;
+                case MENU_OPTION_FLOATRANGE:
+                    // For range options, just store the current value as a string
+                    snprintf(value, sizeof(value), "%.1f", section->current_value_index[i] / 10.0f);
+                    break;                    
                 default:
                     continue;  // Skip other option types
             }
@@ -221,9 +239,18 @@ int parse_ini(const char *filename, MenuSystem *menu_system) {
                 option->type = MENU_OPTION_LIST;
                 current_section->current_value_index[current_section->option_count - 1 ] = 0; // Default to the first list item
             } else if (strstr(option_value, "-")) {
-                option->type = MENU_OPTION_RANGE;
-                sscanf(option_value, "%d-%d", &option->min, &option->max);
-                current_section->current_value_index[current_section->option_count - 1 ] = option->min; // Default to min value
+                if (strstr(option_value, ".")) {
+                    option->type = MENU_OPTION_FLOATRANGE;
+                    float min_value, max_value;
+                    sscanf(option_value, "%f-%f", &min_value, &max_value);
+                    option->min = (int)(min_value * 10);
+                    option->max = (int)(max_value * 10);
+                    current_section->current_value_index[current_section->option_count - 1 ] = option->min; // Default to min value
+                } else {
+                    option->type = MENU_OPTION_RANGE;
+                    sscanf(option_value, "%d-%d", &option->min, &option->max);
+                    current_section->current_value_index[current_section->option_count - 1 ] = option->min; // Default to min value
+                }
             }
             // Read Values from system
             if (strlen(option->read_command) > 0) {
@@ -250,6 +277,13 @@ int parse_ini(const char *filename, MenuSystem *menu_system) {
                     }
                     case MENU_OPTION_RANGE: {
                             int current_value = atoi(output);
+                            if (current_value >= option->min && current_value <= option->max) {
+                                    current_section->current_value_index[current_section->option_count - 1 ] = current_value;
+                            }                    
+                        break;
+                    }     
+                    case MENU_OPTION_FLOATRANGE: {
+                            int current_value = (int)(atof(output) * 10);
                             if (current_value >= option->min && current_value <= option->max) {
                                     current_section->current_value_index[current_section->option_count - 1 ] = current_value;
                             }                    

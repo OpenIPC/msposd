@@ -10,6 +10,7 @@
 typedef enum {
     MENU_OPTION_LIST,      // For list options
     MENU_OPTION_RANGE,     // For range options
+    MENU_OPTION_FLOATRANGE,// For range with floating point precision
     MENU_OPTION_SUBMENU,   // For linking to a submenu
     MENU_OPTION_COMMAND    // For executing a command when selected
 } MenuOptionType;

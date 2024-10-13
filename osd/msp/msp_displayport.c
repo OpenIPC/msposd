@@ -109,8 +109,9 @@ bool init_state_manager() {
         printf("Failed to load menu.\n");
         return false;
     } else {
-        //print_menu_system_state(&menu_system);        
         current_section = &menu_system.sections[current_section_index];
+        if (verbose) 
+            print_menu_system_state(&menu_system);
         return true;
     }
 }
@@ -212,7 +213,8 @@ void handle_stickcommands(uint16_t channels[18]) {
                         current_section->current_value_index[selected_option] = (current_section->current_value_index[selected_option] - 1 + value_count) % value_count;
                         break;
                     }
-                    case MENU_OPTION_RANGE: {
+                    case MENU_OPTION_RANGE:
+                    case MENU_OPTION_FLOATRANGE: {
                         // Decrement within range
                         if (current_section->current_value_index[selected_option] > option->min) {
                             current_section->current_value_index[selected_option]--;
@@ -237,7 +239,8 @@ void handle_stickcommands(uint16_t channels[18]) {
                         current_section->current_value_index[selected_option] = (current_section->current_value_index[selected_option] + 1) % value_count;
                         break;
                     }
-                    case MENU_OPTION_RANGE: {
+                    case MENU_OPTION_RANGE:
+                    case MENU_OPTION_FLOATRANGE: {
                         // Increment within range
                         if (current_section->current_value_index[selected_option] < option->max) {
                             current_section->current_value_index[selected_option]++;
