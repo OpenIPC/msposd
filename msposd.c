@@ -42,6 +42,7 @@ bool AbortNow=false;
 bool verbose = false;
 bool ParseMSP = false;
 bool mspVTXenabled = false;
+bool vtxMenuEnabled = false;
 int MSP_PollRate=20;
 
 int matrix_size=0;
@@ -757,8 +758,9 @@ void stdin_read_callback(int fd, short event, void *arg) {
         printf("You typed: %s\n", buffer);
 		if (buffer[0] == 'm') {
 			printf("Disableing msposd\n");
-			vtxMenuActive = true;
-  	    	init_state_manager();
+  	    	vtxMenuEnabled = init_state_manager();
+			if (vtxMenuEnabled)
+				vtxMenuActive = true;
 		}
 		if (buffer[0] == 'q') {
 			printf("Enableing msposd\n");
@@ -900,7 +902,7 @@ static void send_variant_request2(int serial_fd) {
 
 static void poll_msp(evutil_socket_t sock, short event, void *arg)
 {
-	int serial_fd=(int)arg;
+    int serial_fd = *((int *)arg);
 	send_variant_request2(serial_fd);
 }
 
@@ -1008,7 +1010,7 @@ static int handle_data(const char *port_name, int baudrate,
 
    //MSP_PollRate
 	if (ParseMSP&& msp_tmr==NULL){
-		msp_tmr = event_new(base, -1, EV_PERSIST, poll_msp, serial_fd);
+		msp_tmr = event_new(base, -1, EV_PERSIST, poll_msp, &serial_fd);
 		 // Set poll interval to 50 milliseconds if pollrate is 20
     	struct timeval interval = {
 	        .tv_sec = 0,         // 0 seconds

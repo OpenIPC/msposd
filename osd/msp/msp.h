@@ -82,3 +82,4 @@ typedef struct msp_state_s {
 uint16_t msp_data_from_msg(uint8_t message_buffer[], msp_msg_t *msg);
 msp_error_e construct_msp_command(uint8_t message_buffer[], uint8_t command, uint8_t payload[], uint8_t size, msp_direction_e direction);
 msp_error_e msp_process_data(msp_state_t *msp_state, uint8_t dat);
+void msp_set_vtx_config(int serial_fd);

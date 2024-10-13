@@ -346,7 +346,7 @@ void* get_directBMP(int handle){
     return NULL;
 }
 
- int set_bitmapEx(int handle, BITMAP *bitmap, int BitsPerPixel){
+unsigned long set_bitmapEx(int handle, BITMAP *bitmap, int BitsPerPixel){
     int s32Ret=0;
 #ifdef __SIGMASTAR__
     int byteWidth = getRowStride(bitmap->u32Width,BitsPerPixel);
@@ -372,7 +372,7 @@ void* get_directBMP(int handle){
     //memset((void *)(stCanvasInfo.virtAddr), PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4 ? 0xFF : 0x00 , bitmap->u32Height * getRowStride(bitmap->u32Width , BitsPerPixel));
 
 
-    return   (void *)(stCanvasInfo.virtAddr); 
+    return stCanvasInfo.virtAddr; 
 #endif
 return NULL;   
 }

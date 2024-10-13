@@ -16,6 +16,7 @@ int current_section_index = 0;
 int selected_option = 0;
 
 extern bool verbose;
+extern bool vtxMenuEnabled;
 
 static void process_draw_string(displayport_vtable_t *display_driver, uint8_t *payload) {
     if(!display_driver || !display_driver->draw_character) return;
@@ -102,14 +103,16 @@ int displayport_process_message(displayport_vtable_t *display_driver, msp_msg_t 
 static bool newMenu = true;
 static int current_selection = 0;
 
-void init_state_manager() {
+bool init_state_manager() {
 
     if (parse_ini("/etc/vtxmenu.ini", &menu_system)) {
         printf("Failed to load menu.\n");
-        return 1;
+        return false;
+    } else {
+        //print_menu_system_state(&menu_system);        
+        current_section = &menu_system.sections[current_section_index];
+        return true;
     }
-    //print_menu_system_state(&menu_system);
-    current_section = &menu_system.sections[current_section_index];
 }
 
 void print_current_state(displayport_vtable_t *display_driver) {
@@ -187,8 +190,9 @@ void handle_stickcommands(uint16_t channels[18]) {
             case VTXMENU:
                 if (verbose) printf("Entering vtxMenu\n");
                 newMenu = true;
-                vtxMenuActive = true;
-                init_state_manager();
+                vtxMenuEnabled = init_state_manager();
+                if (vtxMenuEnabled)
+                    vtxMenuActive = true;
                 break;
             case UP:
                 selected_option = (selected_option - 1 + current_section->option_count) % current_section->option_count;

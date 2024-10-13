@@ -152,7 +152,7 @@ void save_all_changes() {
     }
 }
 
-void add_option(MenuSection *section, const char *name, const char *label, void (*command_function)(void)) {
+void add_option(MenuSection *section, const char *name, const char *label, void (*command_function)(void*)) {
     MenuOption option;
     // Copy name and label dynamically
     strncpy(option.name, name, MAX_NAME_LENGTH - 1);

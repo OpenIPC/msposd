@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <unistd.h>
 #include "msp.h"
 #include "../util/interface.h"
 #include "../util/settings.h"

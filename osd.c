@@ -3,6 +3,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <stdbool.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
@@ -148,6 +149,7 @@ typedef struct
 
 
 extern bool vtxMenuActive;
+extern bool vtxMenuEnabled;
 extern bool armed;
 
 static void send_display_size(int serial_fd) {
@@ -251,7 +253,7 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
 
 	            //showchannels(18);		
             	ProcessChannels();
-                if (vtxMenuActive) {
+                if (vtxMenuEnabled && vtxMenuActive) {
                     print_current_state(display_driver);
                 }                
               break;
@@ -320,7 +322,7 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
             break;
         }
         case MSP_GET_VTX_CONFIG: {
-			mspVtxConfigStruct *in_mspVtxConfigStruct = msp_message->payload;
+			mspVtxConfigStruct *in_mspVtxConfigStruct = (mspVtxConfigStruct *) msp_message->payload;
             uint16_t frequency = (in_mspVtxConfigStruct->freqMSB << 8) | in_mspVtxConfigStruct->freqLSB;
 
             double current_frequency = read_current_freq_from_interface(read_setting("/etc/wfb.conf","wlan"));
@@ -1412,7 +1414,7 @@ static void msp_callback(msp_msg_t *msp_message)
     displayport_process_message(display_driver, msp_message);
 }
 
-static void set_options(uint8_t font, uint8_t is_hd) {
+static void set_options(uint8_t font, msp_hd_options_e is_hd) {
     /*
     if(is_hd) { 
         current_display_info = hd_display_info;
@@ -1488,11 +1490,19 @@ int GetMajesticVideoConfig(int *Width){
             inVideo0Section = true;
 
         // If we're in the video0 section, look for the size parameter
-        if (inVideo0Section && strlen(line)>10 /*&& line[0] != '#'*/ && strstr(line, "#")<15) {
-            if (strstr(line, "size:") != NULL) {
-                // Extract the value after "size:"
-                sscanf(line, " size: %49s", sizeValue); // Extract the size value with a buffer limit
-                break;  // Exit the loop once the size is found
+        if (inVideo0Section && strlen(line)>10) {
+           // Skip leading whitespace
+            char *ptr = line;
+            while (isspace((unsigned char)*ptr)) {
+                ptr++;
+            }
+            // Check if the first non-whitespace character is not '#'
+            if (*ptr != '#') {
+                if (strstr(line, "size:") != NULL) {
+                    // Extract the value after "size:"
+                    sscanf(line, " size: %49s", sizeValue); // Extract the size value with a buffer limit
+                    break;  // Exit the loop once the size is found
+                }
             }
         }
 
