@@ -32,9 +32,9 @@
 
 //#include "msp/msp.cpp"
 
+#define MAX_MTU 9000
 #include "osd/util/settings.h"
 
-#define MAX_MTU 9000
 
 bool vtxMenuActive = false;
 bool armed = false;
@@ -798,6 +798,7 @@ void stdin_read_callback(int fd, short event, void *arg) {
     }
 }
 #endif
+
 
 
 static void* setup_temp_mem(off_t base, size_t size)

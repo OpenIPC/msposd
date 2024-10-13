@@ -207,6 +207,7 @@ uint64_t get_time_ms() // in milliseconds
     return ts.tv_sec * 1000LL + ts.tv_nsec / 1000000;
 }
 
+
 static void rx_msp_callback(msp_msg_t *msp_message)
 {
     // Process a received MSP message from FC and decide whether to send it to the PTY (DJI) or UDP port (MSP-OSD on Goggles)
@@ -354,7 +355,7 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
         }
     }
 }
-
+ 
 
 /* MSP DisplayPort handlers for compressed mode */
 
