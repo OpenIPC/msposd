@@ -747,56 +747,58 @@ static void serial_event_cb(struct bufferevent *bev, short events, void *arg)
 }
 
 // Callback function to handle keyboard input
-// void stdin_read_callback(int fd, short event, void *arg) {
-//     char buffer[256];
-//     ssize_t n = read(fd, buffer, sizeof(buffer) - 1);
+#ifdef __KEYBOARD_INPUT__
+void stdin_read_callback(int fd, short event, void *arg) {
+    char buffer[256];
+    ssize_t n = read(fd, buffer, sizeof(buffer) - 1);
     
-//     if (n > 0 && ! armed) {
-//         buffer[n] = '\0';  // Null-terminate the input
-//         printf("You typed: %s\n", buffer);
-// 		if (buffer[0] == 'm') {
-// 			printf("Disableing msposd\n");
-// 			vtxMenuActive = true;
-//   	    	init_state_manager();
-// 		}
-// 		if (buffer[0] == 'q') {
-// 			printf("Enableing msposd\n");
-// 			vtxMenuActive = false;
-// 		}
-//         if (buffer[0] == 'w') {
-// 			uint16_t channels[18];
-// 			channels[0] = 1500;
-// 			channels[1] = 2000;
-// 			channels[2] = 1500;
-// 			channels[3] = 1500;
-// 		    handle_stickcommands(channels); // Move up
-//         } else if (buffer[0] == 's') {
-// 			uint16_t channels[18];
-// 			channels[0] = 1500;
-// 			channels[1] = 1000;
-// 			channels[2] = 1500;
-// 			channels[3] = 1500;
-// 		    handle_stickcommands(channels);// Move down
-//         } else if (buffer[0] == 'a') {
-// 			uint16_t channels[18];
-// 			channels[0] = 1000;
-// 			channels[1] = 1500;
-// 			channels[2] = 1500;
-// 			channels[3] = 1500;
-// 		    handle_stickcommands(channels);// Move left
-//         } else if (buffer[0] == 'd') {
-//  			uint16_t channels[18];
-// 			channels[0] = 2000;
-// 			channels[1] = 1500;
-// 			channels[2] = 1500;
-// 			channels[3] = 1500;
-// 		    handle_stickcommands(channels);// Move right
-//         } else if (buffer[0] == 'e') {
-//             //unused
-//         }	
-//     }
-// }
- 
+    if (n > 0 && ! armed) {
+        buffer[n] = '\0';  // Null-terminate the input
+        printf("You typed: %s\n", buffer);
+		if (buffer[0] == 'm') {
+			printf("Disableing msposd\n");
+			vtxMenuActive = true;
+  	    	init_state_manager();
+		}
+		if (buffer[0] == 'q') {
+			printf("Enableing msposd\n");
+			vtxMenuActive = false;
+		}
+        if (buffer[0] == 'w') {
+			uint16_t channels[18];
+			channels[0] = 1500;
+			channels[1] = 2000;
+			channels[2] = 1500;
+			channels[3] = 1500;
+		    handle_stickcommands(channels); // Move up
+        } else if (buffer[0] == 's') {
+			uint16_t channels[18];
+			channels[0] = 1500;
+			channels[1] = 1000;
+			channels[2] = 1500;
+			channels[3] = 1500;
+		    handle_stickcommands(channels);// Move down
+        } else if (buffer[0] == 'a') {
+			uint16_t channels[18];
+			channels[0] = 1000;
+			channels[1] = 1500;
+			channels[2] = 1500;
+			channels[3] = 1500;
+		    handle_stickcommands(channels);// Move left
+        } else if (buffer[0] == 'd') {
+ 			uint16_t channels[18];
+			channels[0] = 2000;
+			channels[1] = 1500;
+			channels[2] = 1500;
+			channels[3] = 1500;
+		    handle_stickcommands(channels);// Move right
+        } else if (buffer[0] == 'e') {
+            //unused
+        }	
+    }
+}
+#endif
+
 
 static void* setup_temp_mem(off_t base, size_t size)
 {
@@ -985,10 +987,12 @@ static int handle_data(const char *port_name, int baudrate,
 
 
     // Set up an event for stdin (file descriptor 0)
-    //struct event *stdin_event = event_new(base, STDIN_FILENO, EV_READ | EV_PERSIST, stdin_read_callback, base);
+#ifdef __KEYBOARD_INPUT__
+    struct event *stdin_event = event_new(base, STDIN_FILENO, EV_READ | EV_PERSIST, stdin_read_callback, base);
 
     // Add the event to the event loop
-    //event_add(stdin_event, NULL);
+    event_add(stdin_event, NULL);
+#endif
 
 	if (temp) {
 		if (GetTempSigmaStar()>-90){
