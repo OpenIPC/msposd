@@ -79,7 +79,7 @@ void display_menu(displayport_vtable_t *display_driver,MenuSection *section, int
         MenuOption *option = &section->options[i];
         switch (option->type) {
             case MENU_OPTION_LIST: {
-                char value_list[MAX_OPTIONS][20];
+                char value_list[MAX_VALUE_LIST_ITEMS][MAX_VALUE_LENGTH];
                 int value_count;
                 split_values(option->values, value_list, &value_count);
                 if (verbose) printf("%s%s: %s\n",row_selectd, option->lable, value_list[section->current_value_index[i]]);

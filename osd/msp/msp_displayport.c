@@ -212,7 +212,7 @@ void handle_stickcommands(uint16_t channels[18]) {
                 // Handle list value cycling backward
                 switch (option->type) {
                     case MENU_OPTION_LIST: {
-                        char value_list[MAX_OPTIONS][20];
+                        char value_list[MAX_VALUE_LIST_ITEMS][MAX_VALUE_LENGTH];
                         int value_count;
                         split_values(option->values, value_list, &value_count);                
                         current_section->current_value_index[selected_option] = (current_section->current_value_index[selected_option] - 1 + value_count) % value_count;
@@ -237,7 +237,7 @@ void handle_stickcommands(uint16_t channels[18]) {
                 // Handle list value cycling (forward)
                 switch (option->type) {
                     case MENU_OPTION_LIST: {
-                        char value_list[MAX_OPTIONS][20];
+                        char value_list[MAX_VALUE_LIST_ITEMS][MAX_VALUE_LENGTH];
                         int value_count;
                         split_values(option->values, value_list, &value_count);
                         // cycle through list

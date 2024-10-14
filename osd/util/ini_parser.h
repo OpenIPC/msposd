@@ -1,11 +1,13 @@
 #ifndef INI_PARSER_H
 #define INI_PARSER_H
 
-#define MAX_OPTIONS 15
+#define MAX_OPTIONS 50
 #define MAX_SECTIONS 5
-#define MAX_VALUE_LENGTH 150
+#define MAX_VALUE_LENGTH 500
 #define MAX_NAME_LENGTH 50
 #define MAX_LABLE_LENGTH 50
+#define MAX_LINE_LENGTH MAX_VALUE_LENGTH * 3 + MAX_NAME_LENGTH + MAX_LABLE_LENGTH
+#define MAX_VALUE_LIST_ITEMS 50
 
 typedef enum {
     MENU_OPTION_LIST,      // For list options
@@ -44,7 +46,7 @@ typedef struct {
 } MenuSystem;
 
 // Function to parse the INI file
-void split_values(const char *values, char (*value_list)[20], int *value_count);
+void split_values(const char *values, char value_list[MAX_VALUE_LIST_ITEMS][MAX_VALUE_LENGTH], int *value_count);
 int parse_ini(const char *filename, MenuSystem *menu_system);
 void print_menu_system_state(MenuSystem *menu_system);
 void run_command(const char *command, char *output, int output_size);

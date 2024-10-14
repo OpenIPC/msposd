@@ -7,19 +7,26 @@
 extern MenuSection *current_section;
 
 // Helper function to split the list of values in a comma-separated list
-void split_values(const char *values, char (*value_list)[20], int *value_count) {
-    char temp[256];  // Temporary buffer to hold a copy of the original string
-    strncpy(temp, values, sizeof(temp));  // Copy the original string to the temp buffer
+void split_values(const char *values, char value_list[MAX_VALUE_LIST_ITEMS][MAX_VALUE_LENGTH], int *value_count) {
+    char temp[MAX_LINE_LENGTH];  // Temporary buffer to hold a copy of the original string
+    strncpy(temp, values, sizeof(temp) - 1);  // Copy the original string to the temp buffer
     temp[sizeof(temp) - 1] = '\0';  // Ensure null termination
 
     char *token = strtok(temp, ",");
-    *value_count = 0;
+    *value_count = 0;  // Initialize the value count
 
     while (token != NULL) {
-        strncpy(value_list[*value_count], token, 20);  // Copy each token to the value_list
-        value_list[*value_count][19] = '\0';  // Ensure null termination for each value
-        (*value_count)++;
-        token = strtok(NULL, ",");
+        if (*value_count < MAX_VALUE_LIST_ITEMS) {  // Check if there's space in the value list
+            // Copy each token to the value_list with proper length checking
+            strncpy(value_list[*value_count], token, MAX_VALUE_LENGTH - 1);  // Copy with limit
+            value_list[*value_count][MAX_VALUE_LENGTH - 1] = '\0';  // Ensure null termination
+            (*value_count)++;  // Increment the count
+        } else {
+            // Optionally handle case when too many values are provided
+            printf("Warning: Maximum value count exceeded. Some values may be ignored.\n");
+            break;  // Exit if the limit is reached
+        }
+        token = strtok(NULL, ",");  // Get the next token
     }
 }
 
@@ -39,7 +46,7 @@ void print_menu_system_state(MenuSystem *menu_system) {
             switch (option->type) {
                 case MENU_OPTION_LIST: {
                     // If it's a list, display the current selected value
-                    char value_list[MAX_OPTIONS][20];
+                    char value_list[MAX_VALUE_LIST_ITEMS][MAX_VALUE_LENGTH];
                     int value_count;
                     split_values(option->values, value_list, &value_count);
                     printf(" (List): Current Value: %s Values: %s (Index: %d)\n", value_list[section->current_value_index[j]], option->values ,section->current_value_index[j]);                
@@ -145,7 +152,7 @@ void save_all_changes() {
             switch (option->type) {
                 case MENU_OPTION_LIST: {
                     // For list options, get the currently selected value
-                    char value_list[MAX_OPTIONS][20];
+                    char value_list[MAX_VALUE_LIST_ITEMS][MAX_VALUE_LENGTH];
                     int value_count;
                     split_values(option->values, value_list, &value_count);
                     strncpy(value, value_list[section->current_value_index[i]], sizeof(value));
@@ -190,7 +197,7 @@ int parse_ini(const char *filename, MenuSystem *menu_system) {
         return -1;  // Error opening file
     }
 
-    char line[256];
+    char line[MAX_LINE_LENGTH];
     MenuSection *current_section = NULL;
 
     menu_system->section_count = 0;
@@ -263,7 +270,7 @@ int parse_ini(const char *filename, MenuSystem *menu_system) {
                 // For list options, match the output to the corresponding index
                 switch (option->type) {
                     case MENU_OPTION_LIST: {
-                        char value_list[MAX_OPTIONS][20];
+                        char value_list[MAX_VALUE_LIST_ITEMS][MAX_VALUE_LENGTH];
                         int value_count;
                         split_values(option->values, value_list, &value_count);
 
