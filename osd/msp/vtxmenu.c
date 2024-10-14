@@ -7,8 +7,12 @@
 #include "msp_displayport.h"
 #include "vtxmenu.h"
 #include "../util/ini_parser.h"
+#include "../../msposd.h"
+
 
 bool clearNextDraw = false;
+bool showStatusScreen = false;
+uint64_t lastStatusScreen = 0;
 extern bool verbose;
 extern bool vtxMenuActive;
 
@@ -24,13 +28,32 @@ void clear_vtx_menu() {
 }
 void display_menu(displayport_vtable_t *display_driver,MenuSection *section, int selected_option) {
 
+    int menu_offset_cols = 4;
+    int menu_offset_row = 2;    
+
     if (clearNextDraw) {
         display_driver->clear_screen();
         clearNextDraw = false;
     }
 
-    int menu_offset_cols = 4;
-    int menu_offset_row = 2;
+    // Draw status screen when a command was triggered
+    if ((get_current_time_ms() - lastStatusScreen > 1500) && showStatusScreen) {
+        showStatusScreen = false;
+        clearNextDraw = true;
+    }    
+    if (showStatusScreen) {
+        for (int row = 0; row < OSD_HD_ROWS-menu_offset_row; row++) {
+            for (int col = 0; col < OSD_HD_COLS-menu_offset_cols; col++) {
+                display_driver->draw_character(col+menu_offset_cols, row+menu_offset_row, ' ');
+            }
+        }
+        display_driver->draw_character(OSD_HD_COLS/2 - menu_offset_cols,OSD_HD_ROWS/2,     'D');
+        display_driver->draw_character(OSD_HD_COLS/2 - menu_offset_cols + 1,OSD_HD_ROWS/2, 'O');
+        display_driver->draw_character(OSD_HD_COLS/2 - menu_offset_cols + 2,OSD_HD_ROWS/2, 'N');
+        display_driver->draw_character(OSD_HD_COLS/2 - menu_offset_cols + 3,OSD_HD_ROWS/2, 'E');
+        display_driver->draw_complete();
+        return;
+    }
 
     // Create a 2D array to store the menu representation
     char menu_grid[section->option_count+1][OSD_HD_COLS-menu_offset_cols];

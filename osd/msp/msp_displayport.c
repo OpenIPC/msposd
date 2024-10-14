@@ -8,6 +8,7 @@
 #include "msp.h"
 #include "msp_displayport.h"
 #include "vtxmenu.h"
+#include "../../msposd.h"
 #include "../util/ini_parser.h"
 
 MenuSystem menu_system;
@@ -102,6 +103,7 @@ int displayport_process_message(displayport_vtable_t *display_driver, msp_msg_t 
 // VTX CAM Menu
 static bool newMenu = true;
 static int current_selection = 0;
+extern uint64_t lastStatusScreen;
 
 bool init_state_manager() {
 
@@ -114,6 +116,7 @@ bool init_state_manager() {
             print_menu_system_state(&menu_system);
         return true;
     }
+    lastStatusScreen = get_current_time_ms();
 }
 
 void print_current_state(displayport_vtable_t *display_driver) {
@@ -146,6 +149,8 @@ typedef enum {
 
 int last_command = NONE;
 extern bool vtxMenuActive;
+extern bool showStatusScreen;
+
 
 void handle_stickcommands(uint16_t channels[18]) {
 
@@ -265,6 +270,8 @@ void handle_stickcommands(uint16_t channels[18]) {
                         if (option->command_function) {
                             option->command_function(current_section);
                         }
+                        showStatusScreen=true;
+                        lastStatusScreen=abs(get_current_time_ms());
                         break;
                     }
                     default:
