@@ -191,104 +191,110 @@ void handle_stickcommands(uint16_t channels[18]) {
 
     if (command != last_command) {
 
-
-        switch (command) {
-            case VTXMENU:
-                if (verbose) printf("Entering vtxMenu\n");
-                newMenu = true;
-                vtxMenuEnabled = init_state_manager();
-                if (vtxMenuEnabled)
-                    vtxMenuActive = true;
-                break;
-            case UP:
-                selected_option = (selected_option - 1 + current_section->option_count) % current_section->option_count;
-                break;
-            case DOWN:
-                selected_option = (selected_option + 1) % current_section->option_count;
-                break;
-            case LEFT: {
-                MenuOption *option = &current_section->options[selected_option];
-
-                // Handle list value cycling backward
-                switch (option->type) {
-                    case MENU_OPTION_LIST: {
-                        char value_list[MAX_VALUE_LIST_ITEMS][MAX_VALUE_LENGTH];
-                        int value_count;
-                        split_values(option->values, value_list, &value_count);                
-                        current_section->current_value_index[selected_option] = (current_section->current_value_index[selected_option] - 1 + value_count) % value_count;
-                        break;
-                    }
-                    case MENU_OPTION_RANGE:
-                    case MENU_OPTION_FLOATRANGE: {
-                        // Decrement within range
-                        if (current_section->current_value_index[selected_option] > option->min) {
-                            current_section->current_value_index[selected_option]--;
-                        }
-                        break;
-                    }
-                    default:
-                        break;
-                }
-                break;
+        if ( !vtxMenuActive) {
+            switch (command) {
+                case VTXMENU:
+                    if (verbose) printf("Entering vtxMenu\n");
+                    newMenu = true;
+                    vtxMenuEnabled = init_state_manager();
+                    if (vtxMenuEnabled)
+                        vtxMenuActive = true;
+                    break;
             }
-            case RIGHT: {
-                MenuOption *option = &current_section->options[selected_option];
+            last_command=command;
+        } else {
+            switch (command) {
+                case UP:
+                    selected_option = (selected_option - 1 + current_section->option_count) % current_section->option_count;
+                    break;
+                case DOWN:
+                    selected_option = (selected_option + 1) % current_section->option_count;
+                    break;
+                case LEFT: {
+                    MenuOption *option = &current_section->options[selected_option];
 
-                // Handle list value cycling (forward)
-                switch (option->type) {
-                    case MENU_OPTION_LIST: {
-                        char value_list[MAX_VALUE_LIST_ITEMS][MAX_VALUE_LENGTH];
-                        int value_count;
-                        split_values(option->values, value_list, &value_count);
-                        // cycle through list
-                        current_section->current_value_index[selected_option] = (current_section->current_value_index[selected_option] + 1) % value_count;
-                        break;
-                    }
-                    case MENU_OPTION_RANGE:
-                    case MENU_OPTION_FLOATRANGE: {
-                        // Increment within range
-                        if (current_section->current_value_index[selected_option] < option->max) {
-                            current_section->current_value_index[selected_option]++;
+                    // Handle list value cycling backward
+                    switch (option->type) {
+                        case MENU_OPTION_LIST: {
+                            char value_list[MAX_VALUE_LIST_ITEMS][MAX_VALUE_LENGTH];
+                            int value_count;
+                            split_values(option->values, value_list, &value_count);                
+                            current_section->current_value_index[selected_option] = (current_section->current_value_index[selected_option] - 1 + value_count) % value_count;
+                            break;
                         }
-                        break;
-                    }
-                    case MENU_OPTION_SUBMENU: {
-                        // Handle submenu navigation
-                        clear_vtx_menu();
-                        for (int i = 0; i < menu_system.section_count; i++) {
-                            if (strcmp(menu_system.sections[i].name, option->lable) == 0) {
-                                current_section_index = i;
-                                current_section = &menu_system.sections[current_section_index];
-                                selected_option = 0; // Reset the option selection
-                                break;
+                        case MENU_OPTION_RANGE:
+                        case MENU_OPTION_FLOATRANGE: {
+                            // Decrement within range
+                            if (current_section->current_value_index[selected_option] > option->min) {
+                                current_section->current_value_index[selected_option]--;
                             }
+                            break;
                         }
-                        break;
+                        default:
+                            break;
                     }
-                    case MENU_OPTION_COMMAND: {
-                        // Execute the command function
-                        if (option->command_function) {
-                            option->command_function(current_section);
-                        }
-                        showStatusScreen=true;
-                        lastStatusScreen=abs(get_current_time_ms());
-                        break;
-                    }
-                    default:
-                        break;
+                    break;
                 }
-                break;
+                case RIGHT: {
+                    MenuOption *option = &current_section->options[selected_option];
+
+                    // Handle list value cycling (forward)
+                    switch (option->type) {
+                        case MENU_OPTION_LIST: {
+                            char value_list[MAX_VALUE_LIST_ITEMS][MAX_VALUE_LENGTH];
+                            int value_count;
+                            split_values(option->values, value_list, &value_count);
+                            // cycle through list
+                            current_section->current_value_index[selected_option] = (current_section->current_value_index[selected_option] + 1) % value_count;
+                            break;
+                        }
+                        case MENU_OPTION_RANGE:
+                        case MENU_OPTION_FLOATRANGE: {
+                            // Increment within range
+                            if (current_section->current_value_index[selected_option] < option->max) {
+                                current_section->current_value_index[selected_option]++;
+                            }
+                            break;
+                        }
+                        case MENU_OPTION_SUBMENU: {
+                            // Handle submenu navigation
+                            clear_vtx_menu();
+                            for (int i = 0; i < menu_system.section_count; i++) {
+                                if (strcmp(menu_system.sections[i].name, option->lable) == 0) {
+                                    current_section_index = i;
+                                    current_section = &menu_system.sections[current_section_index];
+                                    selected_option = 0; // Reset the option selection
+                                    break;
+                                }
+                            }
+                            break;
+                        }
+                        case MENU_OPTION_COMMAND: {
+                            // Execute the command function
+                            if (option->command_function) {
+                                option->command_function(current_section);
+                            }
+                            showStatusScreen=true;
+                            lastStatusScreen=abs(get_current_time_ms());
+                            break;
+                        }
+                        default:
+                            break;
+                    }
+                    break;
+                }
+                case ENTER:
+                    //handle_selection();
+                    break;           
+                case EXIT:
+                    if (verbose) printf("Exit vtxMenu\n");
+                    newMenu = true;
+                    vtxMenuActive = false;
+                    clear_vtx_menu();
+                    break;
             }
-            case ENTER:
-                //handle_selection();
-                break;           
-            case EXIT:
-                if (verbose) printf("Exit vtxMenu\n");
-                newMenu = true;
-                vtxMenuActive = false;
-                break;
+            last_command=command;
         }
-        last_command=command;
     }
 
 }
