@@ -144,3 +144,9 @@ void runCustomCommand() {
     char output[MAX_VALUE_LENGTH] = "";
     run_command(current_section->options[selected_option].read_command, output, sizeof(output));
 }
+
+void safeboot() {
+    printf("Running safeboot command\n");
+    char output[MAX_VALUE_LENGTH] = "";
+    run_command("/usr/bin/safeboot.sh", output, sizeof(output));
+}

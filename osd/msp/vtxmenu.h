@@ -12,3 +12,4 @@ void clear_vtx_menu();
 void doreboot();
 void exitVTXMenu();
 void runCustomCommand();
+void safeboot();

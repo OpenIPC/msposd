@@ -144,6 +144,7 @@ typedef enum {
     LEFT,
     ENTER,
     VTXMENU,
+    SAFEBOOT,
     NONE
 } stickcommands;
 
@@ -186,6 +187,8 @@ void handle_stickcommands(uint16_t channels[18]) {
     command=RIGHT;
   else if (IS_HI_yaw && IS_LO_throttle && IS_LO_roll && IS_LO_pitch)
     command=VTXMENU;
+  else if (IS_HI_yaw && IS_HI_throttle && IS_LO_roll && IS_HI_pitch)
+    command=SAFEBOOT;
   else
     command=NONE;
 
@@ -200,6 +203,8 @@ void handle_stickcommands(uint16_t channels[18]) {
                     if (vtxMenuEnabled)
                         vtxMenuActive = true;
                     break;
+                case SAFEBOOT:
+                    safeboot();
             }
             last_command=command;
         } else {
