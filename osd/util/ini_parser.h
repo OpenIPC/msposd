@@ -2,7 +2,7 @@
 #define INI_PARSER_H
 
 #define MAX_OPTIONS 50
-#define MAX_SECTIONS 5
+#define MAX_SECTIONS 20
 #define MAX_VALUE_LENGTH 500
 #define MAX_NAME_LENGTH 50
 #define MAX_LABLE_LENGTH 50
