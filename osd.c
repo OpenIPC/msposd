@@ -151,6 +151,7 @@ typedef struct
 extern bool vtxMenuActive;
 extern bool vtxMenuEnabled;
 extern bool armed;
+extern bool vtxInitDone;
 
 static void send_display_size(int serial_fd) {
     uint8_t buffer[8];
@@ -322,31 +323,41 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
             break;
         }
         case MSP_GET_VTX_CONFIG: {
-			mspVtxConfigStruct *in_mspVtxConfigStruct = (mspVtxConfigStruct *) msp_message->payload;
-            uint16_t frequency = (in_mspVtxConfigStruct->freqMSB << 8) | in_mspVtxConfigStruct->freqLSB;
+            if (vtxInitDone) {
+                mspVtxConfigStruct *in_mspVtxConfigStruct = (mspVtxConfigStruct *) msp_message->payload;
+                uint16_t frequency = (in_mspVtxConfigStruct->freqMSB << 8) | in_mspVtxConfigStruct->freqLSB;
 
-            double current_frequency = read_current_freq_from_interface(read_setting("/etc/wfb.conf","wlan"));
+                double current_frequency = read_current_freq_from_interface(read_setting("/etc/wfb.conf","wlan"));
 
-			if (verbose) printf("mspVTX Band: %i, Channel: %i, wanted Frequency: %u, set Frequency: %.0f\n",in_mspVtxConfigStruct->band, in_mspVtxConfigStruct->channel, frequency, current_frequency);
+                if (verbose) printf("mspVTX Band: %i, Channel: %i, wanted Frequency: %u, set Frequency: %.0f\n",in_mspVtxConfigStruct->band, in_mspVtxConfigStruct->channel, frequency, current_frequency);
 
-            if (frequency != (uint16_t)current_frequency) {
-                int channel = 0;
-                for (int i =0 ; i < MAX_ENTRIES; i++) {
-                    if (fc_list[i].frequency == frequency)
-                        channel = fc_list[i].channel;
+                if (frequency != (uint16_t)current_frequency) {
+                    int channel = 0;
+                    for (int i =0 ; i < MAX_ENTRIES; i++) {
+                        if (fc_list[i].frequency == frequency)
+                            channel = fc_list[i].channel;
+                    }
+                    if (channel > 0) {
+                        if (verbose) printf("mspVTX executing channel change to channel %d\n",channel);
+
+                        set_frequency(read_setting("/etc/wfb.conf","wlan"), channel);
+
+                        //store new channel to wfb.conf
+                        char cha_str[32];
+                        sprintf(cha_str, "%i", channel);
+                        write_setting("/etc/wfb.conf", "channel", cha_str);
+                    } else {
+                        printf("Never change to channel 0, we should not reach here, check vtx table in your fc\n");
+                    }
                 }
-                if (verbose) printf("mspVTX executing channel change to channel %d\n",channel);
-
-                set_frequency(read_setting("/etc/wfb.conf","wlan"), channel);
-
-                //store new channel to wfb.conf
-                char cha_str[32];
-                sprintf(cha_str, "%i", channel);
-                write_setting("/etc/wfb.conf", "channel", cha_str);
+                break;
+            } else {
+                if (verbose)
+                    printf("vtxInitDone not finished, should never happen\n");
             }
-            break;
         }
         default: {
+            if (verbose) printf("Received a uncatched MSP_COMMAND: %i\n", msp_message->cmd);
             uint16_t size = msp_data_from_msg(message_buffer, msp_message);
             if(serial_passthrough /*|| cache_msp_message(msp_message)*/) {
                 // Either serial passthrough was on, or the cache was enabled but missed (a response was not available). 

@@ -8,6 +8,7 @@
 #include "../util/settings.h"
 
 extern bool verbose;
+bool vtxInitDone = false;
 
 uint8_t channelFreqLabel[FREQ_LABEL_SIZE] = {
     'B', 'A', 'N', 'D', '_', 'A', ' ', ' ', // A
@@ -52,7 +53,30 @@ uint16_t msp_data_from_msg(uint8_t message_buffer[], msp_msg_t *msg) {
 
 void wipeVtxTable(int serial_fd,int band, int channel) {
 
+    // lets first wipe all
     uint8_t payload[15];
+    payload[0] = 0; // idx LSB
+    payload[1] = 0;  // idx MSB
+    payload[2] = 0; // power
+    payload[3] = 0; // pitmode
+    payload[4] = 0; // lowPowerDisarm 
+    payload[5] = 0; // pitModeFreq LSB
+    payload[6] = 0; // pitModeFreq MSB
+    payload[7] = 0; // newBand - WLAN Channel
+    payload[8] = 0; // newChannel - 161
+    payload[9] = 0; // newFreq  LSB
+    payload[10] = 0; // newFreq  MSB
+    payload[11] = 0; // newBandCount  
+    payload[12] = 0; // newChannelCount 
+    payload[13] = 0; // newPowerCount 
+    payload[14] = 1; // vtxtable should be cleared 
+
+    uint8_t buffer[256];
+
+    construct_msp_command(buffer, MSP_SET_VTX_CONFIG, payload, sizeof(payload), MSP_OUTBOUND);
+    write(serial_fd, &buffer, sizeof(buffer));
+
+    //now prepare the table
     payload[0] = 0; // idx LSB
     payload[1] = 0;  // idx MSB
     payload[2] = 7; // 55, default wfb-ng
@@ -67,9 +91,7 @@ void wipeVtxTable(int serial_fd,int band, int channel) {
     payload[11] = BAND_COUNT; // newBandCount  
     payload[12] = CHANNEL_COUNT; // newChannelCount 
     payload[13] = NUM_POWER_LEVELS; // newPowerCount 
-    payload[14] = 1; // vtxtable should be cleared 
-
-    uint8_t buffer[256];
+    payload[14] = 0; // vtxtable should be cleared 
 
     construct_msp_command(buffer, MSP_SET_VTX_CONFIG, payload, sizeof(payload), MSP_OUTBOUND);
     write(serial_fd, &buffer, sizeof(buffer));
@@ -154,7 +176,7 @@ void msp_set_vtx_config(int serial_fd) {
     for (int i = 1 ; i <= NUM_POWER_LEVELS; i++) {
         setVtxTablePowerLevel(serial_fd,i);
     }
-
+    vtxInitDone = true;
 }
 
 msp_error_e construct_msp_command(uint8_t message_buffer[], uint8_t command, uint8_t payload[], uint8_t size, msp_direction_e direction) {
