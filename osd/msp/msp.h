@@ -38,7 +38,7 @@
 #define FREQ_TABLE_SIZE 64
 #define FREQ_LABEL_SIZE 64
 
-
+#define MSP_REBOOT                      68 //in message reboot settings
 
 typedef enum {
     MSP_ERR_NONE,

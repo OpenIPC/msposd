@@ -43,6 +43,9 @@ bool verbose = false;
 bool ParseMSP = false;
 bool mspVTXenabled = false;
 bool vtxMenuEnabled = false;
+
+int serial_fd = 0;
+
 int MSP_PollRate=20;
 
 int matrix_size=0;
@@ -916,7 +919,7 @@ static int handle_data(const char *port_name, int baudrate,
 	struct event *sig_term;
 	int ret = EXIT_SUCCESS;
 
-	int serial_fd = open(port_name, O_RDWR | O_NOCTTY);
+	serial_fd = open(port_name, O_RDWR | O_NOCTTY);
 	if (serial_fd < 0) {
 		printf("Error while openning port %s: %s\n", port_name,
 		       strerror(errno));
