@@ -363,9 +363,9 @@ static const display_info_t fhd_display_info = {
 #define TRANSPARENT_COLOR 0xFBDE
 
 //Not implemented, draw the center part of the screen with much faster rate to keep CPU load low
-//overlays 1 to 8 are taken by OSD tool
-#define FULL_OVERLAY_ID 9
-#define FAST_OVERLAY_ID 8
+//overlays 1 to 8 are taken by OSD tool, but they are limited to 8 in some systems like Goke
+#define FULL_OVERLAY_ID 6
+#define FAST_OVERLAY_ID 7
 
 char font_2_name[256];
 
@@ -1495,7 +1495,14 @@ static void InitMSPHook(){
     }
 
     snprintf(font_load_name, 255, "%sfont%s.png", font_path, font_suffix);
-    
+        
+    // Check if the file exists in the correct location, if not, try in legacy old location!
+    if (access(font_load_name, F_OK) != 0) {        
+        printf("Font file not found in %s folder! Trying in /usr/bin/ => ",font_path);
+        font_path="/usr/bin/";
+        snprintf(font_load_name, 255, "%sfont%s.png", font_path, font_suffix);        
+    }
+
     //printf("Loadding %s Mode %dp. Characters matrix : %d:%d, Fontsize:%d:%d\r\n", font_load_name,
     //    height,current_display_info.char_width,current_display_info.char_height,current_display_info.font_width, current_display_info.font_height);
     printf("Loading %s for %dp mode\r\n", font_load_name, height);
@@ -1524,7 +1531,7 @@ static void InitMSPHook(){
           SkipXChar=10;
     }*/else if (font_pages>2){//BetaFlight!!!
           current_display_info.char_width =  53;//53
-          current_display_info.char_height = 20;          
+          current_display_info.char_height = 20;        
     }else{//INAV
           current_display_info.char_width =  53;//53
           current_display_info.char_height = 20;          
@@ -1771,7 +1778,7 @@ On sigmastar the BMP row stride is aligned to 8 bytes, that is 16 pixels in PIXE
 
                 #elif __GOKE__
                      if (verbose)
-                        printf("Set Goke Font Review %d:%d", bitmap.u32Width, bitmap.u32Height);
+                        printf("Set Goke Font Review %d:%d\r\n", bitmap.u32Width, bitmap.u32Height);
 
                     set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);//bitmap must match region dimensions!
                 #elif _x86

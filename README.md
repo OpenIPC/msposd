@@ -73,20 +73,35 @@ curl -L -o /usr/bin/msposd https://raw.githubusercontent.com/openipc/msposd/main
 chmod 755 /usr/bin/msposd
 ```
 Copy the font files for your flight controller firmware INAV/ Betaflight/ ArduPilot from here  https://github.com/openipc/msposd/tree/main/fonts   
-Choose one of the following below.   
+
 **For INAV**:
 ```
-curl -L -o /usr/bin/font.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/inav/font.png
-curl -L -o /usr/bin/font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/inav/font_hd.png
+mkdir /usr/share/fonts
+curl -k -L -o /usr/share/fonts/font.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/inav/font.png
+curl -k -L -o /usr/share/fonts/font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/inav/font_hd.png
 ```
 
-**For Betaflight**:
+**For Betaflight**: preinstalled in OpenIPC firmware since Oct 2024
 ```
-curl -L -o /usr/bin/font.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/betaflight/font.png
-curl -L -o /usr/bin/font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/betaflight/font_hd.png
+mkdir /usr/share/fonts
+curl -k -L -o /usr/share/fonts/font.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/betaflight/font.png
+curl -k -L -o /usr/share/fonts/font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/betaflight/font_hd.png
 ```
 
 Start msposd or reference it in OpenIPC boot scripts.  
+
+### To install on Goke/HiSilicon camera
+```
+curl -L -o /usr/bin/msposd https://raw.githubusercontent.com/openipc/msposd/main/release/goke/msposd
+#or
+curl -L -o /usr/bin/msposd https://raw.githubusercontent.com/openipc/msposd/main/release/hisi/msposd
+chmod 755 /usr/bin/msposd
+#Download an additional driver for Region Module
+curl -k -L -o /lib/modules/4.9.37/goke/gk7205v200_rgn.ko https://github.com/OpenIPC/firmware/raw/89ded200eba00726930b8307ddaf573ac449f076/general/package/goke-osdrv-gk7205v200/files/kmod/gk7205v200_rgn.ko
+sed -i "s!#insmod gk7205v200_rgn.ko!insmod gk7205v200_rgn.ko!g" "/usr/bin/load_goke"
+reboot
+```
+On lower-end cameras like gk7205v200/v210 the OSD will work only in 1280x720 mode!
 
 ### Diagnosing
 Q: _I see a static map of all characters on the screen but no realtime OSD_.  
@@ -106,7 +121,7 @@ Save this log to show it if requested.
 Q: _OSD changes, but I see strange symbols on the screen_.  
 A: Download the appropriate font set for you flight controller software. Check for loose connectors, speed settings and make sure you have ground wire between the FC and the cam.
 
-Q: _With Betaflight, if AHI is shown but is not updated, even though msposd has "--ahi 1" argument and the telemetry is working._
+Q: _With Betaflight, if AHI is shown but is not updated, even though msposd has "--ahi 1" argument and the telemetry is working._  
 A: Check your connections, specifically Camera's TX <-> FC RX. Camera needs to request extra data from Flight controller for this feature to work. Betaflight can be configured to allow readonly mode, but then extra features like RC channels control and AHI will not work.
 
 ### Acknowledgements:
