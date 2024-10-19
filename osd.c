@@ -1570,7 +1570,7 @@ On sigmastar the BMP row stride is aligned to 8 bytes, that is 16 pixels in PIXE
     osds = mmap(NULL, sizeof(*osds) * MAX_OSD,
                 PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
 
-    for (int id = 8; id < MAX_OSD; id++){
+    for (int id = 0; id < MAX_OSD; id++){
         osds[id].hand = id;
         osds[id].size = DEF_SIZE;
         osds[id].posx = DEF_POSX;
