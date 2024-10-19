@@ -443,8 +443,13 @@ static const display_info_t fhd_display_info = {
 
 //Not implemented, draw the center part of the screen with much faster rate to keep CPU load low
 //overlays 1 to 8 are taken by OSD tool, but they are limited to 8 in some systems like Goke
+#ifdef __SIGMASTAR__
+#define FULL_OVERLAY_ID 9
+#define FAST_OVERLAY_ID 8
+#else
 #define FULL_OVERLAY_ID 6
 #define FAST_OVERLAY_ID 7
+#endif
 
 char font_2_name[256];
 
