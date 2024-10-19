@@ -1,6 +1,6 @@
-## MSPOSD
+# MSPOSD
 
-### A tool for drawing betaflight/inav/ardupilot MSP Display Port OSD over OpenIPC video stream.
+A tool for drawing betaflight/inav/ardupilot MSP Display Port OSD over OpenIPC video stream.
 
 **Click the image below to watch a video sample:**
 [![Video sample](pics/AHI_OSD.png)](https://www.youtube.com/watch?v=4907k5c7b4U)
@@ -19,6 +19,7 @@ Usage: msposd [OPTIONS]
  -s --osd         Parse MSP and draw OSD over the video
  -a --ahi         Draw graphic AHI, mode [0-No, 2-Simple 1-Ladder, 3-LadderEx (home indicator on ladder)]
  -x --matrix      OSD matrix [0- 53:20 , 1- 50:18 chars, 11 Variable font size]
+    --mspvtx      Enable alpha mspvtx functionality
  -v --verbose     Show debug info
  --help           Display this help
 ```
@@ -31,8 +32,63 @@ set --matrix  to a value 11 or higher, each value represents a template to be us
 </a>  
 All the OSD symbols in the red rectangles will be rendered using smaller font size. They will be aligned to the outer corner of each rectangle (up-left for the upper left one).
 
+## VTX Menu
 
-###  Options.
+### Stick commands
+<img src="pics/vtxmenu.png" alt="vtxmenu stick commands"/>
+
+### VTXMenu INI File Format Guide
+
+See: vtxmenu.ini
+
+#### General Structure
+- **Sections** represent individual pages.
+- Each section can contain one of the following:
+  - **Submenus** (which link to other sections).
+  - **Options** (which allow user selections).
+  - **Commands** (to perform specific actions).
+
+#### Submenus
+- **Submenus** are links that navigate to other sections within the INI file.
+
+#### Options
+- **Options** follow a specific colon-separated format, with parameters in this order:
+  
+  1. **Name** - The display name of the option.
+  2. **Range/List** - A numeric range or list of allowed values.
+  3. **Read Command** - The command to retrieve the current value.
+  4. **Write Command** - The command to update the value. Use the `{}` placeholder to specify where the value will be placed in the write command.
+  
+  - **Range**: A numeric range of allowed values (e.g., `1-10`). You can use decimal syntax to denote more precision `0.1-20`.
+  - **List**: A comma-separated list of selectable options (e.g., `On, Off, Auto`).
+
+#### Commands
+- **Commands** are colon-separated entries that define:
+  
+  1. **Label** - The text displayed to the user.
+  2. **Action** - The command to be executed.
+
+
+### Safeboot
+
+The safeboot stick command will run `/usr/bin/safeboot.sh`.
+Example:
+```
+#!/bin/sh
+cp /etc/wfb.conf /etc/wfb.conf_before_safeboot
+cp /etc/majestic.yaml /etc/majestic.yaml_before_safeboot
+cp /etc/wfb.conf_safeboot /etc/wfb.conf
+cp /etc/majestic.yaml_safeboot /etc/majestic.yaml
+reboot
+```
+This will copy a known good config to the right place and reboot.
+Use `Exit Camera menu` stick command (one or more times) to exit all flightcontroller and VTX menu screens before.
+
+### MSPVTX
+
+msposd has **alpha** support for mspVTX to Betaflight. use the `--mspvtx` switch to activate this. This will configure Betaflight vtx tables with the supported channles by the vtx. You can switch channels from within Betaflight menu, Betaflight Configurator, SpeedyBee App, ELRS VTXAdmin.
+
+##  Options.
 Forwarding of MSP packets via UDP.  
 Can monitor RC Channels values in FC and call the script `channels.sh` (located at /usr/bin or /usr/sbin).Will passing the channel number and its value to it as $1 and $2 parameters. This allows for controlling the camera via the Remote Control Transmitter.  
 AHI (Artificial Horizon Indicator) ladder - Graphical AHI , that is drawn over the standard OSD. 
