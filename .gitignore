@@ -4,5 +4,5 @@ toolchain/
 /*.png
 majestic.yaml
 /msposd
-firmware
+firmware/
 
