@@ -350,11 +350,11 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
                         printf("Never change to channel 0, we should not reach here, check vtx table in your fc\n");
                     }
                 }
-                break;
             } else {
                 if (verbose)
                     printf("vtxInitDone not finished, should never happen\n");
             }
+            break;
         }
         default: {
             if (verbose) printf("Received a uncatched MSP_COMMAND: %i\n", msp_message->cmd);
