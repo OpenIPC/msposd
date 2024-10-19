@@ -82,11 +82,11 @@ cp /etc/majestic.yaml_safeboot /etc/majestic.yaml
 reboot
 ```
 This will copy a known good config to the right place and reboot.
-Use `Exit Camera menu` stick command (one ore more tiimes) to exit all flightcontroller and VTX menu screens before.
+Use `Exit Camera menu` stick command (one or more times) to exit all flightcontroller and VTX menu screens before.
 
 ### MSPVTX
 
-msposd has **alpha** support for mspVTX to Betaflight. use the `--mspvtx` switch to activate this. This will configure betaflight with the supported channles by the vtx. Cou can switch channels from within Betaflight menu, Betaflight Configurator, Speedy Bee App, ELRS VTXAdmin.
+msposd has **alpha** support for mspVTX to Betaflight. use the `--mspvtx` switch to activate this. This will configure Betaflight vtx tables with the supported channles by the vtx. You can switch channels from within Betaflight menu, Betaflight Configurator, SpeedyBee App, ELRS VTXAdmin.
 
 ##  Options.
 Forwarding of MSP packets via UDP.  

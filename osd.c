@@ -10,9 +10,6 @@
 #include <time.h>
 #include <math.h>
 
-#include <sys/ioctl.h>
-#include <net/if.h>
-#include <linux/wireless.h>
 
 #include "osd/msp/msp.h"
 #include "osd/msp/msp_displayport.h"

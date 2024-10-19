@@ -108,7 +108,7 @@ extern uint64_t lastStatusScreen;
 bool init_state_manager() {
 
     if (parse_ini("/etc/vtxmenu.ini", &menu_system)) {
-        printf("Failed to load menu.\n");
+        printf("Failed to load menu config /etc/vtxmenu.ini\n");
         return false;
     } else {
         current_section = &menu_system.sections[current_section_index];

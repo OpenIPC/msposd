@@ -37,7 +37,7 @@
 
 
 bool vtxMenuActive = false;
-bool armed = false;
+bool armed = true; // assume armed until we are told otherwise from the fc
 bool AbortNow=false;
 bool verbose = false;
 bool ParseMSP = false;
@@ -99,7 +99,7 @@ static void print_usage()
  "	-s --osd         Parse MSP and draw OSD over the video\n"
  "	-a --ahi         Draw graphic AHI, mode [0-No, 2-Simple 1-Ladder, 3-LadderEx]\n"
  "	-x --matrix      OSD matrix (0 - 53:20 , 1- 50:18 chars)\n"
- "	-1 --mspvtx      Enable mspvtx support\n"
+ "	   --mspvtx      Enable mspvtx support\n"
  "	-v --verbose     Show debug infot\n"	       
  "	--help           Display this help\n",
 
