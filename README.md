@@ -159,6 +159,9 @@ reboot
 ```
 On lower-end cameras like gk7205v200/v210 the OSD will work only in 1280x720 mode!
 
+### VTX Menu
+![alt text](pics/vtx_menu.png)
+
 ### Diagnosing
 Q: _I see a static map of all characters on the screen but no realtime OSD_.  
 A: There are no data being received by the cam.  
