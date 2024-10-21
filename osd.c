@@ -219,6 +219,7 @@ static void rx_msp_callback(msp_msg_t *msp_message)
             // we need the armed state
             armed = (msp_message->payload[6] & 0x01);
             if (armed) vtxMenuActive = false;
+            break;
         }
 
          case MSP_ATTITUDE: {
