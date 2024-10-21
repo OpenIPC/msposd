@@ -3,6 +3,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <stdbool.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,6 +47,9 @@
 #include "osd/util/time_util.h"
 #include "osd/util/fs_util.h"
 
+#include "osd/util/settings.h"
+#include "osd/util/interface.h"
+
 #define CPU_TEMP_PATH "/sys/devices/platform/soc/f0a00000.apb/f0a71000.omc/temp1"
 #define AU_VOLTAGE_PATH "/sys/devices/platform/soc/f0a00000.apb/f0a71000.omc/voltage4"
 
@@ -71,6 +75,8 @@ enum {
 
 // The Betaflight MSP minor version in which MSP DisplayPort sizing is supported.
 #define MSP_DISPLAY_SIZE_VERSION 45
+
+extern FrequencyChannel fc_list[MAX_ENTRIES];  // Array to store frequency-channel pairs
 
 typedef struct msp_cache_entry_s {
     struct timespec time;
@@ -115,6 +121,34 @@ static int16_t last_directionToHome=0;
 static int16_t last_distanceToHome=0;
 
 static int16_t last_RC_Channels[16];
+
+// https://github.com/betaflight/betaflight/blob/master/src/main/msp/msp.c#L1949
+typedef struct
+{
+    uint8_t vtxType;
+    uint8_t band;
+    uint8_t channel;
+    uint8_t power;
+    uint8_t pitmode;
+    // uint16_t freq; // This doesnt work and bytes are missing after memcpy.
+    uint8_t freqLSB;
+    uint8_t freqMSB;
+    uint8_t deviceIsReady;
+    uint8_t lowPowerDisarm;
+    // uint16_t pitModeFreq; // This doesnt work and bytes are missing after memcpy.
+    uint8_t pitModeFreqLSB;
+    uint8_t pitModeFreqMSB;
+    uint8_t vtxTableAvailable;
+    uint8_t bands;
+    uint8_t channels;
+    uint8_t powerLevels;
+} mspVtxConfigStruct;
+
+
+extern bool vtxMenuActive;
+extern bool vtxMenuEnabled;
+extern bool armed;
+extern bool vtxInitDone;
 
 static void send_display_size(int serial_fd) {
     uint8_t buffer[8];
@@ -180,6 +214,14 @@ static void rx_msp_callback(msp_msg_t *msp_message)
     DEBUG_PRINT("FC->AU MSP msg %d with data len %d \n", msp_message->cmd, msp_message->size);
     stat_msp_msgs++;
     switch(msp_message->cmd) {
+
+        case MSP_CMD_STATUS: {
+            // we need the armed state
+            armed = (msp_message->payload[6] & 0x01);
+            if (armed) vtxMenuActive = false;
+            break;
+        }
+
          case MSP_ATTITUDE: {
 
             last_pitch = *(int16_t*)&msp_message->payload[2];
@@ -210,12 +252,15 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
 
 	            //showchannels(18);		
             	ProcessChannels();
+                if (vtxMenuEnabled && vtxMenuActive) {
+                    print_current_state(display_driver);
+                }                
               break;
          }
          
         case MSP_CMD_DISPLAYPORT: {
 //TEST CHANGE            
-            if (true) {
+            if ( ! vtxMenuActive ) {
                 // This was an MSP DisplayPort message and we're in compressed mode, so pass it off to the DisplayPort handlers.
                 displayport_process_message(display_driver, msp_message);
            // } else {
@@ -275,7 +320,42 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
             }
             break;
         }
+        case MSP_GET_VTX_CONFIG: {
+            if (vtxInitDone) {
+                mspVtxConfigStruct *in_mspVtxConfigStruct = (mspVtxConfigStruct *) msp_message->payload;
+                uint16_t frequency = (in_mspVtxConfigStruct->freqMSB << 8) | in_mspVtxConfigStruct->freqLSB;
+
+                double current_frequency = read_current_freq_from_interface(read_setting("/etc/wfb.conf","wlan"));
+
+                if (verbose) printf("mspVTX Band: %i, Channel: %i, wanted Frequency: %u, set Frequency: %.0f\n",in_mspVtxConfigStruct->band, in_mspVtxConfigStruct->channel, frequency, current_frequency);
+
+                if (frequency != (uint16_t)current_frequency) {
+                    int channel = 0;
+                    for (int i =0 ; i < MAX_ENTRIES; i++) {
+                        if (fc_list[i].frequency == frequency)
+                            channel = fc_list[i].channel;
+                    }
+                    if (channel > 0) {
+                        if (verbose) printf("mspVTX executing channel change to channel %d\n",channel);
+
+                        set_frequency(read_setting("/etc/wfb.conf","wlan"), channel);
+
+                        //store new channel to wfb.conf
+                        char cha_str[32];
+                        sprintf(cha_str, "%i", channel);
+                        write_setting("/etc/wfb.conf", "channel", cha_str);
+                    } else {
+                        printf("Never change to channel 0, we should not reach here, check vtx table in your fc\n");
+                    }
+                }
+            } else {
+                if (verbose)
+                    printf("vtxInitDone not finished, should never happen\n");
+            }
+            break;
+        }
         default: {
+            if (verbose) printf("Received a uncatched MSP_COMMAND: %i\n", msp_message->cmd);
             uint16_t size = msp_data_from_msg(message_buffer, msp_message);
             if(serial_passthrough /*|| cache_msp_message(msp_message)*/) {
                 // Either serial passthrough was on, or the cache was enabled but missed (a response was not available). 
@@ -364,8 +444,13 @@ static const display_info_t fhd_display_info = {
 
 //Not implemented, draw the center part of the screen with much faster rate to keep CPU load low
 //overlays 1 to 8 are taken by OSD tool, but they are limited to 8 in some systems like Goke
+#ifdef __SIGMASTAR__
+#define FULL_OVERLAY_ID 9
+#define FAST_OVERLAY_ID 8
+#else
 #define FULL_OVERLAY_ID 6
 #define FAST_OVERLAY_ID 7
+#endif
 
 char font_2_name[256];
 
@@ -1343,7 +1428,7 @@ static void msp_callback(msp_msg_t *msp_message)
     displayport_process_message(display_driver, msp_message);
 }
 
-static void set_options(uint8_t font, uint8_t is_hd) {
+static void set_options(uint8_t font, msp_hd_options_e is_hd) {
     /*
     if(is_hd) { 
         current_display_info = hd_display_info;
@@ -1419,11 +1504,19 @@ int GetMajesticVideoConfig(int *Width){
             inVideo0Section = true;
 
         // If we're in the video0 section, look for the size parameter
-        if (inVideo0Section && strlen(line)>10 /*&& line[0] != '#'*/ && strstr(line, "#")<15) {
-            if (strstr(line, "size:") != NULL) {
-                // Extract the value after "size:"
-                sscanf(line, " size: %49s", sizeValue); // Extract the size value with a buffer limit
-                break;  // Exit the loop once the size is found
+        if (inVideo0Section && strlen(line)>10) {
+           // Skip leading whitespace
+            char *ptr = line;
+            while (isspace((unsigned char)*ptr)) {
+                ptr++;
+            }
+            // Check if the first non-whitespace character is not '#'
+            if (*ptr != '#') {
+                if (strstr(line, "size:") != NULL) {
+                    // Extract the value after "size:"
+                    sscanf(line, " size: %49s", sizeValue); // Extract the size value with a buffer limit
+                    break;  // Exit the loop once the size is found
+                }
             }
         }
 

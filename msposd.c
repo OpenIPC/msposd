@@ -33,11 +33,19 @@
 //#include "msp/msp.cpp"
 
 #define MAX_MTU 9000
+#include "osd/util/settings.h"
 
 
+bool vtxMenuActive = false;
+bool armed = true; // assume armed until we are told otherwise from the fc
 bool AbortNow=false;
 bool verbose = false;
 bool ParseMSP = false;
+bool mspVTXenabled = false;
+bool vtxMenuEnabled = false;
+
+int serial_fd = 0;
+
 int MSP_PollRate=20;
 
 int matrix_size=0;
@@ -91,6 +99,7 @@ static void print_usage()
  "	-s --osd         Parse MSP and draw OSD over the video\n"
  "	-a --ahi         Draw graphic AHI, mode [0-No, 2-Simple 1-Ladder, 3-LadderEx]\n"
  "	-x --matrix      OSD matrix (0 - 53:20 , 1- 50:18 chars)\n"
+ "	   --mspvtx      Enable mspvtx support\n"
  "	-v --verbose     Show debug infot\n"	       
  "	--help           Display this help\n",
 
@@ -487,6 +496,8 @@ void ProcessChannel(int rc_channel_no){
 	if (rc_channel_no<0 || rc_channel_no>15  /* || (mavpckts_ttl<100*/ ) //wait in the beginning for the values to settle
 		return;
 
+	if (!armed)
+		handle_stickcommands(channels);
 
 	if ( abs(get_current_time_ms()-LastStart[rc_channel_no]) < wait_after_bash)		
 		return;
@@ -739,8 +750,61 @@ static void serial_event_cb(struct bufferevent *bev, short events, void *arg)
 	}
 }
 
+// Callback function to handle keyboard input
+#ifdef __KEYBOARD_INPUT__
+void stdin_read_callback(int fd, short event, void *arg) {
+    char buffer[256];
+    ssize_t n = read(fd, buffer, sizeof(buffer) - 1);
+    
+    if (n > 0 && ! armed) {
+        buffer[n] = '\0';  // Null-terminate the input
+        printf("You typed: %s\n", buffer);
+		if (buffer[0] == 'm') {
+			printf("Disableing msposd\n");
+  	    	vtxMenuEnabled = init_state_manager();
+			if (vtxMenuEnabled)
+				vtxMenuActive = true;
+		}
+		if (buffer[0] == 'q') {
+			printf("Enableing msposd\n");
+			vtxMenuActive = false;
+		}
+        if (buffer[0] == 'w') {
+			uint16_t channels[18];
+			channels[0] = 1500;
+			channels[1] = 2000;
+			channels[2] = 1500;
+			channels[3] = 1500;
+		    handle_stickcommands(channels); // Move up
+        } else if (buffer[0] == 's') {
+			uint16_t channels[18];
+			channels[0] = 1500;
+			channels[1] = 1000;
+			channels[2] = 1500;
+			channels[3] = 1500;
+		    handle_stickcommands(channels);// Move down
+        } else if (buffer[0] == 'a') {
+			uint16_t channels[18];
+			channels[0] = 1000;
+			channels[1] = 1500;
+			channels[2] = 1500;
+			channels[3] = 1500;
+		    handle_stickcommands(channels);// Move left
+        } else if (buffer[0] == 'd') {
+ 			uint16_t channels[18];
+			channels[0] = 2000;
+			channels[1] = 1500;
+			channels[2] = 1500;
+			channels[3] = 1500;
+		    handle_stickcommands(channels);// Move right
+        } else if (buffer[0] == 'e') {
+            //unused
+        }	
+    }
+}
+#endif
 
- 
+
 
 static void* setup_temp_mem(off_t base, size_t size)
 {
@@ -818,6 +882,17 @@ static void send_variant_request2(int serial_fd) {
 	if (MSP_PollRate <= ++VariantCounter){//poll every one second
 		construct_msp_command(buffer, MSP_CMD_FC_VARIANT, NULL, 0, MSP_OUTBOUND);
 		res = write(serial_fd, &buffer, sizeof(buffer));
+
+		if (mspVTXenabled) {
+			// Poll for mspVTX
+			construct_msp_command(buffer, MSP_GET_VTX_CONFIG, NULL, 0, MSP_OUTBOUND);
+			res = write(serial_fd, &buffer, sizeof(buffer));
+		}		
+
+		//poll for FC_STATUS
+		construct_msp_command(buffer, MSP_CMD_STATUS, NULL, 0, MSP_OUTBOUND);
+	    res = write(serial_fd, &buffer, sizeof(buffer));
+
 		//usleep(20*1000);
 		VariantCounter=0;
 	}
@@ -830,7 +905,7 @@ static void send_variant_request2(int serial_fd) {
 
 static void poll_msp(evutil_socket_t sock, short event, void *arg)
 {
-	int serial_fd=(int)arg;
+    int serial_fd = *((int *)arg);
 	send_variant_request2(serial_fd);
 }
 
@@ -844,7 +919,7 @@ static int handle_data(const char *port_name, int baudrate,
 	struct event *sig_term;
 	int ret = EXIT_SUCCESS;
 
-	int serial_fd = open(port_name, O_RDWR | O_NOCTTY);
+	serial_fd = open(port_name, O_RDWR | O_NOCTTY);
 	if (serial_fd < 0) {
 		printf("Error while openning port %s: %s\n", port_name,
 		       strerror(errno));
@@ -873,6 +948,11 @@ static int handle_data(const char *port_name, int baudrate,
 	cfmakeraw(&options);
 	tcsetattr(serial_fd, TCSANOW, &options);
 
+	// tell the fc what vtx config we support
+	if (mspVTXenabled) {
+		printf("Setup mspVTX ...\n");
+		msp_set_vtx_config(serial_fd);
+	}
 	out_sock = socket(AF_INET, SOCK_DGRAM, 0);
 
  	if (!parse_host_port(out_addr,
@@ -912,6 +992,14 @@ static int handle_data(const char *port_name, int baudrate,
 	bufferevent_enable(serial_bev, EV_READ);	 
 
 
+    // Set up an event for stdin (file descriptor 0)
+#ifdef __KEYBOARD_INPUT__
+    struct event *stdin_event = event_new(base, STDIN_FILENO, EV_READ | EV_PERSIST, stdin_read_callback, base);
+
+    // Add the event to the event loop
+    event_add(stdin_event, NULL);
+#endif
+
 	if (temp) {
 		if (GetTempSigmaStar()>-90){
 			temp=2;//SigmaStar
@@ -925,7 +1013,7 @@ static int handle_data(const char *port_name, int baudrate,
 
    //MSP_PollRate
 	if (ParseMSP&& msp_tmr==NULL){
-		msp_tmr = event_new(base, -1, EV_PERSIST, poll_msp, serial_fd);
+		msp_tmr = event_new(base, -1, EV_PERSIST, poll_msp, &serial_fd);
 		 // Set poll interval to 50 milliseconds if pollrate is 20
     	struct timeval interval = {
 	        .tv_sec = 0,         // 0 seconds
@@ -993,7 +1081,8 @@ int main(int argc, char **argv)
 		{ "osd", no_argument, NULL, 'd' },	
 		{ "verbose", no_argument, NULL, 'v' },		
 		{ "temp", no_argument, NULL, 't' },						
-		{ "wfb", no_argument, NULL, 'j' },					
+		{ "wfb", no_argument, NULL, 'j' },
+		{ "mspvtx", no_argument, NULL, '1' },							
 		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
@@ -1082,7 +1171,9 @@ int main(int argc, char **argv)
 		case 'j':		
 			monitor_wfb = true;
 			break;
-
+		case '1':		
+			mspVTXenabled = true;
+			break;
 		case 'v':
 			verbose = true;
 			printf("Verbose mode!");

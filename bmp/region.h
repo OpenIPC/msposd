@@ -15,7 +15,7 @@ extern "C"
     int create_region(int *handle, int x, int y, int width, int height);
     int prepare_bitmap(const char *filename, BITMAP *bitmap, int bFil, unsigned int u16FilColor, int enPixelFmt);
     int set_bitmap(int handle, BITMAP *bitmap);
-    int set_bitmapEx(int handle, BITMAP *bitmap, int BitsPerPixel);
+    unsigned long set_bitmapEx(int handle, BITMAP *bitmap, int BitsPerPixel);
     int unload_region(int *handle);
     void *get_directBMP(int handle);
 #ifdef __SIGMASTAR__    

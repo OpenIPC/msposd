@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include <stdbool.h>
 #include "msp.h"
 
 typedef enum {
@@ -32,3 +33,11 @@ typedef struct displayport_vtable_s {
 } displayport_vtable_t;
 
 int displayport_process_message(displayport_vtable_t *display_driver, msp_msg_t *msg);
+
+bool init_state_manager();
+int get_current_selection();
+const char* get_option(int index);
+void move_selection(int direction);
+void change_option(int direction);
+void print_current_state(displayport_vtable_t *display_driver);
+void handle_stickcommands(uint16_t channels[18]);
