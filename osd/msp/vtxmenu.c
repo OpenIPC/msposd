@@ -146,14 +146,7 @@ void runCustomCommand() {
 }
 
 
-extern int serial_fd ;
 void safeboot() {
-    printf("Reboot the FC\n");
-    uint8_t buffer[256];
-    uint8_t payload[0];
-    construct_msp_command(buffer, MSP_REBOOT, payload, sizeof(payload), MSP_OUTBOUND);
-    write(serial_fd, &buffer, sizeof(buffer));
-
     printf("Running safeboot command\n");
     char output[MAX_VALUE_LENGTH] = "";
     run_command("/usr/bin/safeboot.sh", output, sizeof(output));
