@@ -16,7 +16,10 @@
 
 #ifdef _x86
     #include <SFML/Graphics.h>
-    #include <SFML/Window.h>
+    #include <SFML/Window.h>    
+    #include <stdio.h>
+    #include <stdbool.h>
+    
  #else
     #include "bmp/region.h"
     #include "bmp/common.h"    
@@ -473,6 +476,8 @@ int fcX= 12; int fcW=10; int fcY= 5 ; int fcH=8;
     sfSprite *font_sprite_1;
     sfSprite *font_sprite_2;
     sfRenderWindow *window;
+    sfTexture* texture=NULL;
+    sfSprite* sprite=NULL;
 #endif
 
 
@@ -1309,7 +1314,9 @@ static void draw_screenBMP(){
 #ifdef _x86
     
     
-    sfRenderWindow_clear(window, sfColor_fromRGB(175, 195, 255));
+    
+    
+
     unsigned char* rgbaData = malloc(bmpBuff.u32Width * bmpBuff.u32Height * 4);  // Allocate memory for RGBA data    
 
     if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_1555)          
@@ -1319,14 +1326,20 @@ static void draw_screenBMP(){
     else if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4) //I4 half byte format
         ConvertI4ToRGBA( bmpBuff.pData, rgbaData, bmpBuff.u32Width, bmpBuff.u32Height,&g_stPaletteTable);     
 
-    sfTexture* texture = sfTexture_create(bmpBuff.u32Width, bmpBuff.u32Height);
+    //sfTexture* texture = sfTexture_create(bmpBuff.u32Width, bmpBuff.u32Height);
+    if (texture==NULL)
+        texture = sfTexture_create(bmpBuff.u32Width, bmpBuff.u32Height);
+
     if (!texture) 
         return;
 
+    sfRenderWindow_clear(window, sfColor_fromRGBA(0, 0, 0, 0)); // Clear with transparency
     sfTexture_updateFromPixels(texture, rgbaData, bmpBuff.u32Width, bmpBuff.u32Height, 0, 0);
     free(rgbaData);  
-    // Step 2: Create a sprite and set the texture
-    sfSprite* sprite = sfSprite_create();
+    
+    if (sprite==NULL)
+        sprite = sfSprite_create();
+
     sfSprite_setTexture(sprite, texture, sfTrue);
     // Set the position where you want to draw the sprite
     sfVector2f position = {1, 1};
@@ -1335,9 +1348,9 @@ static void draw_screenBMP(){
     sfRenderWindow_drawSprite(window, sprite, NULL);
 
     // Cleanup resources
-    sfSprite_destroy(sprite);
-    sfTexture_destroy(texture);
-    //printf("%lu set_bitmapC for:%u | %u  | %u ms   pitch:%d  roll:%d\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn) , (uint32_t)(get_time_ms() - step2),(uint32_t)(get_time_ms() - step3), last_pitch, last_roll);
+    //sfSprite_destroy(sprite);
+    //sfTexture_destroy(texture);//this will be kept
+    
     
  
 
@@ -1546,6 +1559,7 @@ int GetMajesticVideoConfig(int *Width){
     }
     return height;
 }
+ 
 
 int majestic_width;
 int fd_mem;
@@ -1643,7 +1657,10 @@ static void InitMSPHook(){
 
     OVERLAY_WIDTH = current_display_info.font_width * (current_display_info.char_width);//must be multiple of 8 !!!
     OVERLAY_WIDTH = (OVERLAY_WIDTH + 7) & ~7;
-
+    if (matrix_size>10 && OVERLAY_WIDTH < (1920-(53*2))) {
+        printf("Matrix size not supported on resolutions smaller than 1920x1080p!\r\n");
+        matrix_size=0;
+    }
 /*
 On sigmastar the BMP row stride is aligned to 8 bytes, that is 16 pixels in PIXEL_FORMAT_I4
 */
@@ -1675,8 +1692,12 @@ On sigmastar the BMP row stride is aligned to 8 bytes, that is 16 pixels in PIXE
 
     #ifdef _x86
         sfVideoMode videoMode = {OVERLAY_WIDTH, OVERLAY_HEIGHT, 32};
-        window = sfRenderWindow_create(videoMode, "MSP OSD", 0, NULL);
+        //window = sfRenderWindow_create(videoMode, "MSP OSD", 0, NULL);        
+        window = sfRenderWindow_create(videoMode, "MSP OSD", sfDefaultStyle, NULL);        
+        
+      
         sfRenderWindow_display(window);
+
     #endif
 
 
@@ -1780,8 +1801,9 @@ On sigmastar the BMP row stride is aligned to 8 bytes, that is 16 pixels in PIXE
 #elif _x86 
                 //TEST ON x86
                 
-                    sfRenderWindow_clear(window, sfColor_fromRGB(255, 255, 0));
-                    
+                    //sfRenderWindow_clear(window, sfColor_fromRGB(255, 255, 0));
+                    sfRenderWindow_clear(window, sfColor_fromRGBA(111, 0, 0, 0));//Transparant
+
                     unsigned char* rgbaData = malloc(bitmap.u32Width * bitmap.u32Height * 4);  // Allocate memory for RGBA data    
 
                     if (PIXEL_FORMAT_DEFAULT==0)          
@@ -1963,6 +1985,13 @@ static void CloseMSP(){
     deinit = MI_RGN_DeInit();
     if (deinit)
         printf("[%s:%d]RGN_DeInit failed with %#x!\n", __func__, __LINE__, s32Ret);        
+    #endif
+    #ifdef _x86
+    // Cleanup resources
+    if (sprite!=NULL)
+        sfSprite_destroy(sprite);
+    if (texture!=NULL)
+        sfTexture_destroy(texture);//this will be kept
     #endif
 
     munmap(osds, sizeof(*osds) * MAX_OSD);

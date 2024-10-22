@@ -53,6 +53,10 @@
         "ratio": "c",
         "type_traits": "c",
         "hi_math.h": "c",
-        "cstdlib": "c"
+        "cstdlib": "c",
+        "xlib.h": "c",
+        "stdbool.h": "c",
+        "xutil.h": "c",
+        "xatom.h": "c"
     }
 }
