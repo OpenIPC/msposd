@@ -1,7 +1,5 @@
 #pragma once
-#if __SIGMASTAR__  
-#include <bits/stdint-uintn.h>
-#endif
+#include <stdint.h>
 #include "../msp/msp.h"
 
 #define MAX_ENTRIES 100  // Maximum number of frequency-channel pairs to store
