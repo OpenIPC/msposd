@@ -1,0 +1,62 @@
+name: Build
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - '*'
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          sudo apt-get update
+          DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC sudo apt-get -y install git make wget gcc libevent-dev libcsfml-dev file g++ cpio unzip rsync bc bzip2
+          ./build.sh goke
+          ./build.sh hisi
+          ./build.sh star6b0
+          ./build.sh star6e
+          ./build.sh x86
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-results
+          path: |
+            msposd_goke
+            msposd_hisi
+            msposd_star6b0
+            msposd_star6e
+            msposd_x86
+
+      - name: Versioned release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            msposd_goke
+            msposd_hisi
+            msposd_star6b0
+            msposd_star6e
+            msposd_x86
+
+      - name: Upload latest
+        if: github.event_name != 'pull_request' && startsWith(github.ref, 'main')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          files: |
+            msposd_goke
+            msposd_hisi
+            msposd_star6b0
+            msposd_star6e
+            msposd_x86
