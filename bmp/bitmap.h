@@ -138,6 +138,11 @@ typedef struct MI_RGN_PaletteTable_s
         uint16_t* destBitmap);
 
 
+    void convertRGBAToARGB(
+        uint8_t* srcBitmap, uint32_t width, uint32_t height, 
+        uint32_t* destBitmap);
+
+
     void convertBitmap1555ToI4_Works_blurry(
         uint16_t* srcBitmap, uint32_t width, uint32_t height, 
         uint8_t* destBitmap, MI_RGN_PaletteTable_t* paletteTable);
@@ -163,6 +168,12 @@ typedef struct MI_RGN_PaletteTable_s
         uint16_t* destBitmap, uint32_t destWidth, uint32_t destHeight,
         uint32_t srcX, uint32_t srcY, uint32_t width, uint32_t height,
         uint32_t destX, uint32_t destY);
+
+    void copyRectRGBA8888(
+    uint32_t* srcBitmap, uint32_t srcWidth, uint32_t srcHeight,
+    uint32_t* destBitmap, uint32_t destWidth, uint32_t destHeight,
+    uint32_t srcX, uint32_t srcY, uint32_t width, uint32_t height,
+    uint32_t destX, uint32_t destY);
 
     void copyRectI8(
         uint8_t* srcBitmap, uint32_t srcWidth, uint32_t srcHeight,

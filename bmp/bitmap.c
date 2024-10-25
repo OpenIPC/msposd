@@ -905,6 +905,36 @@ void copyRectARGB1555(
     }
 }
 
+ 
+void copyRectRGBA8888(
+    uint32_t* srcBitmap, uint32_t srcWidth, uint32_t srcHeight,
+    uint32_t* destBitmap, uint32_t destWidth, uint32_t destHeight,
+    uint32_t srcX, uint32_t srcY, uint32_t width, uint32_t height,
+    uint32_t destX, uint32_t destY)
+{
+    // Bounds checking
+    if (srcX + width > srcWidth || srcY + height > srcHeight ||
+        destX + width > destWidth || destY + height > destHeight) {
+        // Handle error: the rectangle is out of bounds
+        printf("Error copyRectRGBA8888 to %d : %d\n", destX, destY);
+        return;
+    }
+
+    // Calculate the width of the rectangle in bytes (4 bytes per pixel for RGBA8888)
+    uint32_t rowSizeInBytes = width * sizeof(uint32_t);
+    rowSizeInBytes = getRowStride(width, 32); // 32 bits per pixel for RGBA8888
+
+    for (uint32_t y = 0; y < height; ++y) {
+        // Calculate the source and destination pointers for the current row
+        uint32_t* srcPtr = srcBitmap + (srcY + y) * srcWidth + srcX;
+        uint32_t* destPtr = destBitmap + (destY + y) * destWidth + destX;
+
+        // Use memcpy to copy the entire row
+        memcpy(destPtr, srcPtr, rowSizeInBytes);
+    }
+}
+
+
 /*
 void copyRectI8Slow(
     uint8_t* srcBitmap, uint32_t srcWidth, uint32_t srcHeight,
@@ -1753,7 +1783,8 @@ void convertRGBAToARGB1555(
             uint16_t pixel = 0;
 
             // Set alpha bit (1 bit)
-            if (a > 127) {  // Assuming any alpha value above 127 is considered opaque
+            if (a > 199) {  // Assuming any alpha value above 127 is considered opaque
+                                // Needs  to be higher
                 pixel |= 0x8000;  // Set the alpha bit (1 << 15)
             }
 
@@ -1765,6 +1796,33 @@ void convertRGBAToARGB1555(
             // Write the pixel to the destination bitmap
             uint32_t destIndex = u32Y * (u32Stride / 2) + u32X;  // 2 bytes per pixel in ARGB1555
             destBitmap[destIndex] = pixel;
+        }
+    }
+}
+
+void convertRGBAToARGB(
+    uint8_t* srcBitmap, uint32_t width, uint32_t height, 
+    uint32_t* destBitmap)
+{
+    // Iterate over each pixel in the image
+    for (uint32_t y = 0; y < height; ++y) {
+        for (uint32_t x = 0; x < width; ++x) {
+            uint32_t srcIndex = (y * width + x) * 4;  // Calculate the source index (4 bytes per pixel)
+
+            // Extract RGBA values
+            uint8_t r = srcBitmap[srcIndex + 0];
+            uint8_t g = srcBitmap[srcIndex + 1];
+            uint8_t b = srcBitmap[srcIndex + 2];
+            uint8_t a = srcBitmap[srcIndex + 3];
+            if (a<222)
+                a=0;
+
+            // Convert to ARGB format (store alpha first)
+            uint32_t argbPixel = (a << 24) | (r << 16) | (g << 8) | b;
+
+            // Write the pixel to the destination bitmap
+            uint32_t destIndex = y * width + x;  // Direct index for 32-bit ARGB
+            destBitmap[destIndex] = argbPixel;
         }
     }
 }

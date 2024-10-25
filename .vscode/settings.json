@@ -57,6 +57,8 @@
         "xlib.h": "c",
         "stdbool.h": "c",
         "xutil.h": "c",
-        "xatom.h": "c"
+        "xatom.h": "c",
+        "region.h": "c",
+        "cairo-xlib.h": "c"
     }
 }

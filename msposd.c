@@ -40,11 +40,17 @@ bool vtxMenuActive = false;
 bool armed = true; // assume armed until we are told otherwise from the fc
 bool AbortNow=false;
 bool verbose = false;
-bool ParseMSP = false;
+bool ParseMSP = true;
+bool DrawOSD = false;
 bool mspVTXenabled = false;
 bool vtxMenuEnabled = false;
 
+
 int serial_fd = 0;
+
+int in_sock = 0;
+
+int MSPUDPPort=0;
 
 int MSP_PollRate=20;
 
@@ -663,11 +669,20 @@ static long ttl_bytes=0;
 static long stat_bytes=0;
 static long stat_pckts=0;
 static long last_stat=0;
-
+ 
+//handles both UART and Serial read
 static void serial_read_cb(struct bufferevent *bev, void *arg)
 {
 	if (AbortNow)//Abort request by user pending...
 		return;
+
+	int fd = bufferevent_getfd(bev); // Get the file descriptor associated with the event
+    if (fd == serial_fd)       
+        {}//printf("Reading from serial port...\n");        
+     else if (fd == in_sock)    
+        {}//printf("Reading from UDP socket...\n");       
+    
+
 	struct evbuffer *input = bufferevent_get_input(bev);
 	int packet_len, in_len;
 	struct event_base *base = arg;	
@@ -684,8 +699,13 @@ static void serial_read_cb(struct bufferevent *bev, void *arg)
 			if (stat_screen_refresh_count==0)
 				stat_screen_refresh_count++;
 			if (verbose){
-				printf("UART Events:%u MessagesTTL:%u AttitMSGs:%u(%dms) Bytes/S:%u FPS:%u(skipped:%d), avg time per frame ms:%d | %d | %d | \n",stat_pckts,stat_msp_msgs,stat_msp_msg_attitude, (stat_attitudeDelay / (stat_msp_msg_attitude+1) ),
-					stat_bytes, stat_screen_refresh_count, stat_skipped_frames, stat_draw_overlay_1/stat_screen_refresh_count,stat_draw_overlay_2/stat_screen_refresh_count,stat_draw_overlay_3/stat_screen_refresh_count);
+				if (DrawOSD)
+				printf("UART Events:%u MessagesTTL:%u AttitMSGs:%u(%dms) Bytes/S:%u FPS:%u of %u (skipped:%d), AvgFrameLoad ms:%d | %d | %d | \n",stat_pckts,stat_msp_msgs,stat_msp_msg_attitude, (stat_attitudeDelay / (stat_msp_msg_attitude+1) ),
+					stat_bytes, stat_screen_refresh_count, stat_MSP_draw_complete_count, stat_skipped_frames, stat_draw_overlay_1/stat_screen_refresh_count,stat_draw_overlay_2/stat_screen_refresh_count,stat_draw_overlay_3/stat_screen_refresh_count);
+					else
+				printf("UART Events:%u MessagesTTL:%u AttitMSGs:%u(%dms) Bytes/S Recvd:%u Sent:%u, Screen FPS:%u  MSP_FPS:%u  MSP_UDP_Pckts:%u, AvgFrameLoad ms:%d | %d | \n",stat_pckts,stat_msp_msgs,stat_msp_msg_attitude, (stat_attitudeDelay / (stat_msp_msg_attitude+1) ),
+					stat_bytes, stat_MSPBytesSent, stat_screen_refresh_count, stat_MSP_draw_complete_count,stat_UDP_MSPframes, stat_draw_overlay_1/stat_screen_refresh_count,stat_draw_overlay_3/stat_screen_refresh_count);
+
 				showchannels(18);
 			}
 			stat_screen_refresh_count=0;
@@ -697,14 +717,21 @@ static void serial_read_cb(struct bufferevent *bev, void *arg)
 			stat_draw_overlay_2=0;
 			stat_draw_overlay_3=0;
 			stat_skipped_frames=0;
+			stat_MSPBytesSent=0;
+			stat_MSP_draw_complete_count=0;
+			stat_UDP_MSPframes=0;
     	}
 		stat_pckts++;
 		stat_bytes+=packet_len;
 		ttl_packets++;
 		ttl_bytes+=packet_len;
 		if (ParseMSP){
+			//Test to do RAW MSP forward here
+			//sendto(out_sock, data, packet_len, 0, (struct sockaddr *)&sin_out, sizeof(sin_out));
 			for(int i=0;i<packet_len;i++)
 				msp_process_data(rx_msp_state, data[i]);
+			
+			
 			//continue;
 		}else{
 			if (!version_shown && ttl_packets%10==3)//If garbage only, give some feedback do diagnose
@@ -715,7 +742,8 @@ static void serial_read_cb(struct bufferevent *bev, void *arg)
 				(struct sockaddr *)&sin_out,
 				sizeof(sin_out)) == -1) {
 						perror("sendto()");
-						event_base_loopbreak(base);
+						//event_base_loopbreak(base);
+						return false;
 				}
 			}
 
@@ -723,6 +751,7 @@ static void serial_read_cb(struct bufferevent *bev, void *arg)
 			if (aggregate>0 || rc_channel_mon_enabled)//if no RC channel control needed, only forward the data
 				process_mavlink(data,packet_len, arg);//Let's try to parse the stream		
 		}
+
 		evbuffer_drain(input, packet_len);		
 	}
 }
@@ -918,15 +947,38 @@ static int handle_data(const char *port_name, int baudrate,
 	struct event *sig_int = NULL, *in_ev = NULL, *temp_tmr = NULL, *msp_tmr=NULL;
 	struct event *sig_term;
 	int ret = EXIT_SUCCESS;
+	 
+	
 
-	serial_fd = open(port_name, O_RDWR | O_NOCTTY);
-	if (serial_fd < 0) {
-		printf("Error while openning port %s: %s\n", port_name,
-		       strerror(errno));
-		return EXIT_FAILURE;
-	};
-	evutil_make_socket_nonblocking(serial_fd);
+	if (strlen(port_name) > 0 && port_name[0] >= '0' && port_name[0] <= '9') {//Read from UDP
 
+		struct sockaddr_in sin_in = {
+		.sin_family = AF_INET,
+		};
+		if (!parse_host_port(port_name, (struct port_name *)&sin_in.sin_addr.s_addr,
+					&sin_in.sin_port))
+			goto err;
+
+		if (sin_in.sin_port>0)
+			in_sock=socket(AF_INET, SOCK_DGRAM, 0);
+
+		if (in_sock>0 && bind(in_sock, (struct sockaddr *)&sin_in, sizeof(sin_in))) {// we may not need this
+			perror("bind()");
+			exit(EXIT_FAILURE);
+		}
+		if(in_sock>0)
+			printf("Listening UDP on %s...\n", port_name);
+
+	}else{//Read from UART
+		serial_fd = open(port_name, O_RDWR | O_NOCTTY);
+		if (serial_fd < 0) {
+			printf("Error while openning port %s: %s\n", port_name,
+				strerror(errno));
+			return EXIT_FAILURE;
+		};
+		evutil_make_socket_nonblocking(serial_fd);
+		printf("Listening UART on %s...\n", port_name);
+	}
 	struct termios options;
 	tcgetattr(serial_fd, &options);
 	cfsetspeed(&options, speed_by_value(baudrate));
@@ -961,7 +1013,7 @@ static int handle_data(const char *port_name, int baudrate,
 		goto err;
 
 
-	printf("Listening on %s...\n", port_name);
+	 
 
 	struct sockaddr_in sin_in = {
 		.sin_family = AF_INET,
@@ -983,13 +1035,27 @@ static int handle_data(const char *port_name, int baudrate,
 	//Test inject a simple packet to test malvink communication Camera to Ground
 	signal(SIGUSR1, sendtestmsg);
 
-	serial_bev = bufferevent_socket_new(base, serial_fd, 0);
-	/* Trigger the read callback only whenever there is at least 16 bytes of data in the buffer. */
-	//So that the read event is not triggered so often
-    bufferevent_setwatermark(serial_bev, EV_READ, 16, 0);
-	bufferevent_setcb(serial_bev, serial_read_cb, NULL, serial_event_cb,
-			  base);
-	bufferevent_enable(serial_bev, EV_READ);	 
+	if (serial_fd>0){//if UART opened...
+		serial_bev = bufferevent_socket_new(base, serial_fd, 0);
+
+		/* Trigger the read callback only whenever there is at least 16 bytes of data in the buffer. */
+		//So that the read event is not triggered so often
+		bufferevent_setwatermark(serial_bev, EV_READ, 16, 0);
+		bufferevent_setcb(serial_bev, serial_read_cb, NULL, serial_event_cb,
+				base);
+		bufferevent_enable(serial_bev, EV_READ);	 
+	}
+
+
+	if (in_sock>0){
+		//in_ev = event_new(base, in_sock, EV_READ | EV_PERSIST, in_read, NULL);
+		//event_add(in_ev, NULL);
+		 // Using bufferevent for the UDP socket too, for a unified callback
+        struct bufferevent *udp_bev = bufferevent_socket_new(base, in_sock, 0);
+        bufferevent_setcb(udp_bev, serial_read_cb, NULL, NULL, base);
+        bufferevent_enable(udp_bev, EV_READ | EV_PERSIST);
+	}
+
 
 
     // Set up an event for stdin (file descriptor 0)
@@ -1012,7 +1078,7 @@ static int handle_data(const char *port_name, int baudrate,
 	}
 
    //MSP_PollRate
-	if (ParseMSP&& msp_tmr==NULL){
+	if (ParseMSP && msp_tmr==NULL && serial_fd>0){ //Only if we are on Cam, on ground no need to poll
 		msp_tmr = event_new(base, -1, EV_PERSIST, poll_msp, &serial_fd);
 		 // Set poll interval to 50 milliseconds if pollrate is 20
     	struct timeval interval = {
@@ -1102,7 +1168,7 @@ int main(int argc, char **argv)
 	while ((opt = getopt_long_only(argc, argv, "", long_options, &long_index)) != -1) {
 		switch (opt) {
 		case 'm':
-			port_name = optarg;
+			port_name = optarg;			
 			break;
 		case 'b':
 			baudrate = atoi(optarg);
@@ -1178,12 +1244,10 @@ int main(int argc, char **argv)
 			verbose = true;
 			printf("Verbose mode!");
 			break;	
-
 		case 'd':
-			ParseMSP = true;
+			DrawOSD=true;
 			printf("MSP to OSD mode!");
 			break;			
-
 		case 'h':
 		default:
 			print_usage();
@@ -1196,7 +1260,8 @@ int main(int argc, char **argv)
  		//msp_process_data(rx_msp_state, serial_data[i]);
 		rx_msp_state = calloc(1, sizeof(msp_state_t));   
 		rx_msp_state->cb = &rx_msp_callback;  
-		InitMSPHook();
+		//if (DrawOSD)
+		InitMSPHook();//We need to create screen overlay if we gonna show message on screen
 
 		if (false){//Forwarding MSP enabled 
 		//this opens the UDP port so that it can be used ith file descriptors
