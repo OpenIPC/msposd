@@ -9,7 +9,7 @@
             "program": "${workspaceFolder}/msposd",
             "args": [                
                 "--master",
-                "192.168.1.20:14550",
+                "127.0.0.1:14550",
                 "--baudrate",
                 "115200",
                 "--osd",

@@ -700,10 +700,10 @@ static void serial_read_cb(struct bufferevent *bev, void *arg)
 				stat_screen_refresh_count++;
 			if (verbose){
 				if (DrawOSD)
-				printf("UART Events:%u MessagesTTL:%u AttitMSGs:%u(%dms) Bytes/S:%u FPS:%u of %u (skipped:%d), AvgFrameLoad ms:%d | %d | %d | \n",stat_pckts,stat_msp_msgs,stat_msp_msg_attitude, (stat_attitudeDelay / (stat_msp_msg_attitude+1) ),
+				printf("UART Events:%u MessagesTTL:%u AttitMSGs:%u(%dms) Bytes/S:%u FPS:%u of %u (skipped:%d), AvgFrameLoad ms:%d | %d | %d | \r\n",stat_pckts,stat_msp_msgs,stat_msp_msg_attitude, (stat_attitudeDelay / (stat_msp_msg_attitude+1) ),
 					stat_bytes, stat_screen_refresh_count, stat_MSP_draw_complete_count, stat_skipped_frames, stat_draw_overlay_1/stat_screen_refresh_count,stat_draw_overlay_2/stat_screen_refresh_count,stat_draw_overlay_3/stat_screen_refresh_count);
 					else
-				printf("UART Events:%u MessagesTTL:%u AttitMSGs:%u(%dms) Bytes/S Recvd:%u Sent:%u, Screen FPS:%u  MSP_FPS:%u  MSP_UDP_Pckts:%u, AvgFrameLoad ms:%d | %d | \n",stat_pckts,stat_msp_msgs,stat_msp_msg_attitude, (stat_attitudeDelay / (stat_msp_msg_attitude+1) ),
+				printf("UART Events:%u MessagesTTL:%u AttitMSGs:%u(%dms) Bytes/S Recvd:%u Sent:%u, Screen FPS:%u  MSP_FPS:%u  MSP_UDP_Pckts:%u, AvgFrameLoad ms:%d | %d | \r\n",stat_pckts,stat_msp_msgs,stat_msp_msg_attitude, (stat_attitudeDelay / (stat_msp_msg_attitude+1) ),
 					stat_bytes, stat_MSPBytesSent, stat_screen_refresh_count, stat_MSP_draw_complete_count,stat_UDP_MSPframes, stat_draw_overlay_1/stat_screen_refresh_count,stat_draw_overlay_3/stat_screen_refresh_count);
 
 				showchannels(18);
@@ -1090,10 +1090,9 @@ static int handle_data(const char *port_name, int baudrate,
 	}
 
 	event_base_dispatch(base);
-
 err:
 	
-if (temp_tmr) {
+if (temp_tmr ) {
 		event_del(temp_tmr);
 		event_free(temp_tmr);
 	}
@@ -1168,7 +1167,8 @@ int main(int argc, char **argv)
 	while ((opt = getopt_long_only(argc, argv, "", long_options, &long_index)) != -1) {
 		switch (opt) {
 		case 'm':
-			port_name = optarg;			
+			port_name = optarg;	
+			printf("Listen on port :%s\n",port_name);		
 			break;
 		case 'b':
 			baudrate = atoi(optarg);

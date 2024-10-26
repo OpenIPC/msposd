@@ -1319,10 +1319,11 @@ void convertRGBAToI4(
     }
 }
 
-uint16_t Transform_OVERLAY_WIDTH;
-uint16_t Transform_OVERLAY_HEIGHT;
-float Transform_Roll;
-float Transform_Pitch;
+
+    uint16_t Transform_OVERLAY_WIDTH;
+    uint16_t Transform_OVERLAY_HEIGHT;
+    float Transform_Roll;
+    float Transform_Pitch;
 
 void rotate_point(Point original, Point img_center, double angle_degrees, Point *rotated) {
     // Translate the point to move the center to the origin

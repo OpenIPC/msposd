@@ -9,6 +9,7 @@
 #include <string.h>
 #include <time.h>
 #include <math.h>
+#include <libgen.h> // For dirname()
 
 
 #include "osd/msp/msp.h"
@@ -540,6 +541,9 @@ static bool osd_msg_enabled = false;
 //This will be where we will copy font icons and then pass to Display API  to render over video.
 BITMAP bmpBuff;
 
+//Buffer to hold converted RGBA data to work with Cairo
+unsigned char* bmp_x86=NULL;
+
 /// @brief Pointer to the canvas memory with bmp data
 void* directBmp;
 bool useDirectBMPBuffer=false;
@@ -549,7 +553,31 @@ int y_start = 500;
 int x_end = 1300;
 int y_end = 500;
 
+ uint32_t getcolor(uint8_t index){ 
+    MI_RGN_PaletteElement_t element = g_stPaletteTable.astElement[index];
+    uint32_t rgba = (element.u8Red << 24) | (element.u8Green << 16) | (element.u8Blue<< 8) | element.u8Alpha;
+
+ }
+
+ void LineDirect(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y0, int x1, int y1, uint8_t color, int thickness) {
+#ifdef _x86
+
+    drawLine_x86(x0,  y0,  x1,  y1,  getcolor(color),  thickness, false);
+#else
+    drawLineI4( bmpData,  width,  height,  x0,  y0,  x1,  y1,  color,  thickness);
+#endif    
+ }
  
+
+void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1, uint8_t color, int thickness) {
+#ifdef _x86
+    drawLine_x86(posX0,  posY0,  posX1,  posY1,  getcolor(color),  thickness, true);
+#else
+    drawLine( bmpData, posX0,  posY0,  posX1,  posY1,  color,  thickness);
+#endif
+}
+
+
  static void draw_AHI(){
       
     int OffsY= sin((last_pitch/10) * (M_PI / 180.0))*400;
@@ -575,7 +603,7 @@ int y_end = 500;
         linethickness=3;
     }
 
-    drawLine(bmpBuff.pData, img_center.x-linewidth/2 , img_center.y, img_center.x+linewidth/2, img_center.y, COLOR_WHITE, linethickness);
+    LineTranspose(bmpBuff.pData, img_center.x-linewidth/2 , img_center.y, img_center.x+linewidth/2, img_center.y, COLOR_WHITE, linethickness);
 
      //drawRectangleI4(bmpBuff.pData, 600 , 400 , 700 , 6, COLOR_GREEN, 1);
 
@@ -583,14 +611,15 @@ int y_end = 500;
 
  /// @brief Ugly implementation. To do : clear from bmp format dependant code
  static void draw_Ladder(){
-    if (PIXEL_FORMAT_DEFAULT!=PIXEL_FORMAT_I4)
-        return;
+    //if (PIXEL_FORMAT_DEFAULT!=PIXEL_FORMAT_I4)
+    //    return;
               
-    
-    //Point img_center = {OVERLAY_WIDTH/2, OVERLAY_HEIGHT/2};  // Center of the image (example)
-    //Point original_point = {600, 500};  // Example point
-    //Point original_point2 = {1300, 500};  // Example point
 
+
+    Transform_OVERLAY_WIDTH=OVERLAY_WIDTH;
+    Transform_OVERLAY_HEIGHT=OVERLAY_HEIGHT;
+    Transform_Pitch=last_pitch/10;
+    Transform_Roll=-last_roll/10; 
 
     int TiltY= - 150;//pixels offset on the vertical, negative value means up, this is camera nose-down angle in pixels
     //to do, make this in degrees
@@ -636,34 +665,34 @@ int y_end = 500;
         // Line always drawn in the center to have some orientation where the center is
         int line_w = 100 * horizonWidth * 0.2;
         //const auto circle_r= 100*horizonWidth * 0.05;
-        //painter->drawLine(width()/2-(line_w/2),height()/2,width()/2+(line_w/2),height()/2);
+        //painter->LineTranspose(width()/2-(line_w/2),height()/2,width()/2+(line_w/2),height()/2);
         //painter->drawEllipse(QPointF(width()/2,height()/2),circle_r,circle_r);
-         //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y,px+width_ladder,pos_y, COLOR_GREEN);
+         //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y,px+width_ladder,pos_y, COLOR_GREEN);
         
-         //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-2,px+20,pos_y-2, COLOR_WHITE);         
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px-20,pos_y-3,px+20,pos_y-3, COLOR_GRAY_Light,1);    
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px-20,pos_y-4,px+20,pos_y-4, COLOR_GRAY_Light,1);
-         //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-5,px+20,pos_y-5, COLOR_WHITE);
+         //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-2,px+20,pos_y-2, COLOR_WHITE);         
+         LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px-20,pos_y-3,px+20,pos_y-3, COLOR_GRAY_Light,1);    
+         LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px-20,pos_y-4,px+20,pos_y-4, COLOR_GRAY_Light,1);
+         //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-5,px+20,pos_y-5, COLOR_WHITE);
         
 
-         //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y+2,px+20,pos_y+2, COLOR_WHITE);
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px-20,pos_y+3,px+20,pos_y+3, COLOR_GRAY_Light,1);
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px-20,pos_y+4,px+20,pos_y+4, COLOR_GRAY_Light,1);
-         //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y+5,px+20,pos_y+5, COLOR_WHITE);
+         //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y+2,px+20,pos_y+2, COLOR_WHITE);
+         LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px-20,pos_y+3,px+20,pos_y+3, COLOR_GRAY_Light,1);
+         LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px-20,pos_y+4,px+20,pos_y+4, COLOR_GRAY_Light,1);
+         //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y+5,px+20,pos_y+5, COLOR_WHITE);
 
-         //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-2,px+width_ladder,pos_y-2, COLOR_WHITE);
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-3,px+width_ladder+20,pos_y-3, COLOR_GRAY_Light,1);
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-4,px+width_ladder+20,pos_y-4, COLOR_GRAY_Light,1);
-         //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-5,px+width_ladder,pos_y-5, COLOR_WHITE);
+         //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-2,px+width_ladder,pos_y-2, COLOR_WHITE);
+         LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-3,px+width_ladder+20,pos_y-3, COLOR_GRAY_Light,1);
+         LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-4,px+width_ladder+20,pos_y-4, COLOR_GRAY_Light,1);
+         //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-5,px+width_ladder,pos_y-5, COLOR_WHITE);
 
-         //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+2,px+width_ladder,pos_y+2, COLOR_WHITE);
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+3,px+width_ladder+20,pos_y+3, COLOR_GRAY_Light,1);
-         drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+4,px+width_ladder+20,pos_y+4, COLOR_GRAY_Light,1);
-         //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+5,px+width_ladder,pos_y+5, COLOR_WHITE);
+         //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+2,px+width_ladder,pos_y+2, COLOR_WHITE);
+         LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+3,px+width_ladder+20,pos_y+3, COLOR_GRAY_Light,1);
+         LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+4,px+width_ladder+20,pos_y+4, COLOR_GRAY_Light,1);
+         //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+5,px+width_ladder,pos_y+5, COLOR_WHITE);
 
 
-         //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder,pos_y,px+width_ladder,pos_y, COLOR_GREEN);
-         //drawLineI4(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder,pos_y,px+width_ladder,pos_y, COLOR_GREEN);
+         //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder,pos_y,px+width_ladder,pos_y, COLOR_GREEN);
+         //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder,pos_y,px+width_ladder,pos_y, COLOR_GREEN);
     }
 
     int ratio = horizonSpacing; //pixels per degree
@@ -724,19 +753,19 @@ int y_end = 500;
 
                     //left upper cap
                     //drawRectangleI4(bmpBuff.pData, px , y , stroke_s , width_ladder/24, m_color,subline_thickness);                    
-                    drawLine(bmpBuff.pData, px, y, px, y+width_ladder/24 , m_color, subline_thickness+1); // Top side    
+                    LineTranspose(bmpBuff.pData, px, y, px, y+width_ladder/24 , m_color, subline_thickness+1); // Top side    
 
                     //left upper line
                     //drawRectangleI4(bmpBuff.pData, px , y , width_ladder/3 , stroke_s, m_color,subline_thickness);
-                    drawLine(bmpBuff.pData, px, y, px + width_ladder/3, y , m_color, subline_thickness); // Top side    
+                    LineTranspose(bmpBuff.pData, px, y, px + width_ladder/3, y , m_color, subline_thickness); // Top side    
 
                     //right upper cap
                     //drawRectangleI4(bmpBuff.pData, px+width_ladder-2 , y , px+width_ladder-2 + stroke_s , width_ladder/24, m_color,subline_thickness);
-                    drawLine(bmpBuff.pData, px+width_ladder-2 , y , px+width_ladder-2, y+width_ladder/24 , m_color, subline_thickness+1); // Top side    
+                    LineTranspose(bmpBuff.pData, px+width_ladder-2 , y , px+width_ladder-2, y+width_ladder/24 , m_color, subline_thickness+1); // Top side    
 
                     //right upper line
                     //drawRectangleI4(bmpBuff.pData, px+width_ladder*2/3 , y , width_ladder/3 , stroke_s, m_color,subline_thickness);
-                    drawLine(bmpBuff.pData, px+width_ladder*2/3 , y  , (px+width_ladder*2/3) + width_ladder/3 , y , m_color, subline_thickness); // Top side    
+                    LineTranspose(bmpBuff.pData, px+width_ladder*2/3 , y  , (px+width_ladder*2/3) + width_ladder/3 , y , m_color, subline_thickness); // Top side    
 
 
 
@@ -749,36 +778,36 @@ int y_end = 500;
                     //left to right
                     //left lower cap                    
                     //drawRectangleI4(bmpBuff.pData, px, y-(width_ladder/24)+2 , stroke_s , width_ladder/24, m_color,subline_thickness);
-                    drawLine(bmpBuff.pData, px, y-(width_ladder/24)+2 , px , y-(width_ladder/24)+2  + width_ladder/24 , m_color, subline_thickness); // Top side    
+                    LineTranspose(bmpBuff.pData, px, y-(width_ladder/24)+2 , px , y-(width_ladder/24)+1  + width_ladder/24 , m_color, subline_thickness); // Top side    
 
                     //1l                    
                     //drawRectangleI4(bmpBuff.pData, px , y , width_ladder/12 , stroke_s, m_color,subline_thickness);
-                    drawLine(bmpBuff.pData, px , y , px + width_ladder/12 , y , m_color, subline_thickness); // Top side    
+                    LineTranspose(bmpBuff.pData, px , y , px + width_ladder/12 , y , m_color, subline_thickness); // Top side    
 
                     //2l                    
                     //drawRectangleI4(bmpBuff.pData, px+(width_ladder/12)*1.5 , y , width_ladder/12 , stroke_s, m_color,subline_thickness);
-                    drawLine(bmpBuff.pData, px+(width_ladder/12)*1.5 , y , px+(width_ladder/12)*1.5 + width_ladder/12 , y , m_color, subline_thickness); // Top side    
+                    LineTranspose(bmpBuff.pData, px+(width_ladder/12)*1.5 , y , px+(width_ladder/12)*1.5 + width_ladder/12 , y , m_color, subline_thickness); // Top side    
 
                     //3l
                     //drawRectangleI4(bmpBuff.pData, px+(width_ladder/12)*3 , y , width_ladder/12 , stroke_s, m_color,subline_thickness);
-                    drawLine(bmpBuff.pData, px+(width_ladder/12)*3 , y ,px+(width_ladder/12)*3  +  width_ladder/12 , y , m_color, subline_thickness); // Top side    
+                    LineTranspose(bmpBuff.pData, px+(width_ladder/12)*3 , y ,px+(width_ladder/12)*3  +  width_ladder/12 , y , m_color, subline_thickness); // Top side    
 
                     //right lower cap
                     //drawRectangleI4(bmpBuff.pData, px+width_ladder-2 , y-(width_ladder/24)+2 , stroke_s , width_ladder/24, m_color,subline_thickness);
-                    drawLine(bmpBuff.pData, px+width_ladder-2 , y-(width_ladder/24)+2 , px+width_ladder-2 ,   y-(width_ladder/24)+2 + width_ladder/24 , m_color, subline_thickness); // Top side    
+                    LineTranspose(bmpBuff.pData, px+width_ladder-2 , y-(width_ladder/24)+2 , px+width_ladder-2 ,   y-(width_ladder/24)+1 + width_ladder/24 , m_color, subline_thickness); // Top side    
 
                     //1r ///spacing on these might be a bit off
                     //drawRectangleI4(bmpBuff.pData, px+(width_ladder/12)*8 , y , width_ladder/12 , stroke_s, m_color,subline_thickness);
-                    drawLine(bmpBuff.pData, px+(width_ladder/12)*8 , y , px+(width_ladder/12)*8  + width_ladder/12 , y , m_color, subline_thickness); // Top side    
+                    LineTranspose(bmpBuff.pData, px+(width_ladder/12)*8 , y , px+(width_ladder/12)*8  + width_ladder/12 , y , m_color, subline_thickness); // Top side    
 
 
                     //2r ///spacing on these might be a bit off
                     //drawRectangleI4(bmpBuff.pData, px+(width_ladder/12)*9.5 , y , width_ladder/12 , stroke_s, m_color,subline_thickness);
-                    drawLine(bmpBuff.pData,  px+(width_ladder/12)*9.5 , y , px+(width_ladder/12)*9.5 + width_ladder/12 , y , m_color, subline_thickness); // Top side    
+                    LineTranspose(bmpBuff.pData,  px+(width_ladder/12)*9.5 , y , px+(width_ladder/12)*9.5 + width_ladder/12 , y , m_color, subline_thickness); // Top side    
 
                     //3r  ///spacing on these might be a bit off tried a decimal here
                     //drawRectangleI4(bmpBuff.pData, px+(width_ladder*.9166) , y , width_ladder/12 , stroke_s, m_color,subline_thickness);
-                    drawLine(bmpBuff.pData,  px+(width_ladder*.9166) , y , px+(width_ladder*.9166)  + width_ladder/12 , y , m_color, subline_thickness); // Top side    
+                    LineTranspose(bmpBuff.pData,  px+(width_ladder*.9166) , y , px+(width_ladder*.9166)  + width_ladder/12 , y , m_color, subline_thickness); // Top side    
                     
                     
 
@@ -806,10 +835,25 @@ int y_end = 500;
                     // Calculate the X position for the current rectangle
                     int rect_x = start_x + i * (rect_width + spacing) + spacing/2;                    
                     //drawRectangleI4(bmpBuff.pData, rect_x, y, rect_width, 0, COLOR_WHITE, 4);//border with AA
-                    drawLine(bmpBuff.pData, rect_x, y, rect_x + rect_width, y, COLOR_WHITE, 3);
+                    LineTranspose(bmpBuff.pData, rect_x, y, rect_x + rect_width, y, COLOR_WHITE, 3);
                     //drawFilledRectangleI4AA(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, rect_x, y, rect_width, rect_height);
                     
                 }
+
+                int LAST_ROLL = -5; // Example integer value (change as needed)
+                char buffer[6]; // Enough space for "+/-", two digits, the degree symbol, and the null terminator
+
+                // Format the LAST_ROLL value into the buffer with the specified format
+                // %+02d: '+' sign for positive numbers, '0' for leading zero, '2' for width.
+                // \xB0: ASCII code for the degree symbol.
+                if (-10 < last_pitch && last_pitch <10)
+                sprintf(buffer, "%+0.1f°", last_pitch / 10.0);
+                else
+                sprintf(buffer, "%+02d°", last_pitch/10);
+                
+                int osd_font_size=20;
+
+                drawText_x86(buffer, start_x + width_ladder*2.5 - spacing/3, y + osd_font_size/2 - 4, getcolor(COLOR_WHITE), osd_font_size, true);
 
                 if (AHI_Enabled==3){//Draw home
                     uint32_t xHome, yHome;
@@ -862,11 +906,18 @@ int y_end = 500;
                     xR = (xR + 3) & ~3;//Round up to 4, otherwise I4 bitmap image copy distorts the glyph !!!
 
                     if (xR>0 && xR<OVERLAY_WIDTH && yR>0 && yR<OVERLAY_HEIGHT){
-                        copyRectI4(btmp.pData,btmp.u32Width,btmp.u32Height,
-                                bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
-                                s_left,s_top,s_width,s_height,
-                                xR,yR);
+                        if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4)   
+                            copyRectI4(btmp.pData,btmp.u32Width,btmp.u32Height,
+                                    bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
+                                    s_left,s_top,s_width,s_height,
+                                    xR,yR);
+                        else if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_8888)   
+                            copyRectRGBA8888(btmp.pData,btmp.u32Width,btmp.u32Height,
+                                    bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
+                                    s_left,s_top,s_width,s_height,
+                                    xR,yR);  
                     }
+                    
 
                 }
 
@@ -1315,15 +1366,17 @@ static void draw_screenBMP(){
         }
     
         step2=get_time_ms();  
-        
+#ifndef _x86        
         if (AHI_Enabled==2)
             draw_AHI();
         
         if (AHI_Enabled==1 || AHI_Enabled>2)
             draw_Ladder();   
+#endif            
     }//if DrawOSD
-    else
-        step2=get_time_ms();  
+    else{
+        step2=get_time_ms();          
+    }
 
     //strcpy(osds[FULL_OVERLAY_ID].text,"$M $B Test");//"$M $B Test");
     DrawText();
@@ -1332,19 +1385,29 @@ static void draw_screenBMP(){
     uint64_t step3=get_time_ms();  
 #ifdef _x86
 
-    unsigned char* rgbaData = malloc(bmpBuff.u32Width * bmpBuff.u32Height * 4);  // Allocate memory for RGBA data    
+    if (bmp_x86==NULL)//lets cache it
+        bmp_x86 = malloc(bmpBuff.u32Width * bmpBuff.u32Height * 4);  // Allocate memory for RGBA data    
 
     if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_1555)          
-        Convert1555ToRGBA( bmpBuff.pData, rgbaData, bmpBuff.u32Width, bmpBuff.u32Height);    
+        Convert1555ToRGBA( bmpBuff.pData, bmp_x86, bmpBuff.u32Width, bmpBuff.u32Height);    
     else if (PIXEL_FORMAT_DEFAULT==4) //I8 one byte format
-        ConvertI8ToRGBA( bmpBuff.pData, rgbaData, bmpBuff.u32Width, bmpBuff.u32Height,&g_stPaletteTable);    
+        ConvertI8ToRGBA( bmpBuff.pData, bmp_x86, bmpBuff.u32Width, bmpBuff.u32Height,&g_stPaletteTable);    
     else if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4) //I4 half byte format
-        ConvertI4ToRGBA( bmpBuff.pData, rgbaData, bmpBuff.u32Width, bmpBuff.u32Height,&g_stPaletteTable);     
+        ConvertI4ToRGBA( bmpBuff.pData, bmp_x86, bmpBuff.u32Width, bmpBuff.u32Height,&g_stPaletteTable);     
     else if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_8888) //I4 half byte format
-        memcpy(rgbaData,bmpBuff.pData, bmpBuff.u32Width * bmpBuff.u32Height * 4);//Do not need to copy...         
-    
-    Render_x86(rgbaData,bmpBuff.u32Width, bmpBuff.u32Height);
-    free(rgbaData);   
+        //memcpy(bmp_x86,bmpBuff.pData, bmpBuff.u32Width * bmpBuff.u32Height * 4);//Do not need to copy...         
+        bmp_x86=bmpBuff.pData;
+
+    //ClearScreen_x86();
+    Render_x86(bmp_x86,bmpBuff.u32Width, bmpBuff.u32Height);
+
+    if (AHI_Enabled==2)
+            draw_AHI();        
+    if (AHI_Enabled==1 || AHI_Enabled>2)
+            draw_Ladder(); 
+    FlushDrawing_x86();
+
+    //free(bmp_x86);   
 
 #elif __GOKE__
 
@@ -1392,6 +1455,7 @@ static void clear_screen()
 {
     if (cntr++<0 )
         return ;
+    //ClearScreen_x86();
     //BetaFlight needs this. INAV can be configured to skip it
     if (font_pages>2 || (get_time_ms() - LastCleared)>2500) {//no faster than 0.5 per second
         memset(character_map, 0, sizeof(character_map));
@@ -1412,6 +1476,7 @@ static void draw_complete()
 {
     
     stat_MSP_draw_complete_count++;
+   
     draw_screenBMP();
 
 #ifdef _x86
@@ -1467,10 +1532,11 @@ unsigned char* loadPngToBMP(const char* filename, unsigned int* width, unsigned 
 
     if (PIXEL_FORMAT_DEFAULT==3)//I4
         convertRGBAToI4( pngData, *width , *height, bmpData, &g_stPaletteTable);
-    else if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_8888) 
+    else if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_8888){
        // memcpy(bmpData,pngData,bmpSize);
        convertRGBAToARGB( pngData, *width , *height, bmpData);
-    else      
+       premultiplyAlpha((uint32_t*) bmpData, *width, *height);
+    }else      
         convertRGBAToARGB1555( pngData, *width , *height, bmpData);
 
     // Clean up
@@ -1548,10 +1614,23 @@ int GetMajesticVideoConfig(int *Width){
     return height;
 }
  
-
+void getExecutablePath(char *buffer, size_t bufferSize) {
+    ssize_t len = readlink("/proc/self/exe", buffer, bufferSize - 1);
+    if (len != -1) {
+        buffer[len] = '\0';
+    } else {
+        fprintf(stderr, "Failed to determine executable path.\n");
+        exit(EXIT_FAILURE);
+    }
+}
 int majestic_width;
 int fd_mem;
 static void InitMSPHook(){
+
+    char executablePath[1024];
+    getExecutablePath(executablePath, sizeof(executablePath));    
+    char *executableDir = dirname(executablePath);
+
     memset(character_map, 0, sizeof(character_map));
     
     
@@ -1561,7 +1640,10 @@ static void InitMSPHook(){
     font_suffix="";
     font_path = "/usr/share/fonts/";   
      #ifdef _x86
-    font_path = "";//.bmp
+        font_path = executableDir;//.bmp
+        int l=strlen(font_path);
+        font_path[l]='/';
+        font_path[l+1]=0;
     #endif 
  
 
@@ -1596,6 +1678,7 @@ static void InitMSPHook(){
         current_display_info = fhd_display_info;
         font_suffix = "";      
     }
+    
 
     if (DrawOSD){
         snprintf(font_load_name, 255, "%sfont%s.png", font_path, font_suffix);
@@ -1790,10 +1873,10 @@ On sigmastar the BMP row stride is aligned to 8 bytes, that is 16 pixels in PIXE
 
                     Render_x86(rgbaData,bitmap.u32Width, bitmap.u32Height);
                     //Render_x86(bitmapFnt.pData,bitmapFnt.u32Width,700);
-                    
+                    FlushDrawing_x86();
                     free(rgbaData); 
-                    cairo_surface_destroy(image_surface); 
-                    image_surface=NULL;
+                    //cairo_surface_destroy(image_surface); 
+                    //image_surface = NULL;
 
             #endif
                 //free(bitmap.pData);
