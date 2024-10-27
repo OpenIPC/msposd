@@ -670,24 +670,24 @@ void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1,
          //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y,px+width_ladder,pos_y, COLOR_GREEN);
         
          //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-2,px+20,pos_y-2, COLOR_WHITE);         
-         LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px-20,pos_y-3,px+20,pos_y-3, COLOR_GRAY_Light,1);    
-         LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px-20,pos_y-4,px+20,pos_y-4, COLOR_GRAY_Light,1);
+         LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px-20,pos_y-3,px+20,pos_y-3, COLOR_GRAY_Light,2);    
+         //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px-20,pos_y-4,px+20,pos_y-4, COLOR_GRAY_Light,1);
          //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y-5,px+20,pos_y-5, COLOR_WHITE);
         
 
          //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y+2,px+20,pos_y+2, COLOR_WHITE);
-         LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px-20,pos_y+3,px+20,pos_y+3, COLOR_GRAY_Light,1);
-         LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px-20,pos_y+4,px+20,pos_y+4, COLOR_GRAY_Light,1);
+         //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px-20,pos_y+3,px+20,pos_y+3, COLOR_GRAY_Light,1);
+         //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px-20,pos_y+4,px+20,pos_y+4, COLOR_GRAY_Light,2);
          //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px,pos_y+5,px+20,pos_y+5, COLOR_WHITE);
 
          //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-2,px+width_ladder,pos_y-2, COLOR_WHITE);
-         LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-3,px+width_ladder+20,pos_y-3, COLOR_GRAY_Light,1);
-         LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-4,px+width_ladder+20,pos_y-4, COLOR_GRAY_Light,1);
+         LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-3,px+width_ladder+20,pos_y-3, COLOR_GRAY_Light,2);
+         //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-4,px+width_lader+20,pos_y-4, COLOR_GRAY_Light,1);
          //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y-5,px+width_ladder,pos_y-5, COLOR_WHITE);
 
          //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+2,px+width_ladder,pos_y+2, COLOR_WHITE);
-         LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+3,px+width_ladder+20,pos_y+3, COLOR_GRAY_Light,1);
-         LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+4,px+width_ladder+20,pos_y+4, COLOR_GRAY_Light,1);
+         //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+3,px+width_ladder+20,pos_y+3, COLOR_GRAY_Light,1);
+         //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+4,px+width_ladder+20,pos_y+4, COLOR_GRAY_Light,1);
          //LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT,  px+width_ladder-20,pos_y+5,px+width_ladder,pos_y+5, COLOR_WHITE);
 
 
@@ -852,8 +852,9 @@ void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1,
                 sprintf(buffer, "%+02d°", last_pitch/10);
                 
                 int osd_font_size=20;
-
+#ifdef _x86
                 drawText_x86(buffer, start_x + width_ladder*2.5 - spacing/3, y + osd_font_size/2 - 4, getcolor(COLOR_WHITE), osd_font_size, true);
+#endif                
 
                 if (AHI_Enabled==3){//Draw home
                     uint32_t xHome, yHome;
@@ -911,11 +912,17 @@ void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1,
                                     bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
                                     s_left,s_top,s_width,s_height,
                                     xR,yR);
-                        else if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_8888)   
+                        else if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_8888){
+                            //This is tricky. We copy in the bmp with the icons, but they have been already painted!  
                             copyRectRGBA8888(btmp.pData,btmp.u32Width,btmp.u32Height,
                                     bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
                                     s_left,s_top,s_width,s_height,
                                     xR,yR);  
+                            //needed since we may have already painted the icons
+#ifdef _x86                            
+                            Render_x86_rect(bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,xR,yR,xR,yR,s_width,s_height);            
+#endif                            
+                        }
                     }
                     
 
@@ -1366,7 +1373,8 @@ static void draw_screenBMP(){
         }
     
         step2=get_time_ms();  
-#ifndef _x86        
+#ifndef _x86 
+       
         if (AHI_Enabled==2)
             draw_AHI();
         
@@ -1405,6 +1413,9 @@ static void draw_screenBMP(){
             draw_AHI();        
     if (AHI_Enabled==1 || AHI_Enabled>2)
             draw_Ladder(); 
+
+    //this is only 
+    
     FlushDrawing_x86();
 
     //free(bmp_x86);   
@@ -1535,7 +1546,9 @@ unsigned char* loadPngToBMP(const char* filename, unsigned int* width, unsigned 
     else if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_8888){
        // memcpy(bmpData,pngData,bmpSize);
        convertRGBAToARGB( pngData, *width , *height, bmpData);
-       premultiplyAlpha((uint32_t*) bmpData, *width, *height);
+#ifdef _x86       
+       premultiplyAlpha((uint32_t*) bmpData, *width, *height);//RGBA format needs to be converted when using transparency?
+#endif       
     }else      
         convertRGBAToARGB1555( pngData, *width , *height, bmpData);
 
@@ -1872,7 +1885,7 @@ On sigmastar the BMP row stride is aligned to 8 bytes, that is 16 pixels in PIXE
                         Convert1555ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height);  
 
                     Render_x86(rgbaData,bitmap.u32Width, bitmap.u32Height);
-                    //Render_x86(bitmapFnt.pData,bitmapFnt.u32Width,700);
+                    //Render_x86(bitmapFnt.pData,bitmapFnt.u32Width,700);//test 
                     FlushDrawing_x86();
                     free(rgbaData); 
                     //cairo_surface_destroy(image_surface); 

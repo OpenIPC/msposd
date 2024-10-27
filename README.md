@@ -162,6 +162,17 @@ On lower-end cameras like gk7205v200/v210 the OSD will work only in 1280x720 mod
 ### VTX Menu
 ![alt text](pics/vtx_menu.png)
 
+
+## Rendering on the ground station
+This mode uses one MSPOSD running on the air unit, collecting MSP DisplayPort data, aggregating it and sending it via wfb_ng to the ground.    
+On the ground another instance of MSPOSD renders these data and overlays it on the screen.  
+Tested on x86 Ubuntu 6.5.0.28  
+On the cam msposd can be started like this to forward via port 14550 (default mavlink, should not be used)  
+```msposd --channels 7 --master /dev/ttyS2 --baudrate 115200 --out 127.0.0.1:14550 --matrix 11 --ahi 3 -r 30```   
+On the ground:  
+```msposd --master 127.0.0.1:14550  --osd -r 50 --ahi 3 --matrix 11 -v```
+
+
 ### Diagnosing
 Q: _I see a static map of all characters on the screen but no realtime OSD_.  
 A: There are no data being received by the cam.  

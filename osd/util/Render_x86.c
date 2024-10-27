@@ -1,3 +1,6 @@
+//Uncomment when debugging to have access to the windows below the OSD surface
+//#define _DEBUG_x86
+
 #include <cairo/cairo.h>
 #include <cairo/cairo-xlib.h>
 #include <X11/Xlib.h>
@@ -17,7 +20,16 @@ cairo_t* cr=NULL;
 Pixmap backbuffer_pixmap;
 cairo_surface_t* backbuffer_surface;
 
+bool forcefullscreen=true;
+extern bool verbose;
+
 int Init_x86(uint16_t *width, uint16_t *height) {
+        if (verbose)
+            forcefullscreen=false;
+#ifdef _DEBUG_x86
+        forcefullscreen=false;
+#endif
+
         display = XOpenDisplay(NULL);
         if (!display) {
             fprintf(stderr, "Cannot open display\n");
@@ -41,9 +53,10 @@ int Init_x86(uint16_t *width, uint16_t *height) {
         attrs.colormap = XCreateColormap(display, root, vinfo.visual, AllocNone);
         attrs.border_pixel = 0;
         attrs.background_pixel = 0;
-//!!!!!!!!!!!!!!!!!!!!!!!!        
+//!!!!!!!!!!!!!!!!!!!!!!!!       THIS Removes window's borders  
         attrs.override_redirect = True;  // Make the window borderless, MAKE TRUE
-        
+        if (!forcefullscreen)//debug mode
+            attrs.override_redirect = False;
 
         // Create the window with transparency support
         window = XCreateWindow(display, root,
@@ -53,21 +66,25 @@ int Init_x86(uint16_t *width, uint16_t *height) {
                                     CWColormap | CWBorderPixel | CWBackPixel | CWOverrideRedirect,                                     
                                     &attrs);
 
-        char buffer[50];
+        // Set the window name (title)
+        //const char *window_title = "MSPOSD";
+        //XStoreName(display, window, window_title);
+
+        char buffer[50];//tried to set env var to read it from python, didn't work ....
         snprintf(buffer, sizeof(buffer), "%lu", window);
         setenv("MSP_WINDOW_ID", buffer, 1);  // 1 means overwrite if it already exists
 
-        // Make the window visible
+        // Make the window topmost?
         XMapWindow(display, window);
 
-        // Raise the window to the top
+        // Raise the window to the top, may slow down and interfere with the UI, disable for debugging
         XRaiseWindow(display, window);
 
         // Set input focus to the window
         //XSetInputFocus(display, window, RevertToParent, CurrentTime);
 
         // Set window properties to make it transparent
-        if (false){
+        if (false){//seems not needed
             Atom windowType = XInternAtom(display, "_NET_WM_WINDOW_TYPE", False);
             Atom windowTypeDock = XInternAtom(display, "_NET_WM_WINDOW_TYPE_DOCK", False);
             XChangeProperty(display, window, windowType, XA_ATOM, 32, PropModeReplace, (unsigned char*)&windowTypeDock, 1);
@@ -76,10 +93,9 @@ int Init_x86(uint16_t *width, uint16_t *height) {
         surface = cairo_xlib_surface_create(display, window, vinfo.visual, *width, *height);
         cr = cairo_create(surface);
 
-        // Create the backbuffer Pixmap and Cairo surface
+        // Create the backbuffer Pixmap and Cairo surface - NOT USED still, for double buffering later
         backbuffer_pixmap = XCreatePixmap(display, window, *width, *height, DefaultDepth(display, screen));
         backbuffer_surface = cairo_xlib_surface_create(display, backbuffer_pixmap, DefaultVisual(display, screen), *width, *height);
-
 
 }
 
@@ -97,8 +113,6 @@ void premultiplyAlpha(uint32_t* rgbaData, uint32_t width, uint32_t height) {
 
 
 void ClearScreen_x86(){
-      // Flush drawing to the window    
-
     cairo_set_source_rgba(cr, 0, 0, 0, 0);
     cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE );
     cairo_paint(cr);      
@@ -107,6 +121,7 @@ void ClearScreen_x86(){
 
 void Render_x86( unsigned char* rgbaData, int u32Width, int u32Height){   
     
+    //no need to change every frame, just change the font bitmap once
    // premultiplyAlpha((uint32_t*)rgbaData, u32Width, u32Height);
 
    //bitmap has been changed
@@ -118,25 +133,58 @@ void Render_x86( unsigned char* rgbaData, int u32Width, int u32Height){
     if (image_surface==NULL){
         image_surface = cairo_image_surface_create_for_data(
         rgbaData, CAIRO_FORMAT_ARGB32, u32Width, u32Height, u32Width * 4);
-    }else{                 
-       // Update the Cairo surface data if needed (skip if the data is static)
+    }else{                        
         cairo_surface_mark_dirty(image_surface);
     }   
     cairo_set_source_surface(cr, image_surface, 1, 1);
     
     //cairo_set_operator(cr, CAIRO_OPERATOR_OVER);//Handles transparency and blends with the existing background, producing smooth visual results.
     cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);//Faster, clears all below
-    cairo_paint(cr);    
-    
+    cairo_paint(cr);        
     //XSync(display, False);//seems not needed?
+
+    if  (forcefullscreen)
+        XRaiseWindow(display, window);//Raise the window to the top
+
     
-    //XRaiseWindow(display, window);//Raise the window to the top
+    
 }
+
+void Render_x86_rect(unsigned char* rgbaData, int u32Width, int u32Height, int src_x, int src_y, int dest_x, int dest_y, int rect_width, int rect_height) {
+    // Check if the bitmap has changed and recreate the image surface if necessary
+    if (image_surface != NULL && cairo_image_surface_get_data(image_surface) != rgbaData) {
+        cairo_surface_destroy(image_surface);
+        image_surface = NULL;
+    }
+
+    // Create a Cairo image surface from the RGBA data if it hasn't been created yet
+    if (image_surface == NULL) {
+        image_surface = cairo_image_surface_create_for_data(
+            rgbaData, CAIRO_FORMAT_ARGB32, u32Width, u32Height, u32Width * 4);
+    } else {
+        // Mark the image surface as dirty if the RGBA data has changed
+        cairo_surface_mark_dirty(image_surface);
+    }
+
+    // Define the clipping area to copy only a portion of the source image
+    cairo_rectangle(cr, dest_x, dest_y, rect_width, rect_height);
+    cairo_clip(cr);
+
+    // Set the source surface, offset by src_x and src_y to start drawing from the specified portion
+    cairo_set_source_surface(cr, image_surface, dest_x - src_x, dest_y - src_y);
+    cairo_set_operator(cr, /*CAIRO_OPERATOR_SOURCE*/CAIRO_OPERATOR_OVER); // Use SOURCE to copy without blending
+    cairo_paint(cr);
+
+    // Reset the clip to allow future drawings without being constrained
+    cairo_reset_clip(cr);
+    
+}
+
 
 void FlushDrawing_x86(){
     cairo_surface_flush(surface);
     XFlush(display);
-    
+    //XSync(display, False);//seems not needed?    
 }
 
 
@@ -148,7 +196,6 @@ void Close_x86(){
     XDestroyWindow(display, window);
     XCloseDisplay(display);
 
-    return 0;
 }
 
 
@@ -183,7 +230,6 @@ void drawLine_x86(int x0, int y0, int x1, int y1, uint32_t color, double thickne
         
     }
 
-  // Extract the RGBA components from the color
     double r = ((color >> 24) & 0xFF) / 255.0;
     double g = ((color >> 16) & 0xFF) / 255.0;
     double b = ((color >> 8) & 0xFF) / 255.0;
@@ -199,6 +245,7 @@ void drawLine_x86(int x0, int y0, int x1, int y1, uint32_t color, double thickne
         if (thickness>1)
             thickness--;
 
+        //we can turn off
         //cairo_set_antialias(cr, CAIRO_ANTIALIAS_NONE);
 
         // Save the current state of the Cairo context
@@ -218,12 +265,11 @@ void drawLine_x86(int x0, int y0, int x1, int y1, uint32_t color, double thickne
         cairo_move_to(cr, x0, y0);
         cairo_line_to(cr, x1, y1);
         cairo_stroke(cr);
-        cairo_restore(cr);
-    
+        cairo_restore(cr);    
     }
 }
 
-// Function to draw rotated text with transformation
+// Function to draw rotated text with rotation
 void drawText_x86(const char* text, int x, int y, uint32_t color, double size, bool Transpose) {
     // Extract the RGBA components from the color
     double r = ((color >> 24) & 0xFF) / 255.0;
@@ -241,8 +287,7 @@ void drawText_x86(const char* text, int x, int y, uint32_t color, double size, b
         // Apply Transform
         int OffsY = sin((Transform_Pitch) * (M_PI / 180.0)) * 400;
         Point img_center = {width / 2, height / 2}; // Center of the image
-
-        // Define the position before rotation
+        
         Point original_pos = {x, y - OffsY};
         Point rotated_pos;
 
@@ -254,7 +299,6 @@ void drawText_x86(const char* text, int x, int y, uint32_t color, double size, b
         y = rotated_pos.y;
     }
 
-    // Set the font size for the text
     cairo_set_font_size(cr, size);        
 
     if (false){
@@ -266,12 +310,11 @@ void drawText_x86(const char* text, int x, int y, uint32_t color, double size, b
         cairo_translate(cr, x, y);
     
         cairo_rotate(cr, Transform_Roll * (M_PI / 180.0));
-        
-        // This ensures that the text is drawn at the rotated position with (x, y) as the anchor
+                
         cairo_move_to(cr, 0, 0);
         cairo_set_font_size(cr, size);        
         cairo_show_text(cr, text);
-        // Restore the original state of the Cairo context (removes the rotation and translation)
+        
         cairo_restore(cr);
 
     }
