@@ -14,9 +14,11 @@
 
 Display* display=NULL;
 Window window =NULL;
+cairo_surface_t* surface_x11=NULL;
 cairo_surface_t* surface=NULL;
 cairo_surface_t* image_surface = NULL;
 cairo_t* cr=NULL;
+cairo_t* cr_x11=NULL;
 Pixmap backbuffer_pixmap;
 cairo_surface_t* backbuffer_surface;
 
@@ -90,12 +92,10 @@ int Init_x86(uint16_t *width, uint16_t *height) {
             XChangeProperty(display, window, windowType, XA_ATOM, 32, PropModeReplace, (unsigned char*)&windowTypeDock, 1);
         }
         // Create a Cairo surface for drawing on the X11 window
-        surface = cairo_xlib_surface_create(display, window, vinfo.visual, *width, *height);
-        cr = cairo_create(surface);
-
-        // Create the backbuffer Pixmap and Cairo surface - NOT USED still, for double buffering later
-        backbuffer_pixmap = XCreatePixmap(display, window, *width, *height, DefaultDepth(display, screen));
-        backbuffer_surface = cairo_xlib_surface_create(display, backbuffer_pixmap, DefaultVisual(display, screen), *width, *height);
+        surface_x11 = cairo_xlib_surface_create(display, window, vinfo.visual, *width, *height);
+        surface   = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, *width, *height);        
+        cr = cairo_create(surface);        
+        cr_x11 = cairo_create(surface_x11);
 
 }
 
@@ -123,6 +123,18 @@ void Render_x86( unsigned char* rgbaData, int u32Width, int u32Height){
     
     //no need to change every frame, just change the font bitmap once
    // premultiplyAlpha((uint32_t*)rgbaData, u32Width, u32Height);
+
+    // Clear the main surface to avoid lingering frames
+    //cairo_set_operator(cr_x11, CAIRO_OPERATOR_SOURCE); 
+    //cairo_set_source_rgba(cr_x11, 0, 0, 0, 0);  // Transparent background for main surface
+    //cairo_paint(cr_x11);
+
+    // Clear the buffer surface (white to clear previous frames)
+    cairo_set_source_rgba(cr, 0, 0, 0, 0);  // Transparent background for buffer
+    cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);  // Clear everything on the buffer
+    cairo_paint(cr);
+    cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);  // Restore default operator
+
 
    //bitmap has been changed
     if (image_surface != NULL &&  cairo_image_surface_get_data(image_surface) != rgbaData){    
@@ -182,8 +194,16 @@ void Render_x86_rect(unsigned char* rgbaData, int u32Width, int u32Height, int s
 
 
 void FlushDrawing_x86(){
-    cairo_surface_flush(surface);
+
+    // Copy work buffer to the display surface do avoid flickering
+    cairo_set_operator(cr_x11, CAIRO_OPERATOR_SOURCE);
+    // Copy buffer to the display surface
+    cairo_set_source_surface(cr_x11, surface, 0, 0);
+    cairo_paint(cr_x11);
+
+    cairo_surface_flush(surface_x11);
     XFlush(display);
+
     //XSync(display, False);//seems not needed?    
 }
 
@@ -191,8 +211,10 @@ void FlushDrawing_x86(){
 void Close_x86(){
     // Clean up resources
     cairo_destroy(cr);
+    cairo_destroy(cr_x11);
     cairo_surface_destroy(image_surface);
     cairo_surface_destroy(surface);
+    cairo_surface_destroy(surface_x11);
     XDestroyWindow(display, window);
     XCloseDisplay(display);
 
