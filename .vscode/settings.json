@@ -59,6 +59,10 @@
         "xutil.h": "c",
         "xatom.h": "c",
         "region.h": "c",
-        "cairo-xlib.h": "c"
+        "cairo-xlib.h": "c",
+        "stdint-uintn.h": "c",
+        "interface.h": "c",
+        "valarray": "c",
+        "complex": "c"
     }
 }

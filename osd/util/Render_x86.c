@@ -12,6 +12,9 @@
 #include <unistd.h>
 #include "../../bmp/bitmap.h"
 
+#include <X11/keysym.h>
+#include <event2/event.h>
+
 Display* display=NULL;
 Window window =NULL;
 cairo_surface_t* surface_x11=NULL;
@@ -24,6 +27,45 @@ cairo_surface_t* backbuffer_surface;
 
 bool forcefullscreen=true;
 extern bool verbose;
+extern struct event_base *base;
+struct event *x11_event=NULL;
+
+
+extern int AHI_TiltY;
+void handle_key_press(XEvent *event) {
+    KeySym keysym = XLookupKeysym(&event->xkey, 0); // Map keycode to keysym
+
+    // Print the key that was pressed
+    if (keysym == XK_Escape) {
+        printf("Escape key pressed, exiting...\n");
+        //exit(0);  // Exit the program on Escape key
+    }    
+    if ((event->xkey.state & Mod1Mask) && (keysym == XK_Up)) {
+        printf("KeyUP\r\n");
+        if (AHI_TiltY<300)
+            AHI_TiltY+=30;
+        return;
+    }
+        if ((event->xkey.state & Mod1Mask) && (keysym == XK_Down)) {
+            if (AHI_TiltY>-300)
+                AHI_TiltY-=30;
+        return;
+    }
+}
+
+void event_callback(evutil_socket_t fd, short event, void *arg) {
+    XEvent xevent;
+    while (XPending(display)) {  // Process all queued X events
+        XNextEvent(display, &xevent);
+        if (xevent.type == Expose) {
+            //cairo_set_source_rgb(cr, 0, 0, 1); // Blue background
+            //cairo_paint(cr);
+        } else if (xevent.type == KeyPress) {
+            handle_key_press(&xevent);
+        }
+    }
+}
+
 
 int Init_x86(uint16_t *width, uint16_t *height) {
         if (verbose)
@@ -71,6 +113,9 @@ int Init_x86(uint16_t *width, uint16_t *height) {
         // Set the window name (title)
         //const char *window_title = "MSPOSD";
         //XStoreName(display, window, window_title);
+
+        // Select input events: expose, key press, key release
+        XSelectInput(display, window, ExposureMask | KeyPressMask | KeyReleaseMask);
 
         char buffer[50];//tried to set env var to read it from python, didn't work ....
         snprintf(buffer, sizeof(buffer), "%lu", window);
@@ -129,7 +174,7 @@ void Render_x86( unsigned char* rgbaData, int u32Width, int u32Height){
     //cairo_set_source_rgba(cr_x11, 0, 0, 0, 0);  // Transparent background for main surface
     //cairo_paint(cr_x11);
 
-    // Clear the buffer surface (white to clear previous frames)
+    // Clear the buffer surface 
     cairo_set_source_rgba(cr, 0, 0, 0, 0);  // Transparent background for buffer
     cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);  // Clear everything on the buffer
     cairo_paint(cr);
@@ -195,6 +240,14 @@ void Render_x86_rect(unsigned char* rgbaData, int u32Width, int u32Height, int s
 
 void FlushDrawing_x86(){
 
+    //Hook keyboard- can't be in init procs since there the libevent is not still created.
+    // base = event_base_new(); 
+    if (x11_event==NULL && base!=NULL){        
+        // Attach X11 display's file descriptor to the existing msposd event_base
+        struct event *x11_event = event_new(base, ConnectionNumber(display), EV_READ | EV_PERSIST, event_callback, NULL);
+        event_add(x11_event, NULL);
+    }
+   
     // Copy work buffer to the display surface do avoid flickering
     cairo_set_operator(cr_x11, CAIRO_OPERATOR_SOURCE);
     // Copy buffer to the display surface
@@ -217,6 +270,10 @@ void Close_x86(){
     cairo_surface_destroy(surface_x11);
     XDestroyWindow(display, window);
     XCloseDisplay(display);
+
+     // Cleanup
+    event_free(x11_event);
+    event_base_free(base);
 
 }
 
@@ -341,4 +398,51 @@ void drawText_x86(const char* text, int x, int y, uint32_t color, double size, b
 
     }
  
+}
+
+
+ 
+
+void draw_rounded_rectangle(cairo_t *cr, double x, double y, double width, double height, double radius) {
+    cairo_move_to(cr, x + radius, y);
+    cairo_arc(cr, x + width - radius, y + radius, radius, -90 * (M_PI / 180), 0 * (M_PI / 180));  // Top-right corner
+    cairo_arc(cr, x + width - radius, y + height - radius, radius, 0 * (M_PI / 180), 90 * (M_PI / 180));  // Bottom-right corner
+    cairo_arc(cr, x + radius, y + height - radius, radius, 90 * (M_PI / 180), 180 * (M_PI / 180));  // Bottom-left corner
+    cairo_arc(cr, x + radius, y + radius, radius, 180 * (M_PI / 180), 270 * (M_PI / 180));  // Top-left corner
+    cairo_close_path(cr);
+}
+
+void drawRC_Channels(int posX, int posY, int m1X, int m1Y, int m2X, int m2Y){//int pitch, int roll, int throttle, int yaw
+    int width = 100, height = 100;
+
+    int side=64;
+
+    // Draw the outline of the rounded rectangle
+    cairo_set_source_rgb(cr, 1, 1, 1);  // White color for outline
+    cairo_set_line_width(cr, 1);        // Line thickness
+    draw_rounded_rectangle(cr, posX, posY, side, side, 16);  // 72x72 px rectangle with 10 px corner radius
+    cairo_stroke(cr);
+    // Draw a small circle at the center of the rounded rectangle
+    double circle_diameter = 8;
+    double circle_radius = circle_diameter / 2;
+    double rect_center_x = posX + side * (m2X-1000)/1000;
+    double rect_center_y = posY + side - side * (m2Y-1000)/1000;
+    cairo_set_source_rgb(cr, 1, 1, 1);  // Set color to white for the circle
+    cairo_arc(cr, rect_center_x, rect_center_y, circle_radius, 0, 2 * M_PI);
+    cairo_fill(cr);
+
+    // Draw next stick
+    cairo_set_source_rgb(cr, 1, 1, 1);  // White color for outline
+    cairo_set_line_width(cr, 1);        // Line thickness
+    draw_rounded_rectangle(cr, posX + side + 5 , posY, side, side, 16);  // 72x72 px rectangle with 10 px corner radius
+    cairo_stroke(cr);
+
+    // Draw a small circle at the center of the rounded rectangle        
+    rect_center_x = posX  + side + 5 + side * (m1X-1000)/1000;
+    rect_center_y = posY + side - side * (m1Y-1000)/1000;
+    cairo_set_source_rgb(cr, 1, 1, 1);  // Set color to white for the circle
+    cairo_arc(cr, rect_center_x, rect_center_y, circle_radius, 0, 2 * M_PI);
+    cairo_fill(cr);
+
+    return 0;
 }

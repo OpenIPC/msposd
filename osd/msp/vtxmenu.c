@@ -3,6 +3,9 @@
 #include <string.h>
 #include <sys/reboot.h>
 #include <linux/reboot.h>  // For LINUX_REBOOT_CMD_RESTART
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
 
 #include "msp_displayport.h"
 #include "vtxmenu.h"
@@ -15,9 +18,14 @@ bool showStatusScreen = false;
 uint64_t lastStatusScreen = 0;
 extern bool verbose;
 extern bool vtxMenuActive;
+extern int  out_sock;//to resend
+extern struct sockaddr_in sin_out;
 
 extern MenuSection *current_section;
 extern int selected_option;
+static uint8_t message_buffer[256]; 
+static uint8_t payload_buffer[256]; 
+
 
 void exitVTXMenu(){
     vtxMenuActive = false;
@@ -116,13 +124,36 @@ void display_menu(displayport_vtable_t *display_driver,MenuSection *section, int
         }
     }
 
+    if (out_sock>0){//send   to the ground
+        payload_buffer[0]=MSP_DISPLAYPORT_CLEAR;
+        construct_msp_command(&message_buffer[0], MSP_CMD_DISPLAYPORT, &payload_buffer[0], 2, MSP_INBOUND);
+        sendto(out_sock, message_buffer, 6 + 2  , 0, (struct sockaddr *)&sin_out, sizeof(sin_out));        
+    }
+
     // Draw the populated menu array on the OSD
     for (int row = 0; row < section->option_count+1; row++) {
         for (int col = 0; col < OSD_HD_COLS-menu_offset_cols; col++) {
-            display_driver->draw_character(col+menu_offset_cols, row+menu_offset_row, menu_grid[row][col]);
+            display_driver->draw_character(col+menu_offset_cols, row+menu_offset_row, menu_grid[row][col]);            
+        }
+        if (out_sock>0){//send the line to the ground                
+                memcpy(&payload_buffer[4],&menu_grid[row], OSD_HD_COLS-menu_offset_cols);                
+                payload_buffer[0]=MSP_DISPLAYPORT_DRAW_STRING;
+                payload_buffer[1]=row+menu_offset_row;
+                payload_buffer[2]=menu_offset_cols;
+                payload_buffer[3]=0;
+    
+                construct_msp_command(message_buffer, MSP_CMD_DISPLAYPORT, &payload_buffer[0], OSD_HD_COLS-menu_offset_cols +4, MSP_INBOUND);
+                sendto(out_sock, message_buffer, OSD_HD_COLS-menu_offset_cols + 4 + 6  , 0, (struct sockaddr *)&sin_out, sizeof(sin_out));                             
         }
     }
+               
     display_driver->draw_complete();
+
+    if (out_sock>0){//send  to the ground
+        payload_buffer[0]=MSP_DISPLAYPORT_DRAW_SCREEN;
+        construct_msp_command(message_buffer, MSP_CMD_DISPLAYPORT, &payload_buffer[0], 2, MSP_INBOUND);
+        sendto(out_sock, message_buffer,  6 +2 , 0, (struct sockaddr *)&sin_out, sizeof(sin_out));        
+    }
 }
 
 

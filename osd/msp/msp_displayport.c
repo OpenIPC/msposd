@@ -105,9 +105,18 @@ static bool newMenu = true;
 static int current_selection = 0;
 extern uint64_t lastStatusScreen;
 
+// Default path To test on x86
+#ifndef CONFIG_PATH
+    #ifdef _x86
+        #define CONFIG_PATH "./vtxmenu.ini"
+    #else
+        #define CONFIG_PATH "/etc/vtxmenu.ini"
+    #endif
+#endif
+
 bool init_state_manager() {
 
-    if (parse_ini("/etc/vtxmenu.ini", &menu_system)) {
+    if (parse_ini(CONFIG_PATH, &menu_system)) {
         printf("Failed to load menu config /etc/vtxmenu.ini\n");
         return false;
     } else {

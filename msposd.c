@@ -45,6 +45,8 @@ bool DrawOSD = false;
 bool mspVTXenabled = false;
 bool vtxMenuEnabled = false;
 
+//libevent base main loop
+extern struct event_base *base = NULL;
 
 int serial_fd = 0;
 
@@ -344,12 +346,18 @@ uint64_t get_current_time_ms_Old() {
 }
 
 
-static float last_board_temp;
+float last_board_temp;
+
+static long last_board_temp_taken=0;
 
 /// @brief 
 /// @return -100 if no sigmastar found 
 int GetTempSigmaStar(){
 
+
+	if ( (get_time_ms() - last_board_temp_taken  ) < 1000)//Set some caching to keep CPU load low                      
+		return last_board_temp;
+    last_board_temp_taken= get_time_ms();
 //https://wx.comake.online/doc/doc/SigmaStarDocs-SSD220-SIGMASTAR-202305231834/platform/BSP/Ikayaki/frequency_en.html
  	FILE *file = fopen("/sys/devices/virtual/mstar/msys/TEMP_R", "r"); //Temperature 62
     if (file == NULL) {
@@ -880,7 +888,8 @@ static void temp_read(evutil_socket_t sock, short event, void *arg)
 
 	uint32_t val = *(volatile uint32_t *)(mapped_area + 0xBC);
 	float tempo = val & ((1 << 16) - 1);
-        tempo = ((tempo - 117) / 798) * 165 - 40;
+	//tempo = ((tempo - 117) / 798.0f) * 165.0f - 40.0f;
+      tempo = ((tempo - 117) / 798) * 165 - 40;
 
 	if (last_board_temp == -100)//only once
 		printf("Temp read %f C\n", tempo);
@@ -942,8 +951,7 @@ static void poll_msp(evutil_socket_t sock, short event, void *arg)
 
 static int handle_data(const char *port_name, int baudrate,
 		       const char *out_addr )
-{
-	struct event_base *base = NULL;
+{	
 	struct event *sig_int = NULL, *in_ev = NULL, *temp_tmr = NULL, *msp_tmr=NULL;
 	struct event *sig_term;
 	int ret = EXIT_SUCCESS;
@@ -1070,7 +1078,7 @@ static int handle_data(const char *port_name, int baudrate,
 		if (GetTempSigmaStar()>-90){
 			temp=2;//SigmaStar
 			printf("Found SigmaStart temp sensor\n");
-		}else{		//Goke/Hisilicon method
+		}else{		//Goke/Hisilicon method			
 			void* mem = setup_temp_mem(0x12028000, 0xFFFF);
 			temp_tmr = event_new(base, -1, EV_PERSIST, temp_read, mem);
 			evtimer_add(temp_tmr, &(struct timeval){.tv_sec = 1});
@@ -1255,7 +1263,8 @@ int main(int argc, char **argv)
 		}
 	}	
 
-     
+    
+
 	if (ParseMSP){
  		//msp_process_data(rx_msp_state, serial_data[i]);
 		rx_msp_state = calloc(1, sizeof(msp_state_t));   

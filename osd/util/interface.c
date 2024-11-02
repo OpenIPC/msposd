@@ -1,7 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if __SIGMASTAR__  
 #include <bits/stdint-uintn.h>
+#endif
 #include "interface.h"
 
 #define BUFFER_SIZE 1024

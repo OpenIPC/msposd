@@ -130,8 +130,7 @@ static int16_t last_heading=0;
 
 static int16_t last_directionToHome=0;
 static int16_t last_distanceToHome=0;
-
-static int16_t last_RC_Channels[16];
+int AHI_TiltY = -150;
 
 // https://github.com/betaflight/betaflight/blob/master/src/main/msp/msp.c#L1949
 typedef struct
@@ -198,6 +197,8 @@ static int stat_MSP_draw_complete_count=0;
 static int stat_UDP_MSPframes=0;
 static uint64_t last_MSP_ATTITUDE=0;
 static int stat_attitudeDelay=0;
+int RCWidgetX=1620;
+int RCWidgetY=820;
 
 extern bool AbortNow;
 extern bool verbose;
@@ -211,6 +212,7 @@ extern int matrix_size;
 extern int GetTempSigmaStar();
 extern int SendWfbLogToGround();
 extern bool monitor_wfb;
+extern float last_board_temp;
 
 uint64_t get_time_ms() // in milliseconds
 {
@@ -221,6 +223,142 @@ uint64_t get_time_ms() // in milliseconds
     return ts.tv_sec * 1000LL + ts.tv_nsec / 1000000;
 }
 
+
+
+/* MSP DisplayPort handlers for compressed mode */
+
+static void msp_draw_character(uint32_t x, uint32_t y, uint16_t c) {
+    DEBUG_PRINT("drawing char %d at x %d y %d\n", c, x, y);
+    msp_character_map_buffer[x][y] = c;
+}
+
+static void msp_clear_screen() {
+    memset(msp_character_map_buffer, 0, sizeof(msp_character_map_buffer));
+}
+
+static void msp_draw_complete() {   
+    memcpy(msp_character_map_draw, msp_character_map_buffer, sizeof(msp_character_map_buffer));
+}
+
+static void msp_set_options(uint8_t font_num, msp_hd_options_e is_hd) {
+   DEBUG_PRINT("Got options!\n");
+   msp_clear_screen();
+   msp_hd_option = is_hd;
+}
+ 
+
+
+
+
+/*----------------------------------------------------------------------------------------------------*/
+/*------------CONFIGURE SWITCHES ----------------------------------------------------------------*/
+static int enable_fast_layout = 0;
+
+void *io_map;
+struct osd *osds;
+char timefmt[32] = DEF_TIMEFMT;
+int PIXEL_FORMAT_BitsPerPixel = 8;
+
+
+typedef struct display_info_s {
+    uint8_t char_width;
+    uint8_t char_height;
+    uint8_t font_width;
+    uint8_t font_height;
+    uint16_t num_chars;
+} display_info_t; 
+
+#define SD_DISPLAY_INFO {.char_width = 31, .char_height = 15, .font_width = 36, .font_height = 54, .num_chars = 256}
+
+static const display_info_t sd_display_info = SD_DISPLAY_INFO;
+
+static const display_info_t hd_display_info = {
+    .char_width = 50,
+    .char_height = 18,
+    .font_width = 24,
+    .font_height = 36,
+    .num_chars = 512,
+};
+
+static const display_info_t fhd_display_info = {
+    .char_width = 50,
+    .char_height = 18,
+    .font_width = 36,
+    .font_height = 54,
+    .num_chars = 512,
+};
+
+/*
+36*50=1800
+54*18=972
+*/
+#define MAX_OSD_WIDTH 54
+#define MAX_OSD_HEIGHT 20
+
+// for x86 preview only
+
+#define TRANSPARENT_COLOR 0xFBDE
+
+//Not implemented, draw the center part of the screen with much faster rate to keep CPU load low
+//overlays 1 to 8 are taken by OSD tool, but they are limited to 8 in some systems like Goke
+#ifdef __SIGMASTAR__
+#define FULL_OVERLAY_ID 9
+#define FAST_OVERLAY_ID 8
+#else
+#define FULL_OVERLAY_ID 6
+#define FAST_OVERLAY_ID 7
+#endif
+
+char font_2_name[256];
+
+uint16_t OVERLAY_WIDTH =1800;
+uint16_t OVERLAY_HEIGHT =1000;
+
+
+static displayport_vtable_t *display_driver;
+
+static display_info_t current_display_info = SD_DISPLAY_INFO;
+
+
+
+//bounderies as characters of fast area. Fast Character
+int fcX= 12; int fcW=10; int fcY= 5 ; int fcH=8;
+
+
+
+
+static bool InjectChars(char* payload){
+    //string starts at 4 payload[0]==MSP_subtype
+    //set Position to Widget that draws Stick Positions
+    if (payload[4]=='!' && payload[4+1]=='R' && payload[4+2]=='C' && payload[4+3]=='!'){    
+        // uint8_t row = payload[0]; //uint8_t col = payload[1];                                    
+        RCWidgetX = payload[2] *current_display_info.font_width;
+        RCWidgetY = payload[1] * current_display_info.font_height;  
+        memset (&payload[4],0,4);
+
+        return true;
+    }
+
+    //set extra temp on screen
+    if ( payload[4]=='!' && payload[4+1]=='T' && payload[4+2]=='M' && payload[4+3]=='P'&& payload[4+4]=='!'){                                        
+                    int temp = 99;
+#if __SIGMASTAR__                    
+                    temp = GetTempSigmaStar();
+#else
+        temp = last_board_temp ;                   
+#endif                  
+        payload[4] = 199;//10748/54=199
+        payload[4+1]=48 + temp/10;
+        payload[4+2]=48 + temp%10;
+        payload[4+3] = 11;//degree
+        payload[4+4] = 0;//degree
+                         
+        return true;
+    }
+    return false;
+}
+
+ 
 
 static void rx_msp_callback(msp_msg_t *msp_message)
 {
@@ -284,10 +422,22 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
          }
          
         case MSP_CMD_DISPLAYPORT: {
-//TEST CHANGE            
-            if ( ! vtxMenuActive ) {               
-                displayport_process_message(display_driver, msp_message);
+
+            if (msp_message->direction == MSP_INBOUND
+            && msp_message->cmd == MSP_CMD_DISPLAYPORT 
+            && msp_message->payload[0] == MSP_DISPLAYPORT_DRAW_STRING)
+            {
+                InjectChars(&msp_message->payload[0]);
             }
+            
+            if ( ! vtxMenuActive ) {               
+                displayport_process_message(display_driver, msp_message); 
+                    
+            } else 
+                if (!DrawOSD){//if we only resend to ground station and menu is active, stop regular OSD
+                    LastPcktSent= get_time_ms();//clear buffer and prevent from sending MSP to ground                
+                    fb_cursor = 0;
+                }  
             
             if (out_sock>0){
                 if(msp_message->payload[0] == MSP_DISPLAYPORT_DRAW_SCREEN) {
@@ -389,110 +539,6 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
         }
     }
 }
- 
-
-/* MSP DisplayPort handlers for compressed mode */
-
-static void msp_draw_character(uint32_t x, uint32_t y, uint16_t c) {
-    DEBUG_PRINT("drawing char %d at x %d y %d\n", c, x, y);
-    msp_character_map_buffer[x][y] = c;
-}
-
-static void msp_clear_screen() {
-    memset(msp_character_map_buffer, 0, sizeof(msp_character_map_buffer));
-}
-
-static void msp_draw_complete() {   
-    memcpy(msp_character_map_draw, msp_character_map_buffer, sizeof(msp_character_map_buffer));
-}
-
-static void msp_set_options(uint8_t font_num, msp_hd_options_e is_hd) {
-   DEBUG_PRINT("Got options!\n");
-   msp_clear_screen();
-   msp_hd_option = is_hd;
-}
- 
-
-
-
-
-/*----------------------------------------------------------------------------------------------------*/
-/*------------CONFIGURE SWITCHES ----------------------------------------------------------------*/
-static int enable_fast_layout = 0;
-
-void *io_map;
-struct osd *osds;
-char timefmt[32] = DEF_TIMEFMT;
-int PIXEL_FORMAT_BitsPerPixel = 8;
-
-
-typedef struct display_info_s {
-    uint8_t char_width;
-    uint8_t char_height;
-    uint8_t font_width;
-    uint8_t font_height;
-    uint16_t num_chars;
-} display_info_t; 
-
-#define SD_DISPLAY_INFO {.char_width = 31, .char_height = 15, .font_width = 36, .font_height = 54, .num_chars = 256}
-
-static const display_info_t sd_display_info = SD_DISPLAY_INFO;
-
-static const display_info_t hd_display_info = {
-    .char_width = 50,
-    .char_height = 18,
-    .font_width = 24,
-    .font_height = 36,
-    .num_chars = 512,
-};
-
-static const display_info_t fhd_display_info = {
-    .char_width = 50,
-    .char_height = 18,
-    .font_width = 36,
-    .font_height = 54,
-    .num_chars = 512,
-};
-
-/*
-36*50=1800
-54*18=972
-*/
-#define MAX_OSD_WIDTH 54
-#define MAX_OSD_HEIGHT 20
-
-// for x86 preview only
-
-#define TRANSPARENT_COLOR 0xFBDE
-
-//Not implemented, draw the center part of the screen with much faster rate to keep CPU load low
-//overlays 1 to 8 are taken by OSD tool, but they are limited to 8 in some systems like Goke
-#ifdef __SIGMASTAR__
-#define FULL_OVERLAY_ID 9
-#define FAST_OVERLAY_ID 8
-#else
-#define FULL_OVERLAY_ID 6
-#define FAST_OVERLAY_ID 7
-#endif
-
-char font_2_name[256];
-
-uint16_t OVERLAY_WIDTH =1800;
-uint16_t OVERLAY_HEIGHT =1000;
-
-
-static displayport_vtable_t *display_driver;
-
-static display_info_t current_display_info = SD_DISPLAY_INFO;
-
-
-
-//bounderies as characters of fast area. Fast Character
-int fcX= 12; int fcW=10; int fcY= 5 ; int fcH=8;
-
-#ifdef _x86
- 
-#endif
 
 
 static int load_fontFromBMP(const char *filename, BITMAP *bitmap){
@@ -621,7 +667,7 @@ void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1,
     Transform_Pitch=last_pitch/10;
     Transform_Roll=-last_roll/10; 
 
-    int TiltY= - 150;//pixels offset on the vertical, negative value means up, this is camera nose-down angle in pixels
+    int TiltY= - AHI_TiltY;//pixels offset on the vertical, negative value means up, this is camera nose-down angle in pixels
     //to do, make this in degrees
 
     const bool horizonInvertPitch = false;
@@ -810,10 +856,10 @@ void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1,
                 for (int i = 0; i < fragments; i++) {
                     // Calculate the X position for the current rectangle
                     int rect_x = start_x + i * (rect_width + spacing) + spacing/2;                    
-                    //drawRectangleI4(bmpBuff.pData, rect_x, y, rect_width, 0, COLOR_WHITE, 4);//border with AA
-                    LineTranspose(bmpBuff.pData, rect_x, y, rect_x + rect_width, y, COLOR_WHITE, 3);
-                    //drawFilledRectangleI4AA(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, rect_x, y, rect_width, rect_height);
                     
+                    bool isPlaneLevel= (-2 < last_pitch/10 && last_pitch/10 <2)&&(i==2 || i==3);
+                    LineTranspose(bmpBuff.pData, rect_x, y, rect_x + rect_width, y, isPlaneLevel? COLOR_GREEN : COLOR_WHITE, 3);
+                                        
                 }
 
                 int LAST_ROLL = -5; // Example integer value (change as needed)
@@ -823,9 +869,9 @@ void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1,
                 // %+02d: '+' sign for positive numbers, '0' for leading zero, '2' for width.
                 // \xB0: ASCII code for the degree symbol.
                 if (-10 < last_pitch && last_pitch <10)
-                sprintf(buffer, "%+0.1f°", last_pitch / 10.0);
+                    sprintf(buffer, "%+0.1f°", -last_pitch / 10.0);
                 else
-                sprintf(buffer, "%+02d°", last_pitch/10);
+                    sprintf(buffer, "%+02d°", -last_pitch/10);
                 
                 int osd_font_size=20;
 #ifdef _x86
@@ -848,7 +894,7 @@ void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1,
                         if  (home_offset<0){ //(left < right){                            
                             xHome=start_x;
                         } else{
-                            xHome=start_x+width_ladder*2.5;                            
+                            xHome=start_x+width_ladder*2.5;//Don't go over the pitch digits
                         }
                     }else{
                         double K = (double)((double)home_offset+90) /180;//this is from 0 to 1
@@ -856,7 +902,8 @@ void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1,
                             K=1;
                         xHome = (start_x + (K*((double)width_ladder)*2.5));
                     }
-
+                    if (xHome>start_x+width_ladder*2.5-40);//Don't go over the pitch digits
+                        xHome=start_x+width_ladder*2.5-40;
                     
                     int c=10;//Home(small house) symbol to be shown for INAV
                     if (font_pages>2)//tha same symbol for betflight
@@ -894,13 +941,12 @@ void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1,
                                     bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
                                     s_left,s_top,s_width,s_height,
                                     xR,yR);  
-                            //needed since we may have already painted the icons
-#ifdef _x86                            
-                            Render_x86_rect(bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,xR,yR,xR,yR,s_width,s_height);            
-#endif                            
+                            //needed since we may have already painted the icons                       
                         }
-                    }
-                    
+                    } 
+                    #ifdef _x86                            
+                        Render_x86_rect(bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,xR,yR,xR,yR,s_width,s_height);            
+                    #endif                   
 
                 }
 
@@ -1101,6 +1147,22 @@ uint64_t LastOSDMsgParsed = 0;
 
 BITMAP bitmapText;
 
+void print_string_as_hex(const char *str) {
+    while (*str) {
+        printf("%02X ", (unsigned char)*str);
+        str++;
+    }
+    printf("\n");
+}
+void remove_carriage_returns(char *out) {
+    int j = 0;
+    for (int i = 0; out[i] != '\0'; i++) 
+        if (out[i] != '\r' && out[i] != '\n') 
+            out[j++] = out[i];  // Copy non-\r characters        
+
+    out[j] = '\0';  // Null-terminate the modified string
+}
+
 char osdmsg[80];
 
 bool DrawText(){
@@ -1151,21 +1213,39 @@ bool DrawText(){
         if (access(font, F_OK)) //no font file
             return false;
 
-        RECT rect = measure_text(font, osds[FULL_OVERLAY_ID].size, out);
+        if ((osds[FULL_OVERLAY_ID].size < 5.0) || (osds[FULL_OVERLAY_ID].size > 99.0)) 
+            osds[FULL_OVERLAY_ID].size = 20.0;
+
+        //print_string_as_hex(out);
+        //remove_carriage_returns(out);
        
+        RECT rect = measure_text(font, osds[FULL_OVERLAY_ID].size, out);
+
         if (bitmapText.pData!=NULL){
             bitmapText.pData=NULL;
             free(bitmapText.pData);
         }
-
-        bitmapText = raster_text(font, osds[FULL_OVERLAY_ID].size, out);//allocates new bitmap
         
+        bitmapText = raster_text(font, osds[FULL_OVERLAY_ID].size, out);//allocates new bitmap, Bus error on goke ?!
+
+ 
         if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4){//convert to I4 and copy over the main overlay            
 																									  
             uint8_t* destBitmap =  (uint8_t*)malloc(bitmapText.u32Height*getRowStride(bitmapText.u32Width , PIXEL_FORMAT_BitsPerPixel));                                  
 
             convertBitmap1555ToI4(bitmapText.pData, bitmapText.u32Width , bitmapText.u32Height, destBitmap, msg_colour);      
                     
+            free(bitmapText.pData);//free ARGB1555 bitmap
+            //This is inefficient, we use 4 times more memory, but the buffer size is small
+            bitmapText.pData=(void *)destBitmap;//replace it with I4, same size
+            bitmapText.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
+        }
+        if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_1555){//convert to I4 and copy over the main overlay            
+																									  
+            uint8_t* destBitmap =  (uint8_t*)malloc(bitmapText.u32Height*getRowStride(bitmapText.u32Width , PIXEL_FORMAT_BitsPerPixel));                                  
+
+            //convertBitmap1555ToARGB1555(bitmapText.pData, bitmapText.u32Width , bitmapText.u32Height, destBitmap, msg_colour);      
+            memcpy(destBitmap,bitmapText.pData,bitmapText.u32Height*getRowStride(bitmapText.u32Width , PIXEL_FORMAT_BitsPerPixel));
             free(bitmapText.pData);//free ARGB1555 bitmap
             //This is inefficient, we use 4 times more memory, but the buffer size is small
             bitmapText.pData=(void *)destBitmap;//replace it with I4, same size
@@ -1186,13 +1266,22 @@ bool DrawText(){
         posX=20 + ((timems/16)%(bmpBuff.u32Width - bitmapText.u32Width - 40))& ~1;
     posY=(msg_layout/4)==0? 0 : (bmpBuff.u32Height - bitmapText.u32Height) - 2;
     
-    if (bitmapText.pData!=NULL && bitmapText.enPixelFormat ==  PIXEL_FORMAT_DEFAULT){
+    if (bitmapText.pData!=NULL && bitmapText.enPixelFormat ==  PIXEL_FORMAT_I4){
         copyRectI4(bitmapText.pData,bitmapText.u32Width,bitmapText.u32Height,
                                 bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
                                 //0,0,bitmapText.u32Width,bitmapText.u32Height,
                                 0,0,bitmapText.u32Width ,bitmapText.u32Height,
                                 posX,posY);
     }
+
+    if (bitmapText.pData!=NULL && bitmapText.enPixelFormat ==  PIXEL_FORMAT_1555){
+        copyRectARGB1555(bitmapText.pData,bitmapText.u32Width,bitmapText.u32Height,
+                                bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
+                                //0,0,bitmapText.u32Width,bitmapText.u32Height,
+                                0,0,bitmapText.u32Width ,bitmapText.u32Height,
+                                posX,posY);
+    }
+ 
     return true;
 }
 
@@ -1242,6 +1331,33 @@ bool Convert2SmallGlyph(BITMAP *fnt ,  u_int16_t *s_left, u_int16_t *s_top, u_in
     return false;
 }
 
+static bool ReplaceWidgets_Slow(int* x, int* y){
+#ifdef _x86    
+    if (character_map[*x][*y]=='!' && character_map[*x+1][*y]=='R' && character_map[*x+2][*y]=='C' && character_map[*x+3][*y]=='!'){                                        
+                    RCWidgetX = *x *current_display_info.font_width;
+                    RCWidgetY = current_display_info.font_height * *y;
+                    *x=*x+3;//Skip this text                    
+                    return true;
+    }
+#endif    
+
+    if ( character_map[*x][*y]=='!' && character_map[*x+1][*y]=='T' && character_map[*x+2][*y]=='M' && character_map[*x+3][*y]=='P'&& character_map[*x+4][*y]=='!'){                                        
+                    int temp = 99;
+#if __SIGMASTAR__                    
+                    temp = GetTempSigmaStar();
+#else   
+temp = last_board_temp;                    
+#endif                  
+                    character_map[*x][*y] = 199;//10748/54=199
+                    character_map[*x+1][*y]=temp/10;
+                    character_map[*x+2][*y]=temp%10;
+                    character_map[*x+3][*y] = 11;//degree
+                    character_map[*x+4][*y] = 0;//degree
+                    //*x=*x+4;//Skip this text                    
+                    return false;//need to render them
+    }
+    return false;
+}
 
 static void draw_screenBMP(){
     uint64_t step2=0;
@@ -1296,6 +1412,10 @@ static void draw_screenBMP(){
                 }
 
                 uint16_t c = character_map[x][y];
+
+                if (ReplaceWidgets_Slow(&x,&y)) // Logic moved to InjectChars
+                    continue;
+
                 if (c != 0){
                     uint8_t page = 0;
                     if (c > 255) {
@@ -1389,9 +1509,11 @@ static void draw_screenBMP(){
             draw_AHI();        
     if (AHI_Enabled==1 || AHI_Enabled>2)
             draw_Ladder(); 
+    if (RCWidgetX>0)
+        drawRC_Channels(RCWidgetX, RCWidgetY, channels[0], channels[1], channels[2], channels[3]);
 
-    //this is only 
     
+    //Render_x86_rect(bmp_x86,bmpBuff.u32Width, bmpBuff.u32Height,10,10,10,10,24,36);
     FlushDrawing_x86();
 
     //free(bmp_x86);   
@@ -1472,6 +1594,7 @@ static void draw_complete()
     DEBUG_PRINT("draw complete!\n");
     
 }
+
 
 static void msp_callback(msp_msg_t *msp_message)
 {
