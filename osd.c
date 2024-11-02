@@ -1419,7 +1419,7 @@ static void draw_screenBMP(){
                 if (c != 0){
                     uint8_t page = 0;
                     if (c > 255) {
-                        page = 1;
+                        page = (c >> 8) & 0x03;
                         c = c & 0xFF;
                     }
                 
