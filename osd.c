@@ -130,7 +130,7 @@ static int16_t last_heading=0;
 
 static int16_t last_directionToHome=0;
 static int16_t last_distanceToHome=0;
-int AHI_TiltY = -150;
+int AHI_TiltY = 50;
 
 // https://github.com/betaflight/betaflight/blob/master/src/main/msp/msp.c#L1949
 typedef struct
@@ -199,6 +199,7 @@ static uint64_t last_MSP_ATTITUDE=0;
 static int stat_attitudeDelay=0;
 int RCWidgetX=1620;
 int RCWidgetY=820;
+char air_unit_info_msg[255];
 
 extern bool AbortNow;
 extern bool verbose;
@@ -210,6 +211,7 @@ extern void ProcessChannels();
 extern uint16_t channels[18];
 extern int matrix_size;
 extern int GetTempSigmaStar();
+extern int Get8812EU2Temp();
 extern int SendWfbLogToGround();
 extern bool monitor_wfb;
 extern float last_board_temp;
@@ -328,9 +330,11 @@ int fcX= 12; int fcW=10; int fcY= 5 ; int fcH=8;
 
 
 static bool InjectChars(char* payload){
+    
+    char* str= payload + 4;
     //string starts at 4 payload[0]==MSP_subtype
     //set Position to Widget that draws Stick Positions
-    if (payload[4]=='!' && payload[4+1]=='R' && payload[4+2]=='C' && payload[4+3]=='!'){    
+    if (str[0]=='!' && str[1]=='R' && str[2]=='C' && str[3]=='!'){    
         // uint8_t row = payload[0]; //uint8_t col = payload[1];                                    
         RCWidgetX = payload[2] *current_display_info.font_width;
         RCWidgetY = payload[1] * current_display_info.font_height;  
@@ -338,23 +342,67 @@ static bool InjectChars(char* payload){
 
         return true;
     }
+    int cnt=0;
+    //may have several in one text message 
+    while (str[0]!=0 && cnt<20){       
+        //set extra temp on screen
+        if ( str[0]=='!' && str[1]=='T' && str[2]=='M' && str[3]=='P'&& str[4]=='!'){                                        
+            int temp = 99;
+    #if __SIGMASTAR__                    
+            temp = GetTempSigmaStar();
+    #else
+            temp = last_board_temp ;  
+            if (last_board_temp==-100)   
+                last_board_temp=99;              
+    #endif                  
+            if (last_board_temp<0)   
+                last_board_temp=99;
 
-    //set extra temp on screen
-    if ( payload[4]=='!' && payload[4+1]=='T' && payload[4+2]=='M' && payload[4+3]=='P'&& payload[4+4]=='!'){                                        
-                    int temp = 99;
-#if __SIGMASTAR__                    
-                    temp = GetTempSigmaStar();
-#else
-        temp = last_board_temp ;                   
-#endif                  
-        payload[4] = 199;//10748/54=199
-        payload[4+1]=48 + temp/10;
-        payload[4+2]=48 + temp%10;
-        payload[4+3] = 11;//degree
-        payload[4+4] = 0;//degree
-                         
-        return true;
-    }
+            if (font_pages==2){//inav symbols
+                str[0] = 199;//10748/54=199
+                str[3] = 11;//degree
+            }else{//betaflight symbols
+                str[0] = 122;//10748/54=199
+                str[3] = 14;//degree
+            }
+            str[1]=48 + temp/10;
+            str[2]=48 + temp%10;
+            
+            str[4] = 32;//end of string, no need, we are only replacing! place space
+            str = str + 4;         
+            //return true;                               
+        }
+
+        //set extra temp on screen
+        if ( str[0]=='!' && str[1]=='T' && str[2]=='M' && str[3]=='W'&& str[4]=='!'){                                        
+                        int temp = 99;
+                        
+            temp = Get8812EU2Temp();
+            if (temp<0)   
+                last_board_temp=99;
+        
+            if (last_board_temp==-100)   
+                last_board_temp=99;              
+                
+            if (last_board_temp<0)   
+                last_board_temp=99;
+            if (font_pages==2){//inav symbols
+                str[0] = 196;//10748/54=199
+                str[3] = 11;//degree
+            }else{//betaflight symbols
+                str[0] = 122;//10748/54=199
+                str[3] = 14;//degree
+            }
+            str[1]=48 + temp/10;
+            str[2]=48 + temp%10;
+            
+            str[4] = 32;//end of string, no need, we are only replacing! place space
+            str = str + 4;//move the pointer               
+            //return true;
+        }
+         str=str + 1;
+         cnt++;
+    }//while
     return false;
 }
 
@@ -423,10 +471,12 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
          
         case MSP_CMD_DISPLAYPORT: {
 
-            if (msp_message->direction == MSP_INBOUND
-            && msp_message->cmd == MSP_CMD_DISPLAYPORT 
-            && msp_message->payload[0] == MSP_DISPLAYPORT_DRAW_STRING)
-            {
+            if(msp_message->payload[0] == MSP_DISPLAYPORT_INFO_MSG) {
+                msp_message->payload[80]=0;//just in case
+                strcpy(air_unit_info_msg,&msp_message->payload[1]);                
+            }
+            //Here it will replace it ve
+            if (msp_message->direction == MSP_INBOUND && msp_message->cmd == MSP_CMD_DISPLAYPORT && msp_message->payload[0] == MSP_DISPLAYPORT_DRAW_STRING){
                 InjectChars(&msp_message->payload[0]);
             }
             
@@ -454,6 +504,7 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
                    
                 }
             }
+
             
             break;
         }
@@ -902,7 +953,7 @@ void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1,
                             K=1;
                         xHome = (start_x + (K*((double)width_ladder)*2.5));
                     }
-                    if (xHome>start_x+width_ladder*2.5-40);//Don't go over the pitch digits
+                    if (xHome>(start_x+width_ladder*2.5-40))//Don't go over the pitch digits
                         xHome=start_x+width_ladder*2.5-40;
                     
                     int c=10;//Home(small house) symbol to be shown for INAV
@@ -1101,6 +1152,13 @@ static void fill(char* str)
             sprintf(t, "%d", temp);
             strcat(out, t);
             opos += strlen(t);
+        }else if (str[ipos + 1] == 'W'){//get WiFi 8812EU temp
+            ipos++;                     
+            char c[18];
+            sprintf(c, "%d", Get8812EU2Temp());                        
+            strcat(out, c);
+            opos += strlen(c);
+            
         } else if (str[ipos + 1] == 'F' && isdigit(str[ipos + 2]) && isdigit(str[ipos + 3])) {
             // Extract the two digits after $F as an integer
             char numStr[3] = {str[ipos + 2], str[ipos + 3], '\0'};
@@ -1210,6 +1268,26 @@ bool DrawText(){
             fill(out);
             osds[FULL_OVERLAY_ID].updt = 0;//
         }
+
+#ifdef __GOKE__
+//rendering text on goke  makes the program crash?! Need to fix.
+// se we simply send it to the ground
+        if (out_sock>0){//send the line to the ground  
+                static uint8_t message_buffer[256]; 
+                static uint8_t payload_buffer[256];    
+                out[79]=0;//just in case
+                int msglen = strlen(&out[0]);          
+                            
+                payload_buffer[0]=MSP_DISPLAYPORT_INFO_MSG;
+                memcpy(&payload_buffer[1],&out[0], msglen);  
+                construct_msp_command(message_buffer, MSP_CMD_DISPLAYPORT, &payload_buffer[0], 80, MSP_INBOUND);
+                sendto(out_sock, message_buffer,100 , 0, (struct sockaddr *)&sin_out, sizeof(sin_out));                             
+        }
+        printf("skip print text\r\n");
+        return false;
+#endif        
+
+
         if (access(font, F_OK)) //no font file
             return false;
 
@@ -1331,7 +1409,9 @@ bool Convert2SmallGlyph(BITMAP *fnt ,  u_int16_t *s_left, u_int16_t *s_top, u_in
     return false;
 }
 
+//Not needed, but somehow parsing DrawString in InjectChars sometimes does not work.
 static bool ReplaceWidgets_Slow(int* x, int* y){
+  
 #ifdef _x86    
     if (character_map[*x][*y]=='!' && character_map[*x+1][*y]=='R' && character_map[*x+2][*y]=='C' && character_map[*x+3][*y]=='!'){                                        
                     RCWidgetX = *x *current_display_info.font_width;
@@ -1339,23 +1419,58 @@ static bool ReplaceWidgets_Slow(int* x, int* y){
                     *x=*x+3;//Skip this text                    
                     return true;
     }
-#endif    
-
+#endif        
+  
     if ( character_map[*x][*y]=='!' && character_map[*x+1][*y]=='T' && character_map[*x+2][*y]=='M' && character_map[*x+3][*y]=='P'&& character_map[*x+4][*y]=='!'){                                        
                     int temp = 99;
 #if __SIGMASTAR__                    
                     temp = GetTempSigmaStar();
 #else   
-temp = last_board_temp;                    
+                    temp = last_board_temp;                    
 #endif                  
-                    character_map[*x][*y] = 199;//10748/54=199
-                    character_map[*x+1][*y]=temp/10;
-                    character_map[*x+2][*y]=temp%10;
-                    character_map[*x+3][*y] = 11;//degree
+                    if (temp<0)   
+                        temp=99;
+                    if (font_pages==2){//inav symbols
+                        character_map[*x][*y] = 199;//10748/54=199
+                        character_map[*x+3][*y] = 11;//degree
+                    }else{//betaflight symbols                         
+                        character_map[*x][*y] = 123;//6590/54=122
+                        character_map[*x+3][*y] = 14;//degree                        
+                    }
+                                      
+                    character_map[*x+1][*y]= 48 + temp/10;
+                    character_map[*x+2][*y]= 48 + temp%10;
+                    
                     character_map[*x+4][*y] = 0;//degree
                     //*x=*x+4;//Skip this text                    
                     return false;//need to render them
     }
+    //WIFI card Temp
+    if ( character_map[*x][*y]=='!' && character_map[*x+1][*y]=='T' && character_map[*x+2][*y]=='M' && character_map[*x+3][*y]=='W'&& character_map[*x+4][*y]=='!'){                                        
+                    int temp = 99;
+#if __SIGMASTAR__                    
+                    temp = Get8812EU2Temp();
+#else   
+                    temp = last_board_temp;                    
+#endif                  
+                    if (temp<0)   
+                        temp=99;
+                    if (font_pages==2){//inav symbols
+                        character_map[*x][*y] = 196;//10748/54=199 Thermometer symbol
+                        character_map[*x+3][*y] = 11;//degree
+                    }else{  //betaflight symbols
+                        character_map[*x][*y] = 122;//6590/54=122
+                        character_map[*x+3][*y] = 14;//degree
+                    }
+                                      
+                    character_map[*x+1][*y]=48 + temp/10;
+                    character_map[*x+2][*y]=48 + temp%10;                    
+                    character_map[*x+4][*y] = 0;//degree
+                    //*x=*x+4;//Skip this text                    
+                    return false;//need to render them
+    }
+ 
+
     return false;
 }
 
@@ -1413,8 +1528,8 @@ static void draw_screenBMP(){
 
                 uint16_t c = character_map[x][y];
 
-                if (ReplaceWidgets_Slow(&x,&y)) // Logic moved to InjectChars
-                    continue;
+                //if (ReplaceWidgets_Slow(&x,&y)) // Logic moved to InjectChars
+                //    continue;
 
                 if (c != 0){
                     uint8_t page = 0;
@@ -1475,7 +1590,8 @@ static void draw_screenBMP(){
             draw_AHI();
         
         if (AHI_Enabled==1 || AHI_Enabled>2)
-            draw_Ladder();   
+            draw_Ladder();
+
 #endif            
     }//if DrawOSD
     else{
@@ -1512,6 +1628,12 @@ static void draw_screenBMP(){
     if (RCWidgetX>0)
         drawRC_Channels(RCWidgetX, RCWidgetY, channels[0], channels[1], channels[2], channels[3]);
 
+    //strcpy(air_unit_info_msg,"30fps/MCS1 7Mb reset test message that can be 80 characters long that are enough");
+    if (strlen(air_unit_info_msg)>1){                           
+        int osd_font_size=14;
+        //TO DO Change for other resolutions, or right align
+        drawText_x86(air_unit_info_msg, 1350 , 1+osd_font_size, getcolor(COLOR_BLACK), /*font_size*/ osd_font_size, false);   
+    }
     
     //Render_x86_rect(bmp_x86,bmpBuff.u32Width, bmpBuff.u32Height,10,10,10,10,24,36);
     FlushDrawing_x86();
@@ -1901,7 +2023,11 @@ On sigmastar the BMP row stride is aligned to 8 bytes, that is 16 pixels in PIXE
             printf("Create_region PixelFormat:%d Size: %d:%d X_Offset:%d results: %d \r\n", PIXEL_FORMAT_DEFAULT, OVERLAY_WIDTH,OVERLAY_HEIGHT, XOffs, rgn);
          
         if (DrawOSD){   //Show Font Preview
+#ifdef _x86
+            cntr= - 30; //skip first 40 draw requests from the FC to show the preview, about 3 seconds
+#else            
             cntr= - 130; //skip first 40 draw requests from the FC to show the preview, about 3 seconds
+#endif            
             BITMAP bitmap;                                
             int prepared=0;           
 

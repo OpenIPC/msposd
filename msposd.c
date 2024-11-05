@@ -346,6 +346,36 @@ uint64_t get_current_time_ms_Old() {
 }
 
 
+int last_wifi_temp;
+static long last_wifi_temp_taken=0;
+int Get8812EU2Temp(){
+
+	if ((get_time_ms() - last_wifi_temp_taken  ) < 1000)//Set some caching to keep CPU load low                      
+		return last_wifi_temp;
+    last_wifi_temp_taken= get_time_ms();
+
+	FILE *stat = popen("cat /proc/net/rtl88x2eu/wlan0/thermal_state", "r");
+	if (stat == NULL) {
+		fprintf(stderr, "Failed to run command\n");
+		return 1;
+	}
+	char buffer[128];
+	int temperature=0;
+	char c[25];
+	// Read the first line of output
+	if (fgets(buffer, sizeof(buffer), stat) != NULL) {               
+		if (sscanf(buffer, "rf_path: %*d, thermal_value: %*d, offset: %*d, temperature: %d", &temperature) == 1) {
+			printf("WiFi Temperature from the first line: %d\n", temperature);
+		} else {
+			fprintf(stderr, "Failed to parse wifi temperature\n");
+		}
+	}
+	// Close the pipe
+	pclose(stat);
+	last_wifi_temp=temperature;
+	return temperature;
+}
+
 float last_board_temp;
 
 static long last_board_temp_taken=0;

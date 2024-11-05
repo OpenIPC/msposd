@@ -99,12 +99,21 @@ echo "Custom Message... &L04 &F22 CPU:&C &B temp:&T" >/tmp/MSPOSD.msg
 ```
 Extra params withing the message to be shown:
 - &T - Board temperature  
+- &W - WiFi module temperature (8812xx chipsets)
 - &B - Video Bitrate and FPS  
 - &C - CPU Usage percent  
 - &t - Time  
 - &Fxx - Set text font size (10 to 99)  
 - &Lxx - Set text colour (first digit 0- white, 1 - black, 2- red, 3 - green, 4 - blue, 5 - yellow, 6 - magenta, 7 - cyan) and postion on the screen(second digit)  0-TopLeft, 1-TopCenter, 2-TopRight, 3-TopMoving,4-BottomLeft, 5-BottomCenter, 6-BottomRight, 7-BottomMoving   
- -&p - Dropped packet injections by wfb-ng
+ -&p - Dropped packet injections by wfb-ng  
+
+###  Custom OSD elements  
+Custom elements can be added via the standard inav/bf/ardu OSD Configurator. A keyword needs to be added on the screen, that will be replaced by the corresponding widget.  
+This keywords can be added using the PilotName/CraftName fields(INAV/BF/Ardu), or custom Text Elements(INAV only).  
+ - ```!TWM!``` Camera board temp  
+ - ```!TMW!``` WiFi module tem(only 8812EU2 chipsets supported)  
+ - ```!RC!``` Sticks Position widget (Ground Side only)  
+
 ### Usage Example:
 
 ```

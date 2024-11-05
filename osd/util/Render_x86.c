@@ -1,5 +1,5 @@
 //Uncomment when debugging to have access to the windows below the OSD surface
-//#define _DEBUG_x86
+#define _DEBUG_x86
 
 #include <cairo/cairo.h>
 #include <cairo/cairo-xlib.h>
@@ -30,6 +30,8 @@ extern bool verbose;
 extern struct event_base *base;
 struct event *x11_event=NULL;
 
+Window RootWindow;
+
 
 extern int AHI_TiltY;
 void handle_key_press(XEvent *event) {
@@ -40,15 +42,14 @@ void handle_key_press(XEvent *event) {
         printf("Escape key pressed, exiting...\n");
         //exit(0);  // Exit the program on Escape key
     }    
-    if ((event->xkey.state & Mod1Mask) && (keysym == XK_Up)) {
-        printf("KeyUP\r\n");
+    if ((event->xkey.state & Mod1Mask) && (keysym == XK_Up)) {        
         if (AHI_TiltY<300)
             AHI_TiltY+=30;
         return;
     }
-        if ((event->xkey.state & Mod1Mask) && (keysym == XK_Down)) {
-            if (AHI_TiltY>-300)
-                AHI_TiltY-=30;
+    if ((event->xkey.state & Mod1Mask) && (keysym == XK_Down)) {
+        if (AHI_TiltY>-300)
+            AHI_TiltY-=30;
         return;
     }
 }
@@ -58,8 +59,7 @@ void event_callback(evutil_socket_t fd, short event, void *arg) {
     while (XPending(display)) {  // Process all queued X events
         XNextEvent(display, &xevent);
         if (xevent.type == Expose) {
-            //cairo_set_source_rgb(cr, 0, 0, 1); // Blue background
-            //cairo_paint(cr);
+            //Do something here
         } else if (xevent.type == KeyPress) {
             handle_key_press(&xevent);
         }
@@ -73,6 +73,7 @@ int Init_x86(uint16_t *width, uint16_t *height) {
 #ifdef _DEBUG_x86
         forcefullscreen=false;
 #endif
+    
 
         display = XOpenDisplay(NULL);
         if (!display) {
@@ -80,7 +81,7 @@ int Init_x86(uint16_t *width, uint16_t *height) {
             return 1;
         }
         int screen = DefaultScreen(display);
-        Window root = RootWindow(display, screen);
+        RootWindow = RootWindow(display, screen);
         
         uint16_t screen_width = DisplayWidth(display, screen);
         uint16_t screen_height = DisplayHeight(display, screen);
@@ -94,7 +95,7 @@ int Init_x86(uint16_t *width, uint16_t *height) {
         }
 
         XSetWindowAttributes attrs;
-        attrs.colormap = XCreateColormap(display, root, vinfo.visual, AllocNone);
+        attrs.colormap = XCreateColormap(display, RootWindow, vinfo.visual, AllocNone);
         attrs.border_pixel = 0;
         attrs.background_pixel = 0;
 //!!!!!!!!!!!!!!!!!!!!!!!!       THIS Removes window's borders  
@@ -103,7 +104,7 @@ int Init_x86(uint16_t *width, uint16_t *height) {
             attrs.override_redirect = False;
 
         // Create the window with transparency support
-        window = XCreateWindow(display, root,
+        window = XCreateWindow(display, RootWindow,
                                     0, 0, *width, *height, 0, 
                                     vinfo.depth, InputOutput, 
                                     vinfo.visual, 
@@ -246,6 +247,23 @@ void FlushDrawing_x86(){
         // Attach X11 display's file descriptor to the existing msposd event_base
         struct event *x11_event = event_new(base, ConnectionNumber(display), EV_READ | EV_PERSIST, event_callback, NULL);
         event_add(x11_event, NULL);
+
+       // if (XGrabKeyboard(display, window, True, GrabModeAsync, GrabModeAsync, CurrentTime) != GrabSuccess) 
+        //    fprintf(stderr, "Failed to grab keyboard\n");
+            // Grab only the specific key combinations
+        // XGrabKey(display, XKeysymToKeycode(display, XK_Up), Mod1Mask, window, True,
+        //      GrabModeAsync, GrabModeAsync); // Alt + Up Arrow
+        // XGrabKey(display, XKeysymToKeycode(display, XK_Down), Mod1Mask, window, True,
+        //      GrabModeAsync, GrabModeAsync); // Alt + Up Arrow
+        // XGrabKey(display, XKeysymToKeycode(display, XK_Left), ShiftMask, window, True,
+        //      GrabModeAsync, GrabModeAsync); // Shift + Left Arrow
+
+        
+        XGrabKey(display, XKeysymToKeycode(display, XK_Up), Mod1Mask, RootWindow, True,
+             GrabModeAsync, GrabModeAsync); // Alt + Up Arrow
+        XGrabKey(display, XKeysymToKeycode(display, XK_Down), Mod1Mask, RootWindow, True,
+             GrabModeAsync, GrabModeAsync); // Alt + Down Arrow
+        
     }
    
     // Copy work buffer to the display surface do avoid flickering
@@ -388,7 +406,8 @@ void drawText_x86(const char* text, int x, int y, uint32_t color, double size, b
         cairo_save(cr);        
         cairo_translate(cr, x, y);
     
-        cairo_rotate(cr, Transform_Roll * (M_PI / 180.0));
+        if (Transpose) 
+            cairo_rotate(cr, Transform_Roll * (M_PI / 180.0));
                 
         cairo_move_to(cr, 0, 0);
         cairo_set_font_size(cr, size);        
