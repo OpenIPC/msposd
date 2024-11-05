@@ -1,5 +1,5 @@
 //Uncomment when debugging to have access to the windows below the OSD surface
-#define _DEBUG_x86
+//#define _DEBUG_x86
 
 #include <cairo/cairo.h>
 #include <cairo/cairo-xlib.h>
