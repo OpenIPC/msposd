@@ -4,7 +4,7 @@
         {
             "label": "gcc build",
             "type": "shell",
-            "command": "make x86",
+            "command": "./build.sh x86",
             "args": [],
             "group": {
                 "kind": "build",
@@ -14,6 +14,19 @@
                 "$gcc"
             ],
             "detail": "Build project using Makefile"
+        },        
+        {
+            "label": "copy msposd",
+            "type": "shell",
+            "command": "cp",
+            "args": [
+                "-f",
+                "${workspaceFolder}/msposd_x86",
+                "${workspaceFolder}/msposd"
+            ],
+            "problemMatcher": [],
+            "detail": "Copy msposd to workspace folder",
+            "dependsOn": "gcc build"
         }
     ]
 }

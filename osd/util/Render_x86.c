@@ -73,8 +73,7 @@ int Init_x86(uint16_t *width, uint16_t *height) {
 #ifdef _DEBUG_x86
         forcefullscreen=false;
 #endif
-    
-
+        
         display = XOpenDisplay(NULL);
         if (!display) {
             fprintf(stderr, "Cannot open display\n");
@@ -330,7 +329,7 @@ void drawLine_x86(int x0, int y0, int x1, int y1, uint32_t color, double thickne
     double r = ((color >> 24) & 0xFF) / 255.0;
     double g = ((color >> 16) & 0xFF) / 255.0;
     double b = ((color >> 8) & 0xFF) / 255.0;
-    double a = 128;//(color & 0xFF) / 255.0;
+    double a = (color & 0xFF) / 255.0; //128 
     
     if (!outlined){
          cairo_set_source_rgba(cr, r, g, b, a); 
@@ -352,13 +351,14 @@ void drawLine_x86(int x0, int y0, int x1, int y1, uint32_t color, double thickne
         cairo_set_line_width(cr, thickness + 2);  // Make the outline slightly thicker than the main line
         cairo_move_to(cr, x0, y0);
         cairo_line_to(cr, x1, y1);
+
         cairo_stroke(cr);
         cairo_restore(cr);
 
         cairo_save(cr);
         // Draw the main line (colored) with the original thickness
         cairo_set_source_rgba(cr, r, g, b, a);  // Use the desired RGBA values for the line color
-        cairo_set_line_width(cr, thickness);  
+        cairo_set_line_width(cr, thickness  );  
         cairo_move_to(cr, x0, y0);
         cairo_line_to(cr, x1, y1);
         cairo_stroke(cr);
@@ -366,8 +366,21 @@ void drawLine_x86(int x0, int y0, int x1, int y1, uint32_t color, double thickne
     }
 }
 
+
 // Function to draw rotated text with rotation
-void drawText_x86(const char* text, int x, int y, uint32_t color, double size, bool Transpose) {
+int getTextWidth_x86(const char* text , double size) {    
+    cairo_set_font_size(cr, size);      
+    cairo_text_extents_t extents;
+    // Get the extents of the text
+    cairo_text_extents(cr, text, &extents);
+    // Return the width of the text
+    return (int) extents.width;  
+     
+}
+
+
+// Function to draw rotated text with rotation
+void drawText_x86(const char* text, int x, int y, uint32_t color, double size, bool Transpose, int Outline) {
     // Extract the RGBA components from the color
     double r = ((color >> 24) & 0xFF) / 255.0;
     double g = ((color >> 16) & 0xFF) / 255.0;
@@ -402,18 +415,37 @@ void drawText_x86(const char* text, int x, int y, uint32_t color, double size, b
         cairo_move_to(cr, x, y);    
         cairo_show_text(cr, text);
     }else{
-        // Save the current state of the Cairo context
+         // Save the current state of the Cairo context
         cairo_save(cr);        
         cairo_translate(cr, x, y);
     
         if (Transpose) 
             cairo_rotate(cr, Transform_Roll * (M_PI / 180.0));
-                
+
+        if (Outline){
+            // Draw the outline (stroke) first with a larger line width
+            cairo_set_line_width(cr, Outline); // Adjust the width as needed for the outline
+            cairo_set_source_rgba(cr, 0, 0, 0, 1.0); // Set color for the outline (black)            
+            cairo_move_to(cr, 0, 0);      
+            cairo_text_path(cr, text);  // Create a path for the text
+            cairo_stroke(cr);           // Stroke the path (outline)
+           
+        }
+        // Draw the text itself (fill) on top of the outline
+        cairo_set_line_width(cr, 1.0); // Reset line width to normal
+        cairo_set_source_rgba(cr, r, g, b, a); // Set the original color for the text
+        // Fill the text path with the text color
         cairo_move_to(cr, 0, 0);
-        cairo_set_font_size(cr, size);        
-        cairo_show_text(cr, text);
+        cairo_text_path(cr, text);  // Create the path for the text
+        cairo_fill(cr);             // Fill the path with the text color
+        
+
+        // cairo_move_to(cr, 0, 0);
+        // cairo_set_font_size(cr, size);        
+        // cairo_show_text(cr, text);
         
         cairo_restore(cr);
+
 
     }
  

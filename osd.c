@@ -214,7 +214,7 @@ extern int GetTempSigmaStar();
 extern int Get8812EU2Temp();
 extern int SendWfbLogToGround();
 extern bool monitor_wfb;
-extern float last_board_temp;
+extern int last_board_temp;
 
 uint64_t get_time_ms() // in milliseconds
 {
@@ -333,8 +333,8 @@ static bool InjectChars(char* payload){
     
     char* str= payload + 4;
     //string starts at 4 payload[0]==MSP_subtype
-    //set Position to Widget that draws Stick Positions
-    if (str[0]=='!' && str[1]=='R' && str[2]=='C' && str[3]=='!'){    
+    //set Position to Widget that draws Stick Positions - only on ground side, so do not clear it on camera side
+    if (DrawOSD && str[0]=='!' && str[1]=='R' && str[2]=='C' && str[3]=='!'){    
         // uint8_t row = payload[0]; //uint8_t col = payload[1];                                    
         RCWidgetX = payload[2] *current_display_info.font_width;
         RCWidgetY = payload[1] * current_display_info.font_height;  
@@ -347,16 +347,17 @@ static bool InjectChars(char* payload){
     while (str[0]!=0 && cnt<20){       
         //set extra temp on screen
         if ( str[0]=='!' && str[1]=='T' && str[2]=='M' && str[3]=='P'&& str[4]=='!'){                                        
-            int temp = 99;
-    #if __SIGMASTAR__                    
+            int temp = 103;
+    #if __SIGMASTAR__  
+            temp = 102;                  
             temp = GetTempSigmaStar();
     #else
             temp = last_board_temp ;  
-            if (last_board_temp==-100)   
-                last_board_temp=99;              
+            if (temp==-100)   
+                temp=101;              
     #endif                  
-            if (last_board_temp<0)   
-                last_board_temp=99;
+            if (temp<0)   
+                temp=104;
 
             if (font_pages==2){//inav symbols
                 str[0] = 199;//10748/54=199
@@ -365,7 +366,11 @@ static bool InjectChars(char* payload){
                 str[0] = 122;//10748/54=199
                 str[3] = 14;//degree
             }
-            str[1]=48 + temp/10;
+            if (temp>100)
+                str[1]=48 + 'A';
+            else
+                str[1]=48 + temp/10;
+
             str[2]=48 + temp%10;
             
             str[4] = 32;//end of string, no need, we are only replacing! place space
@@ -421,6 +426,10 @@ static void rx_msp_callback(msp_msg_t *msp_message)
             fb_cursor = 0;
             return;
     }
+    //Here it will replace custom text messages for configurator screen
+    if (msp_message->cmd==MSP_CMD_DISPLAYPORT && msp_message->direction == MSP_INBOUND && msp_message->cmd == MSP_CMD_DISPLAYPORT && msp_message->payload[0] == MSP_DISPLAYPORT_DRAW_STRING)
+        InjectChars(&msp_message->payload[0]);
+    
     uint16_t size = msp_data_from_msg(message_buffer, msp_message);
     copy_to_msp_frame_buffer(message_buffer, size);
 
@@ -473,12 +482,11 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
 
             if(msp_message->payload[0] == MSP_DISPLAYPORT_INFO_MSG) {
                 msp_message->payload[80]=0;//just in case
-                strcpy(air_unit_info_msg,&msp_message->payload[1]);                
+                strcpy(air_unit_info_msg,&msp_message->payload[1]); 
+                fill(air_unit_info_msg);               
             }
-            //Here it will replace it ve
-            if (msp_message->direction == MSP_INBOUND && msp_message->cmd == MSP_CMD_DISPLAYPORT && msp_message->payload[0] == MSP_DISPLAYPORT_DRAW_STRING){
-                InjectChars(&msp_message->payload[0]);
-            }
+
+
             
             if ( ! vtxMenuActive ) {               
                 displayport_process_message(display_driver, msp_message); 
@@ -826,7 +834,7 @@ void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1,
 
                     //left upper cap
                     //drawRectangleI4(bmpBuff.pData, px , y , stroke_s , width_ladder/24, m_color,subline_thickness);                    
-                    LineTranspose(bmpBuff.pData, px, y, px, y+width_ladder/24 , m_color, subline_thickness+1); // Top side    
+                    LineTranspose(bmpBuff.pData, px, y, px, y+width_ladder/24 , m_color, subline_thickness); // Top side    
 
                     //left upper line
                     //drawRectangleI4(bmpBuff.pData, px , y , width_ladder/3 , stroke_s, m_color,subline_thickness);
@@ -834,7 +842,7 @@ void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1,
 
                     //right upper cap
                     //drawRectangleI4(bmpBuff.pData, px+width_ladder-2 , y , px+width_ladder-2 + stroke_s , width_ladder/24, m_color,subline_thickness);
-                    LineTranspose(bmpBuff.pData, px+width_ladder-2 , y , px+width_ladder-2, y+width_ladder/24 , m_color, subline_thickness+1); // Top side    
+                    LineTranspose(bmpBuff.pData, px+width_ladder-2 , y , px+width_ladder-2, y+width_ladder/24 , m_color, subline_thickness); // Top side    
 
                     //right upper line
                     //drawRectangleI4(bmpBuff.pData, px+width_ladder*2/3 , y , width_ladder/3 , stroke_s, m_color,subline_thickness);
@@ -924,9 +932,12 @@ void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1,
                 else
                     sprintf(buffer, "%+02d°", -last_pitch/10);
                 
-                int osd_font_size=20;
+                int osd_font_size=18;
 #ifdef _x86
-                drawText_x86(buffer, start_x + width_ladder*2.5 - spacing/3, y + osd_font_size/2 - 4, getcolor(COLOR_WHITE), osd_font_size, true);
+                 uint32_t color = getcolor(COLOR_YELLOW);
+                 if ((-50 < last_pitch) && (last_pitch <50))
+                    color = getcolor(COLOR_WHITE);
+                drawText_x86(buffer, start_x + width_ladder*2.5 - spacing/3, y + osd_font_size/2 - 4, color, osd_font_size, true,1);
 #endif                
 
                 if (AHI_Enabled==3){//Draw home
@@ -1013,9 +1024,9 @@ void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1,
 static int droppedTTL=0;
 static bool first_wfb_read=true;
 
-static void fill(char* str)
+ void fill(char* str)
 {
-    unsigned int rxb_l, txb_l, cpu_l[6];
+    unsigned int rxb_l, txb_l, cpu_l[7];
     char out[180] = "";
     char param = 0;
     int ipos = 0, opos = 0;
@@ -1058,25 +1069,48 @@ static void fill(char* str)
         {
             ipos++;
             char tmp[6];
-            unsigned int cpu[6];
-#ifdef __SIGMASTAR__            
+            unsigned int cpu[7];
+            static unsigned long long cpu_l[7] = {0}; // Stores previous CPU stats for comparison
+
+            //#ifdef __SIGMASTAR__
             FILE *stat = fopen("/proc/stat", "r");
-            fscanf(stat, "%s %u %u %u %u %u %u",
-                tmp, &cpu[0], &cpu[1], &cpu[2], &cpu[3], &cpu[4], &cpu[5]);
+            if (!stat) {
+                perror("Failed to open /proc/stat");
+                return;
+            }
+
+            // Read CPU statistics from /proc/stat
+            fscanf(stat, "%s %u %u %u %u %u %u %u", 
+                tmp, &cpu[0], &cpu[1], &cpu[2], &cpu[3], &cpu[4], &cpu[5], &cpu[6]);
             fclose(stat);
-#else
-            
-#endif
-            char c[5];
-            char avg = 100 - (cpu[3] - cpu_l[3]) / sysconf(_SC_NPROCESSORS_ONLN);
-            sprintf(c, "%d%%", avg);
+            // #endif
+
+            // Calculate the total time and idle time for the current reading
+            unsigned long long total_time = cpu[0] + cpu[1] + cpu[2] + cpu[3] + cpu[4] + cpu[5] + cpu[6];
+            unsigned long long idle_time = cpu[3] + cpu[4];  // Idle time is the sum of idle and iowait
+
+            // Calculate the total and idle differences since the last check
+            unsigned long long prev_total_time = cpu_l[0] + cpu_l[1] + cpu_l[2] + cpu_l[3] + cpu_l[4] + cpu_l[5] + cpu_l[6];
+            unsigned long long prev_idle_time = cpu_l[3] + cpu_l[4];
+            unsigned long long total_diff = total_time - prev_total_time;
+            unsigned long long idle_diff = idle_time - prev_idle_time;
+
+            // Avoid division by zero if total_diff is too small
+            float cpu_load = (total_diff == 0) ? 0.0f : 100.0f * (total_diff - idle_diff) / total_diff;
+
+            // Store the current values in cpu_l for the next comparison
+            for (int i = 0; i < 7; i++) {
+                cpu_l[i] = cpu[i];
+            }
+
+            // Format and append the CPU load percentage to output
+            char c[25];
+            sprintf(c, "%d%%", (int)cpu_load);
             strcat(out, c);
             opos += strlen(c);
-            for (int i = 0; i < sizeof(cpu) / sizeof(cpu[0]); i++)
-                cpu_l[i] = cpu[i];
-        }
+ 
 
-        else if (str[ipos + 1] == 'B')
+        }else if (str[ipos + 1] == 'B')
         {
             ipos++;
             unsigned int bitrate; ;
@@ -1160,30 +1194,40 @@ static void fill(char* str)
             opos += strlen(c);
             
         } else if (str[ipos + 1] == 'F' && isdigit(str[ipos + 2]) && isdigit(str[ipos + 3])) {
-            // Extract the two digits after $F as an integer
-            char numStr[3] = {str[ipos + 2], str[ipos + 3], '\0'};
-            int value = atoi(numStr);
-            //Ugly
-            osds[FULL_OVERLAY_ID].size=value;
-            // Skip the $Fxx part in the input string
-            ipos += 3;
+            if (!DrawOSD){
+                 strncat(out, str + ipos, 1);
+                opos++;
+            }else{
+                // Extract the two digits after $F as an integer
+                char numStr[3] = {str[ipos + 2], str[ipos + 3], '\0'};
+                int value = atoi(numStr);
+                //Ugly
+                osds[FULL_OVERLAY_ID].size=value;
+                // Skip the $Fxx part in the input string
+                ipos += 3;
+            }
         } else if (str[ipos + 1] == 'L' && isdigit(str[ipos + 2]) && isdigit(str[ipos + 3])) {
-            // Extract the two digits after $F as an integer
-            char numStr[3] = {str[ipos + 2], str[ipos + 3], '\0'};
-            int value = atoi(numStr);
-            //Ugly
-            msg_layout=value%10;
-            msg_colour=value/10;
-            if (msg_colour==0)
-                msg_colour=COLOR_WHITE;
-            else if (msg_colour==1)
-                msg_colour=COLOR_BLACK;
-            else                
-                // 1=Red, Green, Blue, Yellow ,Magenta, 6=Cyan
-                msg_colour--;
-            
-            
-            ipos += 3;
+            if (!DrawOSD){//we need to keep &Lxx
+                strncat(out, str + ipos, 1);
+                opos++;
+            }else{
+                // Extract the two digits after $F as an integer
+                char numStr[3] = {str[ipos + 2], str[ipos + 3], '\0'};
+                int value = atoi(numStr);
+                //Ugly
+                msg_layout=value%10;
+                msg_colour=value/10;
+                if (msg_colour==0)
+                    msg_colour=COLOR_WHITE;
+                else if (msg_colour==1)
+                    msg_colour=COLOR_BLACK;
+                else                
+                    // 1=Red, Green, Blue, Yellow ,Magenta, 6=Cyan
+                    msg_colour--;
+                
+                
+                ipos += 3;
+            }
         }
         else if (str[ipos + 1] == '&') {
             ipos++;
@@ -1223,7 +1267,7 @@ void remove_carriage_returns(char *out) {
 
 char osdmsg[80];
 
-bool DrawText(){
+bool DrawTextOnOSDBitmap(){
     char *font;
 #ifdef   _x86
     asprintf(&font, "fonts/%s.ttf", osds[FULL_OVERLAY_ID].font);
@@ -1261,6 +1305,7 @@ bool DrawText(){
     if(osds[FULL_OVERLAY_ID].updt == 1 || 
         (timems - LastOSDMsgParsed) > 1000){//Update varaibles in Message and render the text as BMP
         LastOSDMsgParsed= timems;//Do not parse and read variable too often
+        
         strcpy(out, osdmsg);
         //sprintf(out,"$M $B Size: %d",(int)osds[FULL_OVERLAY_ID].size);
         //osds[FULL_OVERLAY_ID].size=18+((cntr/10)%10);//TEST
@@ -1269,23 +1314,25 @@ bool DrawText(){
             osds[FULL_OVERLAY_ID].updt = 0;//
         }
 
-#ifdef __GOKE__
+
 //rendering text on goke  makes the program crash?! Need to fix.
-// se we simply send it to the ground
-        if (out_sock>0){//send the line to the ground  
-                static uint8_t message_buffer[256]; 
-                static uint8_t payload_buffer[256];    
-                out[79]=0;//just in case
-                int msglen = strlen(&out[0]);          
-                            
-                payload_buffer[0]=MSP_DISPLAYPORT_INFO_MSG;
-                memcpy(&payload_buffer[1],&out[0], msglen);  
-                construct_msp_command(message_buffer, MSP_CMD_DISPLAYPORT, &payload_buffer[0], 80, MSP_INBOUND);
-                sendto(out_sock, message_buffer,100 , 0, (struct sockaddr *)&sin_out, sizeof(sin_out));                             
+// so we simply send it to the ground
+    
+        if (!DrawOSD && out_sock>0){//send the line to the ground  
+            static uint8_t message_buffer[256]; 
+            static uint8_t payload_buffer[256];    
+            out[79]=0;//just in case
+            int msglen = strlen(&out[0]);          
+                        
+            payload_buffer[0]=MSP_DISPLAYPORT_INFO_MSG;            
+            memcpy(&payload_buffer[1],&out[0], msglen+1); //include the 0 for string ending 
+            construct_msp_command(message_buffer, MSP_CMD_DISPLAYPORT, &payload_buffer[0], 80, MSP_INBOUND);
+            sendto(out_sock, message_buffer,100 , 0, (struct sockaddr *)&sin_out, sizeof(sin_out));                             
+            printf("Sent text msg : %s\r\n",out);
+            return false;
         }
-        printf("skip print text\r\n");
-        return false;
-#endif        
+
+
 
 
         if (access(font, F_OK)) //no font file
@@ -1599,7 +1646,7 @@ static void draw_screenBMP(){
     }
 
     //strcpy(osds[FULL_OVERLAY_ID].text,"$M $B Test");//"$M $B Test");
-    DrawText();
+    DrawTextOnOSDBitmap();
     
     stat_screen_refresh_count++;
     uint64_t step3=get_time_ms();  
@@ -1630,9 +1677,23 @@ static void draw_screenBMP(){
 
     //strcpy(air_unit_info_msg,"30fps/MCS1 7Mb reset test message that can be 80 characters long that are enough");
     if (strlen(air_unit_info_msg)>1){                           
-        int osd_font_size=14;
-        //TO DO Change for other resolutions, or right align
-        drawText_x86(air_unit_info_msg, 1350 , 1+osd_font_size, getcolor(COLOR_BLACK), /*font_size*/ osd_font_size, false);   
+        int osd_font_size=osds[FULL_OVERLAY_ID].size - 6; //Some offset needed to keep the same with air rendering 
+         uint64_t timems=get_time_ms();
+         int width=getTextWidth_x86(air_unit_info_msg,osd_font_size);
+        
+        
+        int posX=0,posY=0;
+        if (msg_layout%4==0)// left
+            posX=4;
+        if (msg_layout%4==1)// center
+            posX=(bmpBuff.u32Width - width) /2;            
+        if (msg_layout%4==2)// right
+            posX=(bmpBuff.u32Width - width) - 42;
+        if (msg_layout%4==3)//moving
+            posX=20 + ((timems/16)%(bmpBuff.u32Width - width - 40))& ~1;
+        posY=(msg_layout/4)== 0 ? osd_font_size : (bmpBuff.u32Height ) - 6;//Uppper or lower line
+
+        drawText_x86(air_unit_info_msg, posX , posY, getcolor(msg_colour), /*font_size*/ osd_font_size, false,0);   
     }
     
     //Render_x86_rect(bmp_x86,bmpBuff.u32Width, bmpBuff.u32Height,10,10,10,10,24,36);
@@ -1641,20 +1702,20 @@ static void draw_screenBMP(){
     //free(bmp_x86);   
 
 #elif __GOKE__
-
-    set_bitmap(osds[FULL_OVERLAY_ID].hand, &bmpBuff);
+    if (DrawOSD)
+        set_bitmap(osds[FULL_OVERLAY_ID].hand, &bmpBuff);
 
 #else
    int id=0;
    // printf("%lu set_bitmapB for:%d | %d ms\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn));
-    
-    if (useDirectBMPBuffer){
-        int s32Ret = MI_RGN_UpdateCanvas(osds[FULL_OVERLAY_ID].hand);
-        bmpBuff.pData=NULL;//we must reset it so that we get it the next iteration to draw!
-        if (verbose&& s32Ret!=0)
-            printf("MI_RGN_UpdateCanvas failed: %d!\n",s32Ret);
-    }else
-        set_bitmap(osds[FULL_OVERLAY_ID].hand, &bmpBuff);
+    if (DrawOSD)
+        if (useDirectBMPBuffer){
+            int s32Ret = MI_RGN_UpdateCanvas(osds[FULL_OVERLAY_ID].hand);
+            bmpBuff.pData=NULL;//we must reset it so that we get it the next iteration to draw!
+            if (verbose&& s32Ret!=0)
+                printf("MI_RGN_UpdateCanvas failed: %d!\n",s32Ret);
+        }else
+            set_bitmap(osds[FULL_OVERLAY_ID].hand, &bmpBuff);
 
     //printf("%lu set_bitmapB for:%u | %u   | %u ms\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() - LastDrawn) , (uint32_t)(get_time_ms() - step2),(uint32_t)(get_time_ms() - step3));
 
@@ -1662,7 +1723,6 @@ static void draw_screenBMP(){
     stat_draw_overlay_1+=(uint32_t)(get_time_ms() - LastDrawn);
     stat_draw_overlay_2+=(uint32_t)(get_time_ms() - step2);
     stat_draw_overlay_3+=(uint32_t)(get_time_ms() - step3);
-
 
     //free(bitmap.pData);
 }
@@ -1688,7 +1748,7 @@ static void clear_screen()
         return ;
     //ClearScreen_x86();
     //BetaFlight needs this. INAV can be configured to skip it
-    if (font_pages>2 || (get_time_ms() - LastCleared)>2500) {//no faster than 0.5 per second
+    if (font_pages>2 || (get_time_ms() - LastCleared)>500) {//no faster than 0.5 per second
         memset(character_map, 0, sizeof(character_map));
         if (bmpBuff.pData!=NULL)//Set whole BMP as transparant, Palette index 0xF if 4bit
             memset(bmpBuff.pData, PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4 ? 0xFF : 0x00 , bmpBuff.u32Height * getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));        
@@ -1699,7 +1759,7 @@ static void clear_screen()
         //LastDrawn=(get_time_ms())+500;///give 200ms no refresh  to load data in buffer 
     }else
         if (verbose)
-            printf("%lu Clear screen skipped\n",(uint32_t)((uint32_t)get_time_ms())%10000 );
+            printf("%lu Clear screen skipped\r\n",(uint32_t)((uint32_t)get_time_ms())%10000 );
     //LastDrawn=(get_time_ms())+200;//give 120ms more to load data 
 }
 static int draws=0;
@@ -1981,8 +2041,8 @@ On sigmastar the BMP row stride is aligned to 8 bytes, that is 16 pixels in PIXE
 
     if(DrawOSD)
         OVERLAY_HEIGHT =current_display_info.font_height * (current_display_info.char_height);
-    else
-        OVERLAY_HEIGHT =current_display_info.font_height*2;//We do not need the whole screen, let's use only top part of the screen for drawing
+    //else
+    //    OVERLAY_HEIGHT =current_display_info.font_height*2;//We do not need the whole screen, let's use only top part of the screen for drawing
 
     printf("Glyph size:%d:%d on a %d:%d matrix. Overlay %d:%d \r\n",current_display_info.font_width,current_display_info.font_height,
         current_display_info.char_width,current_display_info.char_height,
@@ -2018,7 +2078,8 @@ On sigmastar the BMP row stride is aligned to 8 bytes, that is 16 pixels in PIXE
         if (XOffs<0)
             XOffs=8;
         //THIS IS NEEDED, the main region to draw inside
-        rgn=create_region(&osds[FULL_OVERLAY_ID].hand, XOffs, 0, OVERLAY_WIDTH, OVERLAY_HEIGHT);
+        if (DrawOSD)
+            rgn=create_region(&osds[FULL_OVERLAY_ID].hand, XOffs, 0, OVERLAY_WIDTH, OVERLAY_HEIGHT);
         if (verbose)
             printf("Create_region PixelFormat:%d Size: %d:%d X_Offset:%d results: %d \r\n", PIXEL_FORMAT_DEFAULT, OVERLAY_WIDTH,OVERLAY_HEIGHT, XOffs, rgn);
          

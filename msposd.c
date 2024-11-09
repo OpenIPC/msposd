@@ -376,7 +376,7 @@ int Get8812EU2Temp(){
 	return temperature;
 }
 
-float last_board_temp;
+int last_board_temp;
 
 static long last_board_temp_taken=0;
 
@@ -406,8 +406,9 @@ int GetTempSigmaStar(){
     fclose(file);
 
 	if (verbose && last_board_temp<-90)
-        	printf("No temp data in file %s\n",WfbLogFile);
+        printf("No temp data in file %s\n",WfbLogFile);
 
+	//printf("SigmaStar temp: %d\n",last_board_temp);
 	return last_board_temp;
 
 }
@@ -594,7 +595,7 @@ void showchannels(int count){
 		printf("Channels :"); 
 		for (int i =0; i <count;i++)
 			printf("| %02d", channels[i]);
-		printf("\n");
+		printf("\r\n");
 	}
 }
 

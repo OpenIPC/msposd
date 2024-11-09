@@ -19,16 +19,14 @@
                 "-c",
                 "9",
                 "-r",
-                "30",
-                
+                "999",                
                 "--ahi",
                 "3",  
                 "--matrix",
                 "11",                
-                "-v",    
+                "-v",
                 "-f",                
-                "/home/home/",
-                "--wfb",               
+                "/home/home/",                         
                 " "
 
             ],
@@ -46,10 +44,8 @@
                     "ignoreFailures": true
                 }
             ],
-            "preLaunchTask": "gcc build",
-            "linux": {
-                "preLaunchTask": "gcc build"
-            }            
+            "preLaunchTask": "copy msposd"
+                     
         }
     ]
 }

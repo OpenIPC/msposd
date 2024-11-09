@@ -23,6 +23,7 @@ cc msposd.c -I ./include -L/usr/lib/x86_64-linux-gnu/  -lcsfml-graphics -lcsfml-
 
 #copy on cam
 scp -O ./release/star6e/msposd root@192.168.1.88:/usr/bin/msposd
+scp -O ./msposd_star6e root@192.168.1.88:/usr/bin/msposd
 
 on the camera
 msposd --channels 7 --master /dev/ttyS2 --baudrate 115200  --osd --matrix 11 --ahi 3 -r 30
@@ -54,3 +55,9 @@ msposd --channels 7 --master /dev/ttyS2 --baudrate 115200 --out 127.0.0.1:14550 
 --on PC render  
 /home/home/src/msposd/msposd --master 127.0.0.1:14550 --osd -r 50 --ahi 3 --matrix 11 -v
 
+-- obsolete, copy binaries to release folser
+./build.sh x86
+cp ./msposd_x86 ./release/x86/msposd
+cp ./msposd_star6e ./release/star6e/msposd
+cp ./msposd_goke ./release/goke/msposd
+cp ./msposd_hisi ./release/hisi/msposd
