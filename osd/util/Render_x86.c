@@ -166,15 +166,7 @@ void ClearScreen_x86(){
 
 void Render_x86( unsigned char* rgbaData, int u32Width, int u32Height){   
     
-    //no need to change every frame, just change the font bitmap once
-   // premultiplyAlpha((uint32_t*)rgbaData, u32Width, u32Height);
-
-    // Clear the main surface to avoid lingering frames
-    //cairo_set_operator(cr_x11, CAIRO_OPERATOR_SOURCE); 
-    //cairo_set_source_rgba(cr_x11, 0, 0, 0, 0);  // Transparent background for main surface
-    //cairo_paint(cr_x11);
-
-    // Clear the buffer surface 
+    
     cairo_set_source_rgba(cr, 0, 0, 0, 0);  // Transparent background for buffer
     cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);  // Clear everything on the buffer
     cairo_paint(cr);

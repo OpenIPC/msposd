@@ -13,13 +13,60 @@
                 "--baudrate",
                 "115200",
                 "--osd",
-
                 "-c",
                 "7",
                 "-c",
                 "9",
                 "-r",
                 "999",                
+                "--ahi",
+                "3",  
+                "--matrix",
+                "11",                
+                "-v",
+                "-f",                
+                "/home/home/",                         
+                " "
+
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            
+            "setupCommands": [
+                {
+                    "description": "MAVLINk gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "copy msposd"
+                     
+        },
+        {
+            //--on CAM read serial and forward via mavlink port
+// msposd --channels 7 --master /dev/ttyS2 --baudrate 115200 --out 127.0.0.1:14550 --matrix 11 --ahi 3 -r 50
+
+            "name": "UART_FWD",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/msposd",
+            "args": [                
+                "--master",
+                "/dev/ttyUSB0",
+                "--baudrate",
+                "115200",
+                "--out",
+                "127.0.0.1:14550",
+                "-c",
+                "7",
+                "-c",
+                "9",
+                "-r",
+                "50",                
                 "--ahi",
                 "3",  
                 "--matrix",

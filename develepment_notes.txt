@@ -47,7 +47,11 @@ Will Line 1,2, 10,11, 19,20 will be Large font, the rest will be small, and alig
 --ahi 3
 Enhanced AHI ladder, home indicator on the main AHI line
 --on PC read serial
-msposd --channels 7 --master /dev/ttyUSB0 --baudrate 115200  --osd --matrix 11 --ahi 3 -r 30
+msposd --channels 7 --master /dev/ttyUSB0 --baudrate 115200  --osd --matrix 11 --ahi 3 -r 30 -v
+
+--on PC read serial and forward to test air no OSD mode
+msposd --channels 7 --master /dev/ttyUSB0 --baudrate 115200  --out 127.0.0.1:14550  --matrix 11 --ahi 3 -r 50 -v
+ 
 
 --on CAM read serial and forward via mavlink port
 msposd --channels 7 --master /dev/ttyS2 --baudrate 115200 --out 127.0.0.1:14550 --matrix 11 --ahi 3 -r 30

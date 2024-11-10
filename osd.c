@@ -420,18 +420,22 @@ static void rx_msp_callback(msp_msg_t *msp_message)
     stat_msp_msgs++;
 
     //We will forward ALL MSP traffic, not only DisplayPort
-    if(fb_cursor > sizeof(frame_buffer)) {
-            printf("Exhausted frame buffer! Resetting...\n");
-            sendto(out_sock, frame_buffer, fb_cursor, 0, (struct sockaddr *)&sin_out, sizeof(sin_out));
+    if(fb_cursor > sizeof(frame_buffer)) {            
+            if (out_sock>0){
+                printf("Exhausted frame buffer! Flushing...\n");
+                sendto(out_sock, frame_buffer, fb_cursor, 0, (struct sockaddr *)&sin_out, sizeof(sin_out));
+            }
             fb_cursor = 0;
-            return;
+            //return;
     }
     //Here it will replace custom text messages for configurator screen
     if (msp_message->cmd==MSP_CMD_DISPLAYPORT && msp_message->direction == MSP_INBOUND && msp_message->cmd == MSP_CMD_DISPLAYPORT && msp_message->payload[0] == MSP_DISPLAYPORT_DRAW_STRING)
         InjectChars(&msp_message->payload[0]);
     
-    uint16_t size = msp_data_from_msg(message_buffer, msp_message);
-    copy_to_msp_frame_buffer(message_buffer, size);
+    //if (out_sock>0){//No need to cache MSP if we won't send it later
+        uint16_t size = msp_data_from_msg(message_buffer, msp_message);
+        copy_to_msp_frame_buffer(message_buffer, size);
+    //}
 
     switch(msp_message->cmd) {
 
@@ -495,9 +499,10 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
                 if (!DrawOSD){//if we only resend to ground station and menu is active, stop regular OSD
                     LastPcktSent= get_time_ms();//clear buffer and prevent from sending MSP to ground                
                     fb_cursor = 0;
+                    printf("D");
                 }  
             
-            if (out_sock>0){
+            if (out_sock>0 && fb_cursor>0){//if there is data to send
                 if(msp_message->payload[0] == MSP_DISPLAYPORT_DRAW_SCREEN) {
                     //Try to aggregate several MSP packets into one UDP packets   
                     if ( (!DrawOSD) &&  MinTimeBetweenScreenRefresh>20 && (get_time_ms() - LastPcktSent  ) < MinTimeBetweenScreenRefresh)
@@ -1319,16 +1324,17 @@ bool DrawTextOnOSDBitmap(){
 // so we simply send it to the ground
     
         if (!DrawOSD && out_sock>0){//send the line to the ground  
-            static uint8_t message_buffer[256]; 
+            static uint8_t msg_buffer[256]; 
             static uint8_t payload_buffer[256];    
             out[79]=0;//just in case
             int msglen = strlen(&out[0]);          
                         
             payload_buffer[0]=MSP_DISPLAYPORT_INFO_MSG;            
             memcpy(&payload_buffer[1],&out[0], msglen+1); //include the 0 for string ending 
-            construct_msp_command(message_buffer, MSP_CMD_DISPLAYPORT, &payload_buffer[0], 80, MSP_INBOUND);
-            sendto(out_sock, message_buffer,100 , 0, (struct sockaddr *)&sin_out, sizeof(sin_out));                             
-            printf("Sent text msg : %s\r\n",out);
+            construct_msp_command(msg_buffer, MSP_CMD_DISPLAYPORT, &payload_buffer[0], 80, MSP_INBOUND);
+            sendto(out_sock, msg_buffer,100 , 0, (struct sockaddr *)&sin_out, sizeof(sin_out));                             
+            
+            //printf("Sent text msg : %s\r\n",out);
             return false;
         }
 
@@ -1526,7 +1532,7 @@ static void draw_screenBMP(){
     if (cntr++<0 )//skip in the beginning to show to font preview
         return ;
 
-    if ( !DrawOSD && (get_time_ms() - LastDrawn  ) < 200)//No need to redraw text on screen so often, lets keep low
+    if ( !DrawOSD && (get_time_ms() - LastDrawn  ) < 200)//No need to redraw text on screen so often, lets keep low CPU load
         return ;
 
 	if ( (get_time_ms() - LastDrawn  ) < MinTimeBetweenScreenRefresh){//Set some delay to keep CPU load low        
@@ -1534,10 +1540,11 @@ static void draw_screenBMP(){
 		return ;
     }
 
-    if ( (get_time_ms() - LastCleared  ) < 2){//at least 2ms to reload some data after clearscreen, otherwise the screen will blink?
-                                            //but if there is too few chars to show we may never render it
+    if ( (get_time_ms() - LastCleared  ) < 2){
+        //at least 2ms to reload some data after clearscreen, otherwise the screen will blink?
+        //but if there is too few chars to show we may never render it
         //printf("%lu DrawSkipped after clear LastDrawn:%lu | %lu%\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)LastDrawn%10000 , (uint32_t) LastCleared%10000);
-		return ;
+		//return ;
     }
     
     LastDrawn= get_time_ms();
@@ -1665,41 +1672,40 @@ static void draw_screenBMP(){
         //memcpy(bmp_x86,bmpBuff.pData, bmpBuff.u32Width * bmpBuff.u32Height * 4);//Do not need to copy...         
         bmp_x86=bmpBuff.pData;
 
-    //ClearScreen_x86();
-    Render_x86(bmp_x86,bmpBuff.u32Width, bmpBuff.u32Height);
+    if (DrawOSD){
+        //ClearScreen_x86();
+        Render_x86(bmp_x86,bmpBuff.u32Width, bmpBuff.u32Height);
 
-    if (AHI_Enabled==2)
-            draw_AHI();        
-    if (AHI_Enabled==1 || AHI_Enabled>2)
-            draw_Ladder(); 
-    if (RCWidgetX>0)
-        drawRC_Channels(RCWidgetX, RCWidgetY, channels[0], channels[1], channels[2], channels[3]);
+        if (AHI_Enabled==2)
+                draw_AHI();        
+        if (AHI_Enabled==1 || AHI_Enabled>2)
+                draw_Ladder(); 
+        if (RCWidgetX>0)
+            drawRC_Channels(RCWidgetX, RCWidgetY, channels[0], channels[1], channels[2], channels[3]);
 
-    //strcpy(air_unit_info_msg,"30fps/MCS1 7Mb reset test message that can be 80 characters long that are enough");
-    if (strlen(air_unit_info_msg)>1){                           
-        int osd_font_size=osds[FULL_OVERLAY_ID].size - 6; //Some offset needed to keep the same with air rendering 
-         uint64_t timems=get_time_ms();
-         int width=getTextWidth_x86(air_unit_info_msg,osd_font_size);
+        //strcpy(air_unit_info_msg,"30fps/MCS1 7Mb reset test message that can be 80 characters long that are enough");
+        if (strlen(air_unit_info_msg)>1){                           
+            int osd_font_size=osds[FULL_OVERLAY_ID].size - 6; //Some offset needed to keep the same with air rendering 
+            uint64_t timems=get_time_ms();
+            int width=getTextWidth_x86(air_unit_info_msg,osd_font_size);
+                        
+            int posX=0,posY=0;
+            if (msg_layout%4==0)// left
+                posX=4;
+            if (msg_layout%4==1)// center
+                posX=(bmpBuff.u32Width - width) /2;            
+            if (msg_layout%4==2)// right
+                posX=(bmpBuff.u32Width - width) - 42;
+            if (msg_layout%4==3)//moving
+                posX=20 + ((timems/16)%(bmpBuff.u32Width - width - 40))& ~1;
+            posY=(msg_layout/4)== 0 ? osd_font_size : (bmpBuff.u32Height ) - 6;//Uppper or lower line
+
+            drawText_x86(air_unit_info_msg, posX , posY, getcolor(msg_colour), /*font_size*/ osd_font_size, false,0);   
+        }
         
-        
-        int posX=0,posY=0;
-        if (msg_layout%4==0)// left
-            posX=4;
-        if (msg_layout%4==1)// center
-            posX=(bmpBuff.u32Width - width) /2;            
-        if (msg_layout%4==2)// right
-            posX=(bmpBuff.u32Width - width) - 42;
-        if (msg_layout%4==3)//moving
-            posX=20 + ((timems/16)%(bmpBuff.u32Width - width - 40))& ~1;
-        posY=(msg_layout/4)== 0 ? osd_font_size : (bmpBuff.u32Height ) - 6;//Uppper or lower line
-
-        drawText_x86(air_unit_info_msg, posX , posY, getcolor(msg_colour), /*font_size*/ osd_font_size, false,0);   
+        FlushDrawing_x86();
     }
-    
-    //Render_x86_rect(bmp_x86,bmpBuff.u32Width, bmpBuff.u32Height,10,10,10,10,24,36);
-    FlushDrawing_x86();
-
-    //free(bmp_x86);   
+ 
 
 #elif __GOKE__
     if (DrawOSD)
@@ -1960,7 +1966,8 @@ static void InitMSPHook(){
     int height = GetMajesticVideoConfig(&majestic_width);
     
     #ifdef _x86
-        Init_x86(&OVERLAY_WIDTH, &OVERLAY_HEIGHT);
+        if (DrawOSD)
+            Init_x86(&OVERLAY_WIDTH, &OVERLAY_HEIGHT);
         height=OVERLAY_HEIGHT;
     #endif
 
@@ -2085,9 +2092,9 @@ On sigmastar the BMP row stride is aligned to 8 bytes, that is 16 pixels in PIXE
          
         if (DrawOSD){   //Show Font Preview
 #ifdef _x86
-            cntr= - 30; //skip first 40 draw requests from the FC to show the preview, about 3 seconds
+            cntr= - 20; //skip first 40 draw requests from the FC to show the preview, about 1 seconds
 #else            
-            cntr= - 130; //skip first 40 draw requests from the FC to show the preview, about 3 seconds
+            cntr= - 80; //skip first 80 draw requests from the FC to show the preview, about 2 seconds
 #endif            
             BITMAP bitmap;                                
             int prepared=0;           

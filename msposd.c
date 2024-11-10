@@ -62,7 +62,7 @@ int AHI_Enabled=1;
 
 const char *default_master = "/dev/ttyAMA0";
 const int default_baudrate = 115200;
-const char *defualt_out_addr = "127.0.0.1:14600";
+const char *defualt_out_addr = "";
 const char *default_in_addr =  "127.0.0.1:0";
 const int RC_CHANNELS = 65; //RC_CHANNELS ( #65 ) for regular MAVLINK RC Channels read (https://mavlink.io/en/messages/common.html#RC_CHANNELS)
 const int RC_CHANNELS_RAW = 35; //RC_CHANNELS_RAW ( #35 ) for ExpressLRS,Crossfire and other RC procotols (https://mavlink.io/en/messages/common.html#RC_CHANNELS_RAW)
@@ -75,7 +75,7 @@ struct bufferevent *serial_bev;
 struct sockaddr_in sin_out = {
 	.sin_family = AF_INET,
 };
-int out_sock;
+int out_sock=0;
 
 
 long aggregate=1;
@@ -1044,15 +1044,15 @@ static int handle_data(const char *port_name, int baudrate,
 		printf("Setup mspVTX ...\n");
 		msp_set_vtx_config(serial_fd);
 	}
-	out_sock = socket(AF_INET, SOCK_DGRAM, 0);
 
- 	if (!parse_host_port(out_addr,
-			     (struct in_addr *)&sin_out.sin_addr.s_addr,
-			     &sin_out.sin_port))
-		goto err;
+	if (strlen(out_addr)>1){
+		out_sock = socket(AF_INET, SOCK_DGRAM, 0);
 
-
-	 
+		if (!parse_host_port(out_addr,
+					(struct in_addr *)&sin_out.sin_addr.s_addr,
+					&sin_out.sin_port))
+			goto err;
+	}
 
 	struct sockaddr_in sin_in = {
 		.sin_family = AF_INET,
