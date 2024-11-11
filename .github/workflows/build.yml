@@ -27,6 +27,14 @@ jobs:
           ./build.sh star6e
           ./build.sh x86
 
+      - name: Build OpenIPC
+        run: |
+          sudo apt-get update
+          DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC sudo apt-get -y install git make wget gcc libevent-dev libcsfml-dev file g++ cpio unzip rsync bc bzip2
+          mkdir firmware
+          cd firmware
+          make BOARD=ssc338q_fpv MSPOSD_VERSION=${GITHUB_SHA} br-msposd
+ 
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
