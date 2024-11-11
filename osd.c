@@ -1754,7 +1754,7 @@ static void clear_screen()
         return ;
     //ClearScreen_x86();
     //BetaFlight needs this. INAV can be configured to skip it
-    if (font_pages>2 || (get_time_ms() - LastCleared)>500) {//no faster than 0.5 per second
+    if (!DrawOSD || font_pages == 1 || font_pages>2 || (get_time_ms() - LastCleared)>300) {//no faster than 0.5 per second
         memset(character_map, 0, sizeof(character_map));
         if (bmpBuff.pData!=NULL)//Set whole BMP as transparant, Palette index 0xF if 4bit
             memset(bmpBuff.pData, PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4 ? 0xFF : 0x00 , bmpBuff.u32Height * getRowStride(bmpBuff.u32Width , PIXEL_FORMAT_BitsPerPixel));        
@@ -1788,7 +1788,7 @@ static void msp_callback(msp_msg_t *msp_message)
 {
     displayport_process_message(display_driver, msp_message);
 }
-
+static int set_mode_global_counter=0;
 static void set_options(uint8_t font, msp_hd_options_e is_hd) {
     /*
     if(is_hd) { 
@@ -1798,7 +1798,7 @@ static void set_options(uint8_t font, msp_hd_options_e is_hd) {
     }
     */
    //we need FullHD option?!
-    if (verbose)
+    if (verbose&&set_mode_global_counter++<10)
         printf("FC set mode:%d\r\n",is_hd);
 }
 

@@ -153,6 +153,19 @@ curl -k -L -o /usr/share/fonts/font.png https://raw.githubusercontent.com/openip
 curl -k -L -o /usr/share/fonts/font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/betaflight/font_hd.png
 ```
 
+
+**For Ardupilot**:  
+Set  
+```SERIALx_PROTOCOL = 42``` replace x with the UART number.  
+```OSD_TYPE = 5```  
+To use betaflight fonts, set ```MSP_OPTIONS = 5``` and copy fonts for betaflight as shown above.
+If you prefer to use ardupilot "native" fonts (more icons), then set ```MSP_OPTIONS = 4``` and copy the fonts below.
+```
+mkdir /usr/share/fonts
+curl -k -L -o /usr/share/fonts/font.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/ardupilot/font.png
+curl -k -L -o /usr/share/fonts/font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/ardupilot/font_hd.png
+```
+
 Start msposd or reference it in OpenIPC boot scripts.  
 
 ### To install on Goke/HiSilicon camera

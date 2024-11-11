@@ -50,7 +50,7 @@ Enhanced AHI ladder, home indicator on the main AHI line
 msposd --channels 7 --master /dev/ttyUSB0 --baudrate 115200  --osd --matrix 11 --ahi 3 -r 30 -v
 
 --on PC read serial and forward to test air no OSD mode
-msposd --channels 7 --master /dev/ttyUSB0 --baudrate 115200  --out 127.0.0.1:14550  --matrix 11 --ahi 3 -r 50 -v
+msposd_x86 --channels 7 --master /dev/ttyUSB0 --baudrate 115200  --out 127.0.0.1:14550  --matrix 11 --ahi 3 -r 50 -v
  
 
 --on CAM read serial and forward via mavlink port
