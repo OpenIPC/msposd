@@ -50,16 +50,42 @@ void display_menu(displayport_vtable_t *display_driver,MenuSection *section, int
         clearNextDraw = true;
     }    
     if (showStatusScreen) {
-        for (int row = 0; row < OSD_HD_ROWS-menu_offset_row; row++) {
-            for (int col = 0; col < OSD_HD_COLS-menu_offset_cols; col++) {
-                display_driver->draw_character(col+menu_offset_cols, row+menu_offset_row, ' ');
+        for (int row = 0; row < OSD_HD_ROWS - menu_offset_row; row++) {
+            for (int col = 0; col < OSD_HD_COLS - menu_offset_cols; col++) {
+                display_driver->draw_character(col + menu_offset_cols, row + menu_offset_row, ' ');
             }
         }
-        display_driver->draw_character(OSD_HD_COLS/2 - menu_offset_cols,OSD_HD_ROWS/2,     'D');
-        display_driver->draw_character(OSD_HD_COLS/2 - menu_offset_cols + 1,OSD_HD_ROWS/2, 'O');
-        display_driver->draw_character(OSD_HD_COLS/2 - menu_offset_cols + 2,OSD_HD_ROWS/2, 'N');
-        display_driver->draw_character(OSD_HD_COLS/2 - menu_offset_cols + 3,OSD_HD_ROWS/2, 'E');
+
+        const char *status_msg = "DONE";
+        int msg_len = strlen(status_msg);
+        int start_col = OSD_HD_COLS / 2 - msg_len / 2;
+
+        for (int i = 0; i < msg_len; i++) {
+            display_driver->draw_character(start_col + i, OSD_HD_ROWS / 2, status_msg[i]);
+        }
         display_driver->draw_complete();
+
+        if (out_sock > 0) { // Send status screen to the ground
+            // Clear the screen remotely
+            payload_buffer[0] = MSP_DISPLAYPORT_CLEAR;
+            construct_msp_command(message_buffer, MSP_CMD_DISPLAYPORT, payload_buffer, 2, MSP_INBOUND);
+            sendto(out_sock, message_buffer, 6 + 2, 0, (struct sockaddr *)&sin_out, sizeof(sin_out));
+
+            // Draw the "DONE" message remotely
+            payload_buffer[0] = MSP_DISPLAYPORT_DRAW_STRING;
+            payload_buffer[1] = OSD_HD_ROWS / 2;         // Row for "DONE"
+            payload_buffer[2] = OSD_HD_COLS / 2 - msg_len / 2; // Center column
+            payload_buffer[3] = 0;                      // Reserved byte
+            memcpy(&payload_buffer[4], status_msg, msg_len); // Copy the message into the payload
+
+            construct_msp_command(message_buffer, MSP_CMD_DISPLAYPORT, payload_buffer, 4 + msg_len, MSP_INBOUND);
+            sendto(out_sock, message_buffer, 6 + 4 + msg_len, 0, (struct sockaddr *)&sin_out, sizeof(sin_out));
+
+            // Instruct remote display to draw the complete screen
+            payload_buffer[0] = MSP_DISPLAYPORT_DRAW_SCREEN;
+            construct_msp_command(message_buffer, MSP_CMD_DISPLAYPORT, payload_buffer, 2, MSP_INBOUND);
+            sendto(out_sock, message_buffer, 6 + 2, 0, (struct sockaddr *)&sin_out, sizeof(sin_out));
+        }
         return;
     }
 

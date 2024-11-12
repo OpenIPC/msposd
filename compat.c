@@ -32,7 +32,7 @@
 int __ctype_b;
 int __stdin;
 
-#ifndef _x86
+#if !defined(_x86) && !defined(__ROCKCHIP__)
 int __fgetc_unlocked(FILE *stream) {
   return fgetc(stream);
 }
