@@ -1,0 +1,39 @@
+name: Testbuild of OpenIPC
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  buildroot:
+    if: github.repository == 'openipc/msposd'
+    name: Firmware
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Sigmastar [I6E]
+          - {"platform": "ssc30kq", "release": "fpv"}
+          - {"platform": "ssc338q", "release": "fpv"}
+
+          # Hisilicon [HI3516EV200]
+          - {"platform": "hi3516ev200", "release": "fpv"}
+          - {"platform": "hi3516ev300", "release": "fpv"}
+
+          # Hisilicon [HI3536DV100]
+          - {"platform": "hi3536dv100", "release": "fpv"}
+
+          # Goke [GK7205V200]
+          - {"platform": "gk7205v200", "release": "fpv"}
+          - {"platform": "gk7205v210", "release": "fpv"}
+          - {"platform": "gk7205v300", "release": "fpv"}
+    steps:
+      - name: Build OpenIPC
+        env:
+          MSPOSD_VERSION: ${{ github.sha }}
+        run: |
+          git clone https://github.com/openipc/firmware --depth=1
+          cd firmware
+          make BOARD=${{matrix.platform}}_${{matrix.release}} MSPOSD_VERSION=${MSPOSD_VERSION} br-msposd
