@@ -1939,7 +1939,7 @@ static void InitMSPHook(){
     char font_load_name[255];
     font_suffix="";
     font_path = "/usr/share/fonts/";   
-     #ifdef _x86
+    #ifdef _x86
         font_path = executableDir;//.bmp
         int l=strlen(font_path);
         font_path[l]='/';
@@ -2142,7 +2142,7 @@ On sigmastar the BMP row stride is aligned to 8 bytes, that is 16 pixels in PIXE
                 
                 #ifdef __SIGMASTAR__   
                     if (verbose)
-                        printf("Set SS Font Review %d:%d", bitmap.u32Width, bitmap.u32Height);
+                        printf("Set SS Font Review %d:%d\r\n", bitmap.u32Width, bitmap.u32Height);
                     //For some reason this fails...?!
                     //set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);//bitmap must match region dimensions!
                      
