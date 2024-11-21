@@ -14,6 +14,7 @@
 #include <termios.h>
 #include <assert.h>
 #include <time.h>
+#include "version.h"
 
 #include <event2/event.h>
 #include <event2/util.h>
@@ -1198,7 +1199,7 @@ int main(int argc, char **argv)
 	MinTimeBetweenScreenRefresh=50;
 	last_board_temp=-100;
 
-	printf("Ver: %s\n", VERSION_STRING);
+	printf("Ver: %s Compiled at: %s\n", GIT_VERSION, VERSION_STRING);
 	int opt;
 	int r;
 	int long_index = 0;
