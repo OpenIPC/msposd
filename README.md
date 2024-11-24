@@ -18,7 +18,7 @@ Usage: msposd [OPTIONS]
  -d --wfb         Monitors wfb.log file and reports errors via HUD messages
  -s --osd         Parse MSP and draw OSD over the video
  -a --ahi         Draw graphic AHI, mode [0-No, 2-Simple 1-Ladder, 3-LadderEx (home indicator on ladder)]
- -x --matrix      OSD matrix [0- 53:20 , 1- 50:18 chars, 11 Variable font size]
+ -x --matrix      OSD matrix [0- 53:20 , 1- 50:18 chars, 11- Variable font size, 9-bottom align 720p mode, 8-center align 720p mode]
     --mspvtx      Enable alpha mspvtx functionality
  -v --verbose     Show debug info
  --help           Display this help
@@ -134,7 +134,7 @@ Copy msposd for the architecture you need on the cam.
 Prebuild binaries for x86, SigmaStar, Goke and Hisilicon are at release/ folder.  
 **For SigmaStar** based SoC (ssc338q, sc30kq) :
 ```
-curl -L -o /usr/bin/msposd https://raw.githubusercontent.com/openipc/msposd/main/release/star6e/msposd
+curl -L -o /usr/bin/msposd https://github.com/OpenIPC/msposd/releases/download/latest/msposd_star6e  
 chmod 755 /usr/bin/msposd
 ```
 Copy the font files for your flight controller firmware INAV/ Betaflight/ ArduPilot from here  https://github.com/openipc/msposd/tree/main/fonts   
@@ -170,9 +170,9 @@ Start msposd or reference it in OpenIPC boot scripts.
 
 ### To install on Goke/HiSilicon camera
 ```
-curl -L -o /usr/bin/msposd https://raw.githubusercontent.com/openipc/msposd/main/release/goke/msposd
+curl -L -o /usr/bin/msposd curl -L -o /usr/bin/msposd https://github.com/OpenIPC/msposd/releases/download/latest/msposd_goke 
 #or
-curl -L -o /usr/bin/msposd https://raw.githubusercontent.com/openipc/msposd/main/release/hisi/msposd
+curl -L -o /usr/bin/msposd curl -L -o /usr/bin/msposd https://github.com/OpenIPC/msposd/releases/download/latest/msposd_hisi 
 chmod 755 /usr/bin/msposd
 #Download an additional driver for Region Module
 curl -k -L -o /lib/modules/4.9.37/goke/gk7205v200_rgn.ko https://github.com/OpenIPC/firmware/raw/89ded200eba00726930b8307ddaf573ac449f076/general/package/goke-osdrv-gk7205v200/files/kmod/gk7205v200_rgn.ko

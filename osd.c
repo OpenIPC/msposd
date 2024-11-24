@@ -744,7 +744,7 @@ void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1,
     const bool show_center_indicator = false;////m_show_center_indicator;
     
     const double ladder_stroke_faktor=0.1;
-    const int subline_thickness=2;
+    const int subline_thickness=1;
 
     if (OVERLAY_HEIGHT<900){//720p mode
         horizonWidth = 2;
@@ -851,7 +851,7 @@ void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1,
 
                     //right upper line
                     //drawRectangleI4(bmpBuff.pData, px+width_ladder*2/3 , y , width_ladder/3 , stroke_s, m_color,subline_thickness);
-                    LineTranspose(bmpBuff.pData, px+width_ladder*2/3 , y  , (px+width_ladder*2/3) + width_ladder/3 , y , m_color, subline_thickness); // Top side    
+                    LineTranspose(bmpBuff.pData, px+width_ladder*2/3 , y  , (px+width_ladder*2/3) + width_ladder/3 - 1  , y , m_color, subline_thickness); // Top side    
 
 
 
@@ -1924,6 +1924,7 @@ void getExecutablePath(char *buffer, size_t bufferSize) {
     }
 }
 int majestic_width;
+int majestic_height;
 int fd_mem;
 static void InitMSPHook(){
 
@@ -1964,7 +1965,7 @@ static void InitMSPHook(){
 
 
     int height = GetMajesticVideoConfig(&majestic_width);
-    
+    majestic_height=height;
     #ifdef _x86
         if (DrawOSD)
             Init_x86(&OVERLAY_WIDTH, &OVERLAY_HEIGHT);
@@ -2084,11 +2085,20 @@ On sigmastar the BMP row stride is aligned to 8 bytes, that is 16 pixels in PIXE
         int XOffs=(majestic_width - OVERLAY_WIDTH)/2;
         if (XOffs<0)
             XOffs=8;
+        XOffs = (XOffs + 7) & ~7;//multiple of 8
+
+        int YOffs=0;
+        if (matrix_size==8)
+            YOffs=(majestic_height - OVERLAY_HEIGHT)/2;//vertical center
+
+        if (matrix_size==9)
+            YOffs=(majestic_height - OVERLAY_HEIGHT);//vertical bottom
+
         //THIS IS NEEDED, the main region to draw inside
         if (DrawOSD)
-            rgn=create_region(&osds[FULL_OVERLAY_ID].hand, XOffs, 0, OVERLAY_WIDTH, OVERLAY_HEIGHT);
+            rgn=create_region(&osds[FULL_OVERLAY_ID].hand, XOffs, YOffs, OVERLAY_WIDTH, OVERLAY_HEIGHT);
         if (verbose)
-            printf("Create_region PixelFormat:%d Size: %d:%d X_Offset:%d results: %d \r\n", PIXEL_FORMAT_DEFAULT, OVERLAY_WIDTH,OVERLAY_HEIGHT, XOffs, rgn);
+            printf("Create_region PixelFormat:%d Size: %d:%d X_Offset:%d Y_Offset:%d results: %d \r\n", PIXEL_FORMAT_DEFAULT, OVERLAY_WIDTH,OVERLAY_HEIGHT, XOffs,YOffs, rgn);
          
         if (DrawOSD){   //Show Font Preview
 #ifdef _x86

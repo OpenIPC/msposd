@@ -5,6 +5,7 @@ toolchain/
 majestic.yaml
 /msposd
 firmware/
+release/
 msposd_goke
 msposd_hisi
 msposd_star6b0
