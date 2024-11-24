@@ -1,14 +1,15 @@
 #!/bin/bash
-DL="https://github.com/openipc/firmware/releases/download/latest"
+DL="https://github.com/OpenIPC/firmware/releases/download/toolchain/toolchain"
+
 
 if [[ "$1" == *"star6b0" ]]; then
-	CC=cortex_a7_thumb2_hf-gcc13-musl-4_9
+	CC=sigmastar-infinity6b0
 elif [[ "$1" == *"star6e" ]]; then
-	CC=cortex_a7_thumb2_hf-gcc13-glibc-4_9
+	CC=sigmastar-infinity6e
 elif [[ "$1" == *"goke" ]]; then
-	CC=cortex_a7_thumb2-gcc13-musl-4_9
+	CC=goke-gk7205v200
 elif [[ "$1" == *"hisi" ]]; then
-	CC=cortex_a7_thumb2-gcc13-musl-4_9
+	CC=hisilicon-hi3516ev200
 fi
 
 GCC=$PWD/toolchain/$CC/bin/arm-linux-gcc
@@ -16,9 +17,9 @@ OUT=msposd_$1
 
 if [[ "$1" != *"jetson"* && "$1" != *"x86"* ]]; then
 	if [ ! -e toolchain/$CC ]; then
-		wget -c -q --show-progress $DL/$CC.tgz -P $PWD
+		wget -c -q --show-progress $DL.$CC.tgz -P $PWD
 		mkdir -p toolchain/$CC
-		tar -xf $CC.tgz -C toolchain/$CC --strip-components=1 || exit 1
+		tar -xf toolchain.$CC.tgz -C toolchain/$CC --strip-components=1 || exit 1
 		rm -f $CC.tgz
 	fi
 fi
