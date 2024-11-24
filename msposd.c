@@ -61,6 +61,8 @@ int matrix_size=0;
 
 int AHI_Enabled=1;
 
+bool enable_simple_uart=false;
+
 const char *default_master = "/dev/ttyAMA0";
 const int default_baudrate = 115200;
 const char *defualt_out_addr = "";
@@ -100,7 +102,7 @@ static void print_usage()
  "	-b --baudrate    Serial port baudrate (%d by default)\n"
  "	-o --output	  	 UDP endpoint to forward aggregated MSP messages (%s)\n"
  "	-c --channels    RC Channel to listen for commands (0 by default) and exec channels.sh. This command can be repeated. Channel values are 1-based.\n"
- "	-w --wait        Delay after each command received(2000ms default)\n"
+"	-w --wait        Delay after each command received(2000ms default)\n"
  "	-r --fps         Max MSP Display refresh rate(5..50)\n"
  "	-p --persist     How long a channel value must persist to generate a command - for multiposition switches (0ms default)\n"
  "	-t --temp        Read SoC temperature\n"
@@ -930,10 +932,65 @@ static void temp_read(evutil_socket_t sock, short event, void *arg)
 int VariantCounter=0;
 
 
+static bool ReadSerialSimple(int showstat){
+	if (showstat) {//no faster than 1 per second    
+			last_stat=(get_time_ms());
+			if (stat_screen_refresh_count==0)
+				stat_screen_refresh_count++;
+			if (verbose){
+				if (DrawOSD)
+				printf("UART Events:%u MessagesTTL:%u AttitMSGs:%u(%dms) Bytes/S:%u FPS:%u of %u (skipped:%d), AvgFrameLoad ms:%d | %d | %d | \r\n",stat_pckts,stat_msp_msgs,stat_msp_msg_attitude, (stat_attitudeDelay / (stat_msp_msg_attitude+1) ),
+					stat_bytes, stat_screen_refresh_count, stat_MSP_draw_complete_count, stat_skipped_frames, stat_draw_overlay_1/stat_screen_refresh_count,stat_draw_overlay_2/stat_screen_refresh_count,stat_draw_overlay_3/stat_screen_refresh_count);
+					else
+				printf("UART Events:%u MessagesTTL:%u AttitMSGs:%u(%dms) Bytes/S Recvd:%u Sent:%u, Screen FPS:%u  MSP_FPS:%u  MSP_UDP_Pckts:%u, AvgFrameLoad ms:%d | %d | \r\n",stat_pckts,stat_msp_msgs,stat_msp_msg_attitude, (stat_attitudeDelay / (stat_msp_msg_attitude+1) ),
+					stat_bytes, stat_MSPBytesSent, stat_screen_refresh_count, stat_MSP_draw_complete_count,stat_UDP_MSPframes, stat_draw_overlay_1/stat_screen_refresh_count,stat_draw_overlay_3/stat_screen_refresh_count);
+
+				showchannels(18);
+			}
+			stat_screen_refresh_count=0;
+			stat_pckts=0;
+			stat_bytes=0;
+			stat_msp_msgs=0;
+			stat_msp_msg_attitude=0;
+			stat_draw_overlay_1=0;
+			stat_draw_overlay_2=0;
+			stat_draw_overlay_3=0;
+			stat_skipped_frames=0;
+			stat_MSPBytesSent=0;
+			stat_MSP_draw_complete_count=0;
+			stat_UDP_MSPframes=0;
+	}
+	
+	uint8_t data[1024];
+	 // Read from the serial port once per interval
+    int packet_len = read(serial_fd, data, sizeof(data));
+    if (packet_len < 0) 
+		return;
+
+	stat_pckts++;  
+	stat_bytes+=packet_len;
+	ttl_packets++;
+	ttl_bytes+=packet_len;
+	if (ParseMSP){
+		for(int i=0;i<packet_len;i++)
+			msp_process_data(rx_msp_state, data[i]);
+		//continue;
+	}
+}
+
+
 static void send_variant_request2(int serial_fd) {
     uint8_t buffer[6];
 	int res=0;
 
+	if (enable_simple_uart ){
+		int rate_divider=MSP_PollRate / (1000 / MinTimeBetweenScreenRefresh);
+		if (rate_divider<1 || rate_divider>MSP_PollRate)
+			rate_divider=1;
+			
+		if (( VariantCounter%rate_divider == 0 ))
+			ReadSerialSimple(VariantCounter == 0);	
+	}
 
 	if (rc_channel_mon_enabled && VariantCounter%5==1){//once every 5 cycles, 4 times per second
 		construct_msp_command(buffer, MSP_RC, NULL, 0, MSP_OUTBOUND);
@@ -1075,7 +1132,8 @@ static int handle_data(const char *port_name, int baudrate,
 	//Test inject a simple packet to test malvink communication Camera to Ground
 	signal(SIGUSR1, sendtestmsg);
 
-	if (serial_fd>0){//if UART opened...
+	if (serial_fd>0 && !enable_simple_uart){//if UART opened and we need to read it via events
+	
 		serial_bev = bufferevent_socket_new(base, serial_fd, 0);
 
 		/* Trigger the read callback only whenever there is at least 16 bytes of data in the buffer. */
@@ -1258,11 +1316,12 @@ int main(int argc, char **argv)
 
 		case 'r':
 			r=atoi(optarg);
-			if (r>100){
-				enable_fast_layout=true;
-				r=r%100;
+			if (r>1000){
+				enable_simple_uart=true;				
+				r=r%1000;
+				printf("Simple UART Reading mode! %d \n", r);
 			}
-			MinTimeBetweenScreenRefresh = 1000/atoi(optarg);			
+			MinTimeBetweenScreenRefresh = 1000/r;			
 			resetLastStartValues();
 			break;
 

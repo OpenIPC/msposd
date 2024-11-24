@@ -11,3 +11,4 @@ msposd_hisi
 msposd_star6b0
 msposd_star6e
 msposd_x86
+serial_monitor.c
