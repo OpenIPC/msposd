@@ -75,7 +75,7 @@ int Init_x86(uint16_t *width, uint16_t *height) {
 #endif
     
 
-#ifdef _jetson
+#ifdef _x86
         if (getenv("DISPLAY") == NULL) {
             /*
              * Use default display screen, especially launch from console
