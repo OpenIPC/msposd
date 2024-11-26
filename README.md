@@ -159,7 +159,7 @@ Set
 ```SERIALx_PROTOCOL = 42``` replace x with the UART number.  
 ```OSD_TYPE = 5```  
 To use betaflight fonts, set ```MSP_OPTIONS = 5``` and copy fonts for betaflight as shown above.
-If you prefer to use ardupilot "native" fonts (more icons), then set ```MSP_OPTIONS = 4``` and copy the fonts below.
+If you prefer to use ardupilot "native" fonts (more icons), then set ```MSP_OPTIONS = 0``` and copy the fonts below.
 ```
 mkdir /usr/share/fonts
 curl -k -L -o /usr/share/fonts/font.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/ardupilot/font.png

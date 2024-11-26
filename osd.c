@@ -321,12 +321,14 @@ static displayport_vtable_t *display_driver;
 
 static display_info_t current_display_info = SD_DISPLAY_INFO;
 
-
+/// @brief We keep the main font glyphs here
+BITMAP bitmapFnt;
 
 //bounderies as characters of fast area. Fast Character
 int fcX= 12; int fcW=10; int fcY= 5 ; int fcH=8;
+char font_load_name[255];
 
-
+bool LoadFont();
 
 
 static bool InjectChars(char* payload){
@@ -529,7 +531,16 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
                 memcpy(current_fc_identifier, msp_message->payload, 4);
                 //Seems only BetaFlight needs this
                 send_version_request(serial_fd);
-                printf("Flight Controller detected: %s\r\n",current_fc_identifier);
+                printf("Flight Controller detected: %s \r\n",current_fc_identifier);
+                if (bitmapFnt.pData==NULL){
+                    SetOSDMsg("");
+                    LoadFont();
+                    if (bitmapFnt.pData==NULL){
+                        char msg[200];
+                        sprintf(msg,"&F38 &L43 No Font File %s found!",font_load_name);
+                        SetOSDMsg(msg);
+                    }
+                }
             }
             break;
         }
@@ -626,8 +637,7 @@ void draw_character_on_console(int row, int col, char ch) {
     printf("%c", ch);
 }
 
-/// @brief We keep the main font glyphs here
-BITMAP bitmapFnt;
+
 
 /// @brief Extra font glyphs with smaller size
 BITMAP bmpFntSmall;
@@ -996,7 +1006,7 @@ void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1,
                     //xR = (xR + 7) & ~7;//Round up to 8
                     xR = (xR + 3) & ~3;//Round up to 4, otherwise I4 bitmap image copy distorts the glyph !!!
 
-                    if (xR>0 && xR<OVERLAY_WIDTH && yR>0 && yR<OVERLAY_HEIGHT){
+                    if (xR>0 && xR<OVERLAY_WIDTH && yR>0 && yR<OVERLAY_HEIGHT && btmp.pData!=NULL){
                         if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4)   
                             copyRectI4(btmp.pData,btmp.u32Width,btmp.u32Height,
                                     bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,
@@ -1029,6 +1039,7 @@ void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1,
 static int droppedTTL=0;
 static bool first_wfb_read=true;
 
+ 
  void fill(char* str)
 {
     unsigned int rxb_l, txb_l, cpu_l[7];
@@ -1250,6 +1261,21 @@ static char FECFile[128]= "./MSPOSD.msg";
 static char FECFile[128]= "/tmp/MSPOSD.msg"; 
 #endif    
 
+
+void SetOSDMsg(char* msg){
+    //const char *content = "&F48 &L43 Identifying Flight Controller..."; // String to write to the file
+
+                // Open the file for writing
+                FILE *file = fopen(FECFile, "w");
+                if (file == NULL) 
+                    perror("Error opening file");
+                else{                              
+                    fprintf(file, "%s", msg);
+                    fclose(file);
+                }
+}
+
+
 uint64_t LastOSDMsgParsed = 0;
 
 BITMAP bitmapText;
@@ -1272,7 +1298,7 @@ void remove_carriage_returns(char *out) {
 
 char osdmsg[80];
 
-bool DrawTextOnOSDBitmap(){
+bool DrawTextOnOSDBitmap(char* msg){
     char *font;
 #ifdef   _x86
     asprintf(&font, "fonts/%s.ttf", osds[FULL_OVERLAY_ID].font);
@@ -1293,19 +1319,22 @@ bool DrawTextOnOSDBitmap(){
     
     char out[180];
     size_t bytesRead=0;
-    FILE *file=NULL;    
-    file = fopen(FECFile, "rb");
-    if (file != NULL){// New file, will have to render the font            
-        bytesRead = fread(osdmsg, 1, 79 /*max buffer*/, file); //with files        
-        fclose(file);        
-        remove(FECFile);
-        osdmsg[bytesRead]=0;//end of string	                        
-        osds[FULL_OVERLAY_ID].updt = 1;
-        osd_msg_enabled=true;
-    }
-    if (osd_msg_enabled==false)
-        return false;
-    
+    FILE *file=NULL; 
+    if (msg == NULL || strlen(msg)==0){   
+        file = fopen(FECFile, "rb");
+        if (file != NULL){// New file, will have to render the font            
+            bytesRead = fread(osdmsg, 1, 79 /*max buffer*/, file); //with files        
+            fclose(file);        
+            remove(FECFile);
+            osdmsg[bytesRead]=0;//end of string	                        
+            osds[FULL_OVERLAY_ID].updt = 1;
+            osd_msg_enabled=true;
+        }
+        if (osd_msg_enabled==false)
+            return false;
+    }else
+        strcpy(osdmsg, msg);
+
     uint64_t timems=get_time_ms();
     if(osds[FULL_OVERLAY_ID].updt == 1 || 
         (timems - LastOSDMsgParsed) > 1000){//Update varaibles in Message and render the text as BMP
@@ -1337,9 +1366,6 @@ bool DrawTextOnOSDBitmap(){
             //printf("Sent text msg : %s\r\n",out);
             return false;
         }
-
-
-
 
         if (access(font, F_OK)) //no font file
             return false;
@@ -1585,7 +1611,7 @@ static void draw_screenBMP(){
                 //if (ReplaceWidgets_Slow(&x,&y)) // Logic moved to InjectChars
                 //    continue;
 
-                if (c != 0){
+                if (c != 0 && bitmapFnt.pData!=NULL){//If there is now font, no drawing
                     uint8_t page = 0;
                     if (c > 255) {
                         page = (c >> 8) & 0x03;
@@ -1653,7 +1679,7 @@ static void draw_screenBMP(){
     }
 
     //strcpy(osds[FULL_OVERLAY_ID].text,"$M $B Test");//"$M $B Test");
-    DrawTextOnOSDBitmap();
+    DrawTextOnOSDBitmap(NULL);
     
     stat_screen_refresh_count++;
     uint64_t step3=get_time_ms();  
@@ -1923,29 +1949,109 @@ void getExecutablePath(char *buffer, size_t bufferSize) {
         exit(EXIT_FAILURE);
     }
 }
+
+ 
+
+char *font_path;
+char *font_suffix;
+ 
+int height=0;
+char font_type[20];
+
+//Try to get the font name for different FC
+//if font.png file is present, assumes it is for the correct FC SW Type (BF/INAV or Ardu)
+void getFontName(char *FontName ){
+
+
+
+}
+
+bool LoadFont(){
+    char font_type[10]="";
+    char executablePath[1024];
+    getExecutablePath(executablePath, sizeof(executablePath));    
+    char *executableDir = dirname(executablePath);
+    font_path = "/usr/share/fonts/";   
+    #ifdef _x86
+    font_path = executableDir;//.bmp
+    int l=strlen(font_path);
+    font_path[l]='/';
+    font_path[l+1]=0;
+    #endif 
+    if(strncmp(current_fc_identifier, "BTFL", 4) == 0) 
+        strcpy(font_type,"_btfl");          
+    if(strncmp(current_fc_identifier, "INAV", 4) == 0) 
+        strcpy(font_type,"_inav");    
+    if(strncmp(current_fc_identifier, "ARDU", 4) == 0) 
+        strcpy(font_type,"_ardu");
+    
+
+    //snprintf(font_load_name, 255, "%sfont%s.png", font_path, font_suffix);
+    snprintf(font_load_name, 255, "%sfont%s%s.png", font_path, font_type, font_suffix);
+        
+    // Check if the file exists in the correct location, if not, try in legacy old location!
+    if (access(font_load_name, F_OK) != 0) {        
+        printf("Font file not found in %s folder! Trying in /usr/bin/ => ",font_path);
+        font_path="/usr/bin/";
+        snprintf(font_load_name, 255, "%sfont%s.png", font_path, font_suffix);               
+    }
+
+    printf("Loading %s for %dp mode\r\n", font_load_name, height);
+
+    if (bitmapFnt.pData!=NULL)//if called by mistake
+        free(bitmapFnt.pData);
+
+    bitmapFnt.pData=(void *)loadPngToBMP(font_load_name,&bitmapFnt.u32Width,&bitmapFnt.u32Height);
+    bitmapFnt.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
+        
+
+    if (bitmapFnt.u32Width==0 || bitmapFnt.u32Height==0){
+        printf("Can't find font file : %s \r\n OSD Disabled! \r\n",font_load_name);
+        return false;
+    }
+
+    font_pages = bitmapFnt.u32Width/current_display_info.font_width;
+    printf("Font file res %d:%d pages:%d\r\n", bitmapFnt.u32Width,bitmapFnt.u32Height, font_pages);
+
+    if (matrix_size==1){//Predefined size for matrix, standard
+        current_display_info.char_width =  50;
+        current_display_info.char_height = 18;  
+    }else if (font_pages>2){//BetaFlight!!!
+        current_display_info.char_width =  53;//53
+        current_display_info.char_height = 20;        
+    }else{//INAV
+        current_display_info.char_width =  53;//53
+        current_display_info.char_height = 20;          
+    }
+    //new mode, showing smaller icons in FHD mode
+    if (matrix_size>10){
+        snprintf(font_load_name, 255, "%sfont%s%s.png", font_path, font_type, "_hd");        
+        printf("Loading small size glyphs %s for %dp mode\r\n", font_load_name, height);
+
+        if (bmpFntSmall.pData!=NULL)//if called by mistake
+            free(bmpFntSmall.pData);
+
+        bmpFntSmall.pData=(void *)loadPngToBMP(font_load_name,&bmpFntSmall.u32Width,&bmpFntSmall.u32Height);
+        bmpFntSmall.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8        
+    }
+        printf("Glyph size:%d:%d on a %d:%d matrix. Overlay %d:%d \r\n",current_display_info.font_width,current_display_info.font_height,
+        current_display_info.char_width,current_display_info.char_height,
+        OVERLAY_WIDTH,OVERLAY_HEIGHT);
+}
+
+
 int majestic_width;
 int majestic_height;
 int fd_mem;
 static void InitMSPHook(){
 
-    char executablePath[1024];
-    getExecutablePath(executablePath, sizeof(executablePath));    
-    char *executableDir = dirname(executablePath);
+    
 
     memset(character_map, 0, sizeof(character_map));
     
     
-    char *font_path;
-    char *font_suffix;
-    char font_load_name[255];
-    font_suffix="";
-    font_path = "/usr/share/fonts/";   
-     #ifdef _x86
-        font_path = executableDir;//.bmp
-        int l=strlen(font_path);
-        font_path[l]='/';
-        font_path[l+1]=0;
-    #endif 
+ 
+    font_suffix="";    
  
 
     PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_1555;//ARGB1555 format, 16 bits per pixel 
@@ -1957,14 +2063,15 @@ static void InitMSPHook(){
     #endif
     #ifdef _x86
         //enable this to test simulate preocessing on SigmaStar
-        //PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_I4;//I4 format, 4 bits per pixel 
-        //PIXEL_FORMAT_BitsPerPixel = 4;   
-        PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_8888;//ARGB format, 32 bits per pixel 
-        PIXEL_FORMAT_BitsPerPixel = 32;   
+        PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_I4;//I4 format, 4 bits per pixel 
+        PIXEL_FORMAT_BitsPerPixel = 4;   
+
+        //PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_8888;//ARGB format, 32 bits per pixel 
+        //PIXEL_FORMAT_BitsPerPixel = 32;   
     #endif
 
 
-    int height = GetMajesticVideoConfig(&majestic_width);
+    height = GetMajesticVideoConfig(&majestic_width);
     majestic_height=height;
     #ifdef _x86
         if (DrawOSD)
@@ -1983,58 +2090,10 @@ static void InitMSPHook(){
     
 
     if (DrawOSD){
-        snprintf(font_load_name, 255, "%sfont%s.png", font_path, font_suffix);
-            
-        // Check if the file exists in the correct location, if not, try in legacy old location!
-        if (access(font_load_name, F_OK) != 0) {        
-            printf("Font file not found in %s folder! Trying in /usr/bin/ => ",font_path);
-            font_path="/usr/bin/";
-            snprintf(font_load_name, 255, "%sfont%s.png", font_path, font_suffix);        
-        }
-        
-        printf("Loading %s for %dp mode\r\n", font_load_name, height);
-
-        if (bitmapFnt.pData!=NULL)//if called by mistake
-            free(bitmapFnt.pData);
-
-        bitmapFnt.pData=(void *)loadPngToBMP(font_load_name,&bitmapFnt.u32Width,&bitmapFnt.u32Height);
-        bitmapFnt.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8
-            
-
-        if (bitmapFnt.u32Width==0 || bitmapFnt.u32Height==0){
-            printf("Can't find font file : %s \r\n OSD Disabled! \r\n",font_load_name);
-            return;
-        }
-
-        font_pages = bitmapFnt.u32Width/current_display_info.font_width;
-        printf("Font file res %d:%d pages:%d\r\n", bitmapFnt.u32Width,bitmapFnt.u32Height, font_pages);
-        
-        if (matrix_size==1){//Predefined size for matrix, standard
-            current_display_info.char_width =  50;
-            current_display_info.char_height = 18;  
-        }/*else if (matrix_size==2){//Predefined size for  smaller matrix, for performance
-            current_display_info.char_width =  36;
-            current_display_info.char_height = 12;  
-            SkipXChar=10;
-        }*/else if (font_pages>2){//BetaFlight!!!
-            current_display_info.char_width =  53;//53
-            current_display_info.char_height = 20;        
-        }else{//INAV
-            current_display_info.char_width =  53;//53
-            current_display_info.char_height = 20;          
-        }
-        //new mode, showing smaller icons in FHD mode
-        if (matrix_size>10){
-            snprintf(font_load_name, 255, "%sfont%s.png", font_path, "_hd");
-            printf("Loading small size glyphs %s for %dp mode\r\n", font_load_name, height);
-
-            if (bmpFntSmall.pData!=NULL)//if called by mistake
-                free(bmpFntSmall.pData);
-
-            bmpFntSmall.pData=(void *)loadPngToBMP(font_load_name,&bmpFntSmall.u32Width,&bmpFntSmall.u32Height);
-            bmpFntSmall.enPixelFormat =  PIXEL_FORMAT_DEFAULT ;//E_MI_RGN_PIXEL_FORMAT_I8; //I8        
-        }
+        LoadFont();
     }
+    current_display_info.char_width =  53;
+    current_display_info.char_height = 20; 
     OVERLAY_WIDTH = current_display_info.font_width * (current_display_info.char_width);//must be multiple of 8 !!!
     OVERLAY_WIDTH = (OVERLAY_WIDTH + 7) & ~7;
     if (matrix_size>10 && OVERLAY_WIDTH < (1920-(53*2))) {
@@ -2109,8 +2168,8 @@ On sigmastar the BMP row stride is aligned to 8 bytes, that is 16 pixels in PIXE
             BITMAP bitmap;                                
             int prepared=0;           
 
-            //LOAD PNG TEST
-            if (true){//Split and show a review of the selected font for several seconds
+            //LOAD PNG TEST, if there is font file loaded, preview it
+            if (/*true*/bitmapFnt.pData!=NULL){//Split and show a review of the selected font for several seconds
                 prepared=1;
                 
                 bitmap.enPixelFormat = PIXEL_FORMAT_DEFAULT;
@@ -2196,6 +2255,12 @@ On sigmastar the BMP row stride is aligned to 8 bytes, that is 16 pixels in PIXE
 
             #endif
                 //free(bitmap.pData);
+            }else{//no font file still, show message on screen
+                cntr=0;
+                //const char *content = "&F48 &L43 Identifying Flight Controller..."; // String to write to the file
+                SetOSDMsg("&F48 &L43 Identifying Flight Controller...");
+                 
+                draw_screenBMP();
             }
 
             if (prepared){

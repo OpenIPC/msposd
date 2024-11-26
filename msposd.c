@@ -1010,19 +1010,23 @@ static void send_variant_request2(int serial_fd) {
 		construct_msp_command(buffer, MSP_CMD_FC_VARIANT, NULL, 0, MSP_OUTBOUND);
 		res = write(serial_fd, &buffer, sizeof(buffer));
 
-		if (mspVTXenabled) {
+		//Sending several request right one after another does not work well on INAV ...
+		if (bitmapFnt.pData!=NULL && mspVTXenabled) {//no need to poll when no fonts are still loaded
 			// Poll for mspVTX
 			construct_msp_command(buffer, MSP_GET_VTX_CONFIG, NULL, 0, MSP_OUTBOUND);
 			res = write(serial_fd, &buffer, sizeof(buffer));
-		}		
-
-		//poll for FC_STATUS
-		construct_msp_command(buffer, MSP_CMD_STATUS, NULL, 0, MSP_OUTBOUND);
-	    res = write(serial_fd, &buffer, sizeof(buffer));
-
+		}				 
 		//usleep(20*1000);
 		VariantCounter=0;
 	}
+
+	//Sending several request right one after another does not work well on INAV ...
+	if (MSP_PollRate - 2 == VariantCounter ){//poll every one second, but one by one!
+		//poll for FC_STATUS
+		construct_msp_command(buffer, MSP_CMD_STATUS, NULL, 0, MSP_OUTBOUND);
+	    res = write(serial_fd, &buffer, sizeof(buffer));
+	}
+
 
 	//construct_msp_command(buffer, MSP_CMD_BATTERY_STATE, NULL, 0, MSP_OUTBOUND);
     //res = write(serial_fd, &buffer, sizeof(buffer));
@@ -1096,7 +1100,10 @@ static int handle_data(const char *port_name, int baudrate,
 
 	cfmakeraw(&options);
 	tcsetattr(serial_fd, TCSANOW, &options);
-
+#ifdef _x86 
+	usleep(500*1000);//flush all data in the Rx buffer
+	int tttt=tcflush(serial_fd, TCIOFLUSH);
+#endif
 	// tell the fc what vtx config we support
 	if (mspVTXenabled) {
 		printf("Setup mspVTX ...\n");
