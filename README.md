@@ -137,22 +137,27 @@ Prebuild binaries for x86, SigmaStar, Goke and Hisilicon are at release/ folder.
 curl -L -o /usr/bin/msposd https://github.com/OpenIPC/msposd/releases/download/latest/msposd_star6e  
 chmod 755 /usr/bin/msposd
 ```
-Copy the font files for your flight controller firmware INAV/ Betaflight/ ArduPilot from here  https://github.com/openipc/msposd/tree/main/fonts   
 
+***Since Nov 2024 ***
+Program automatically selects the appropriate font file for the FC software used.  
+font_inav.png/font_inav_hd.png | font_btfl.png/font_btfl_hd.png | font_ardu.png/font_ardu_hd.png files must be present in ```/usr/share/fonts/```
+
+
+***If you prefer, you can copy only the fong files for the FC software you plan to use***  
+Copy the font files for your flight controller firmware INAV/ Betaflight/ ArduPilot from here  https://github.com/openipc/msposd/tree/main/fonts    
 **For INAV**:
 ```
 mkdir /usr/share/fonts
-curl -k -L -o /usr/share/fonts/font.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/inav/font.png
-curl -k -L -o /usr/share/fonts/font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/inav/font_hd.png
+curl -k -L -o /usr/share/fonts/font.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/font_inav.png
+curl -k -L -o /usr/share/fonts/font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/font_inav_hd.png
 ```
 
 **For Betaflight**: preinstalled in OpenIPC firmware since Oct 2024
 ```
 mkdir /usr/share/fonts
-curl -k -L -o /usr/share/fonts/font.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/betaflight/font.png
-curl -k -L -o /usr/share/fonts/font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/betaflight/font_hd.png
+curl -k -L -o /usr/share/fonts/font.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/font_btfl.png
+curl -k -L -o /usr/share/fonts/font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/font_btfl_hd.png
 ```
-
 
 **For Ardupilot**:  
 Set  
@@ -162,8 +167,8 @@ To use betaflight fonts, set ```MSP_OPTIONS = 5``` and copy fonts for betaflight
 If you prefer to use ardupilot "native" fonts (more icons), then set ```MSP_OPTIONS = 0``` and copy the fonts below.
 ```
 mkdir /usr/share/fonts
-curl -k -L -o /usr/share/fonts/font.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/ardupilot/font.png
-curl -k -L -o /usr/share/fonts/font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/ardupilot/font_hd.png
+curl -k -L -o /usr/share/fonts/font.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/font_ardu.png
+curl -k -L -o /usr/share/fonts/font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/font_ardu_hd.png
 ```
 
 Start msposd or reference it in OpenIPC boot scripts.  
