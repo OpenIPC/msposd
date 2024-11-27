@@ -73,19 +73,10 @@ int Init_x86(uint16_t *width, uint16_t *height) {
 #ifdef _DEBUG_x86
         forcefullscreen=false;
 #endif
-    
 
 #ifdef _x86
-        if (getenv("DISPLAY") == NULL) {
-            /*
-             * Use default display screen, especially launch from console
-             * ToDo: x86 linux should implement this code also, test needed.
-             */
-            setenv("DISPLAY", ":0", 1);
-        }
+        setenv("DISPLAY", ":0", 0);
 #endif
-
-
 
         display = XOpenDisplay(NULL);
         if (!display) {
