@@ -25,7 +25,7 @@ jobs:
           ./build.sh hisi
           ./build.sh star6b0
           ./build.sh star6e
-          ./build.sh x86
+          ./build.sh native
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
@@ -35,7 +35,7 @@ jobs:
               msposd_hisi
               msposd_star6b0
               msposd_star6e
-              msposd_x86
+              msposd
 
       - name: Versioned release
         if: startsWith(github.ref, 'refs/tags/')
@@ -46,7 +46,7 @@ jobs:
             msposd_hisi
             msposd_star6b0
             msposd_star6e
-            msposd_x86
+            msposd
 
       - name: Upload latest
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -58,4 +58,4 @@ jobs:
             msposd_hisi
             msposd_star6b0
             msposd_star6e
-            msposd_x86
+            msposd
