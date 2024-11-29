@@ -1,5 +1,3 @@
-//Uncomment when debugging to have access to the windows below the OSD surface
-//#define _DEBUG_x86
 
 #include <cairo/cairo.h>
 #include <cairo/cairo-xlib.h>
@@ -70,9 +68,6 @@ void event_callback(evutil_socket_t fd, short event, void *arg) {
 int Init_x86(uint16_t *width, uint16_t *height) {
         if (verbose)
             forcefullscreen=false;
-#ifdef _DEBUG_x86
-        forcefullscreen=false;
-#endif
 
 #ifdef _x86
         setenv("DISPLAY", ":0", 0);
