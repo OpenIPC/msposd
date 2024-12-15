@@ -1799,7 +1799,7 @@ static void draw_complete()
 {
     
     stat_MSP_draw_complete_count++;
-   
+    draws++;
     draw_screenBMP();
 
 #ifdef _x86
@@ -2045,11 +2045,7 @@ int majestic_height;
 int fd_mem;
 static void InitMSPHook(){
 
-    
-
     memset(character_map, 0, sizeof(character_map));
-    
-    
  
     font_suffix="";    
  
@@ -2062,12 +2058,13 @@ static void InitMSPHook(){
         PIXEL_FORMAT_BitsPerPixel = 4;
     #endif
     #ifdef _x86
-        //enable this to test simulate preocessing on SigmaStar
-        PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_I4;//I4 format, 4 bits per pixel 
-        PIXEL_FORMAT_BitsPerPixel = 4;   
+        //enable this to simulate I4 Bitmap Processing on SigmaStar
+        //PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_I4;//I4 format, 4 bits per pixel 
+        //PIXEL_FORMAT_BitsPerPixel = 4;   
 
-        //PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_8888;//ARGB format, 32 bits per pixel 
-        //PIXEL_FORMAT_BitsPerPixel = 32;   
+        //Default 32 bit rendering on the ground
+        PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_8888;//ARGB format, 32 bits per pixel 
+        PIXEL_FORMAT_BitsPerPixel = 32;   
     #endif
 
 

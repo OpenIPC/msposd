@@ -36,6 +36,8 @@
 #define MAX_MTU 9000
 #include "osd/util/settings.h"
 
+//This needs to be patched in the kernel to work
+#define UART_FCR_TRIGGER_RX_L3 0x10000	
 
 bool vtxMenuActive = false;
 bool armed = true; // assume armed until we are told otherwise from the fc
@@ -961,7 +963,7 @@ static bool ReadSerialSimple(int showstat){
 			stat_UDP_MSPframes=0;
 	}
 	
-	uint8_t data[1024];
+	uint8_t data[2048];
 	 // Read from the serial port once per interval
     int packet_len = read(serial_fd, data, sizeof(data));
     if (packet_len < 0) 
@@ -971,10 +973,14 @@ static bool ReadSerialSimple(int showstat){
 	stat_bytes+=packet_len;
 	ttl_packets++;
 	ttl_bytes+=packet_len;
+
+	//support for very low refresh rate, we will lose some FC data, may end up with distorted OSD? But we need to read all data in the beginning to identify the FC !
+	if (packet_len==sizeof(data) && bitmapFnt.pData!=NULL)
+		tcflush(serial_fd, TCIOFLUSH);
+
 	if (ParseMSP){
 		for(int i=0;i<packet_len;i++)
-			msp_process_data(rx_msp_state, data[i]);
-		//continue;
+			msp_process_data(rx_msp_state, data[i]);							
 	}
 }
 
@@ -982,7 +988,8 @@ static bool ReadSerialSimple(int showstat){
 static void send_variant_request2(int serial_fd) {
     uint8_t buffer[6];
 	int res=0;
-
+	if (AbortNow)
+		return;
 	if (enable_simple_uart ){
 		int rate_divider=MSP_PollRate / (1000 / MinTimeBetweenScreenRefresh);
 		if (rate_divider<1 || rate_divider>MSP_PollRate)
@@ -1098,12 +1105,19 @@ static int handle_data(const char *port_name, int baudrate,
 	options.c_iflag &= 0; // disable software flow controll
 	options.c_oflag &= 0;
 
+	
+	if (enable_simple_uart)
+		options.c_iflag |= ( UART_FCR_TRIGGER_RX_L3 );	//#define UART_FCR_TRIGGER_RX_L3 0x10000	will work only on patched kernel driver
+
 	cfmakeraw(&options);
 	tcsetattr(serial_fd, TCSANOW, &options);
 #ifdef _x86 
 	usleep(500*1000);//flush all data in the Rx buffer
 	int tttt=tcflush(serial_fd, TCIOFLUSH);
 #endif
+	if (enable_simple_uart)
+		tcflush(serial_fd, TCIOFLUSH);
+
 	// tell the fc what vtx config we support
 	if (mspVTXenabled) {
 		printf("Setup mspVTX ...\n");
@@ -1122,7 +1136,7 @@ static int handle_data(const char *port_name, int baudrate,
 	struct sockaddr_in sin_in = {
 		.sin_family = AF_INET,
 	};
- 
+
 
 	base = event_base_new();
 
@@ -1197,7 +1211,7 @@ static int handle_data(const char *port_name, int baudrate,
 	event_base_dispatch(base);
 err:
 	
-if (temp_tmr ) {
+	if (temp_tmr ) {
 		event_del(temp_tmr);
 		event_free(temp_tmr);
 	}

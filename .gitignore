@@ -10,6 +10,7 @@ msposd_goke
 msposd_hisi
 msposd_star6b0
 msposd_star6e
+msposd_x86
 msposd
 serial_monitor.c
 version.h

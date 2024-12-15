@@ -4,7 +4,7 @@
         {
             "label": "gcc build",
             "type": "shell",
-            "command": "./build.sh x86",
+            "command": "./build.sh native",
             "args": [],
             "group": {
                 "kind": "build",
@@ -21,8 +21,8 @@
             "command": "cp",
             "args": [
                 "-f",
-                "${workspaceFolder}/msposd_x86",
-                "${workspaceFolder}/msposd"
+                "${workspaceFolder}/msposd",
+                "${workspaceFolder}/msposd_x"
             ],
             "problemMatcher": [],
             "detail": "Copy msposd to workspace folder",
