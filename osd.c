@@ -1183,7 +1183,7 @@ static bool first_wfb_read=true;
             ipos++;
             char s[64];
             time_t t = time(NULL);
-            struct tm *tm = gmtime(&t);
+            struct tm *tm = localtime(&t);
             strftime(s, 64, timefmt, tm);
             strcat(out, s);
             opos += strlen(s);
