@@ -92,7 +92,7 @@ typedef struct msp_cache_entry_s {
 
 static msp_cache_entry_t *msp_message_cache[256]; // make a slot for all possible messages
 
-static uint8_t frame_buffer[8192]; // buffer a whole frame of MSP commands until we get a draw command
+static uint8_t frame_buffer[1024]; // buffer a whole frame of MSP commands until we get a draw command. needs to fit in UDP !
 static uint32_t fb_cursor = 0;
 
 static uint8_t message_buffer[256]; // only needs to be the maximum size of an MSP packet, we only care to fwd MSP
@@ -1043,7 +1043,7 @@ static bool first_wfb_read=true;
  void fill(char* str)
 {
     unsigned int rxb_l, txb_l, cpu_l[7];
-    char out[180] = "";
+    char out[280] = "";
     char param = 0;
     int ipos = 0, opos = 0;
 
@@ -1296,7 +1296,7 @@ void remove_carriage_returns(char *out) {
     out[j] = '\0';  // Null-terminate the modified string
 }
 
-char osdmsg[80];
+char osdmsg[180];
 
 bool DrawTextOnOSDBitmap(char* msg){
     char *font;
@@ -1323,7 +1323,7 @@ bool DrawTextOnOSDBitmap(char* msg){
     if (msg == NULL || strlen(msg)==0){   
         file = fopen(FECFile, "rb");
         if (file != NULL){// New file, will have to render the font            
-            bytesRead = fread(osdmsg, 1, 79 /*max buffer*/, file); //with files        
+            bytesRead = fread(osdmsg, 1, 179 /*max buffer*/, file); //with files        
             fclose(file);        
             remove(FECFile);
             osdmsg[bytesRead]=0;//end of string	                        
