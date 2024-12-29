@@ -13,24 +13,35 @@
 #include <X11/keysym.h>
 #include <event2/event.h>
 
+#if defined(_x86)
 Display* display=NULL;
 Window window =NULL;
-cairo_surface_t* surface_x11=NULL;
-cairo_surface_t* surface=NULL;
-cairo_surface_t* image_surface = NULL;
-cairo_t* cr=NULL;
-cairo_t* cr_x11=NULL;
 Pixmap backbuffer_pixmap;
-cairo_surface_t* backbuffer_surface;
-
 bool forcefullscreen=true;
-extern bool verbose;
 extern struct event_base *base;
 struct event *x11_event=NULL;
-
 Window RootWindow;
+#endif
 
+#if defined(__ROCKCHIP__)
+#define SHM_NAME "msposd"
+// Define the shared memory region structure
+typedef struct {
+    uint16_t width;  // Image width
+    uint16_t height; // Image height
+    unsigned char data[]; // Flexible array for image data
+} SharedMemoryRegion;
+#endif
 
+cairo_surface_t* surface=NULL;
+cairo_surface_t* surface_back=NULL;
+cairo_surface_t* image_surface = NULL;
+cairo_t* cr=NULL;
+cairo_t* cr_back=NULL;
+
+extern bool verbose;
+
+#if defined(_x86)
 extern int AHI_TiltY;
 void handle_key_press(XEvent *event) {
     KeySym keysym = XLookupKeysym(&event->xkey, 0); // Map keycode to keysym
@@ -64,14 +75,11 @@ void event_callback(evutil_socket_t fd, short event, void *arg) {
     }
 }
 
-
-int Init_x86(uint16_t *width, uint16_t *height) {
+int Init(uint16_t *width, uint16_t *height) {
         if (verbose)
             forcefullscreen=false;
 
-#ifdef _x86
         setenv("DISPLAY", ":0", 0);
-#endif
 
         display = XOpenDisplay(NULL);
         if (!display) {
@@ -136,12 +144,95 @@ int Init_x86(uint16_t *width, uint16_t *height) {
             XChangeProperty(display, window, windowType, XA_ATOM, 32, PropModeReplace, (unsigned char*)&windowTypeDock, 1);
         }
         // Create a Cairo surface for drawing on the X11 window
-        surface_x11 = cairo_xlib_surface_create(display, window, vinfo.visual, *width, *height);
+        surface_back = cairo_xlib_surface_create(display, window, vinfo.visual, *width, *height);
         surface   = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, *width, *height);        
         cr = cairo_create(surface);        
-        cr_x11 = cairo_create(surface_x11);
+        cr_back = cairo_create(surface_back);
 
 }
+#endif
+
+#if defined(__ROCKCHIP__)
+int Init(uint16_t *width, uint16_t *height) {
+    // Create shared memory region
+    const char *shm_name = "msposd"; // Name of the shared memory region
+    int shm_fd = -1;
+
+    // Wait until the shared memory segment exists
+    while (shm_fd == -1) {
+        shm_fd = shm_open(shm_name, O_RDWR, 0666);
+        if (shm_fd == -1) {
+            if (errno == ENOENT) {
+                printf("Shared memory '%s' does not exist. Waiting...\n", shm_name);
+                sleep(1); // Wait for 1 second before trying again
+                continue;
+            } else {
+                perror("Failed to open shared memory");
+                return -1;
+            }
+        }
+
+    }
+    // Map just the header to read width and height
+    size_t header_size = sizeof(SharedMemoryRegion);
+    SharedMemoryRegion *shm_region = (SharedMemoryRegion *) mmap(0, header_size, PROT_READ, MAP_SHARED, shm_fd, 0);
+    if (shm_region == MAP_FAILED) {
+        perror("Failed to map shared memory header");
+        close(shm_fd);
+        return -1;
+    }
+
+    // Validate width and height (optional)
+    if (shm_region->width <= 0 || shm_region->width <= 0) {
+        fprintf(stderr, "Invalid width or height in shared memory\n");
+        munmap(shm_region, header_size);
+        close(shm_fd);
+        return -1;
+    }
+
+    int shm_width = shm_region->width;
+    int shm_height = shm_region->height;
+    *width = shm_region->width;
+    *height = shm_region->height;
+
+    printf("Surface is %ix%i pixels\n",shm_width,shm_height);
+
+    // Unmap the header (optional, as we'll remap everything)
+    munmap(shm_region, header_size);
+
+    // Calculate the total size of shared memory
+    size_t shm_size = header_size + (shm_width * shm_height * 4); // Header + Image data
+
+    // Remap the entire shared memory region (header + image data)
+    shm_region = (SharedMemoryRegion *) mmap(0, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (shm_region == MAP_FAILED) {
+        perror("Failed to remap shared memory");
+        close(shm_fd);
+        return -1;
+    }
+
+    // Create a Cairo surface for the image data
+    surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, shm_width, shm_width);        
+    if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+        fprintf(stderr, "Failed to create Cairo surface\n");
+        return -1;
+    }
+
+    // Create a Cairo surface for the image data connecto to the shm
+    surface_back = cairo_image_surface_create_for_data(
+        shm_region->data, CAIRO_FORMAT_ARGB32, shm_width, shm_height, shm_width * 4);
+    if (cairo_surface_status(surface_back) != CAIRO_STATUS_SUCCESS) {
+        fprintf(stderr, "Failed to create Cairo surface_back\n");
+        munmap(shm_region, shm_size);
+        close(shm_fd);
+        return -1;
+    }    
+
+    // Create a Cairo context
+    cr = cairo_create(surface);
+    cr_back = cairo_create(surface_back);
+}
+#endif
 
 void premultiplyAlpha(uint32_t* rgbaData, uint32_t width, uint32_t height) {
     for (uint32_t i = 0; i < width * height; ++i) {
@@ -156,14 +247,14 @@ void premultiplyAlpha(uint32_t* rgbaData, uint32_t width, uint32_t height) {
 }
 
 
-void ClearScreen_x86(){
+void ClearScreen(){
     cairo_set_source_rgba(cr, 0, 0, 0, 0);
     cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE );
     cairo_paint(cr);      
 }
 
 
-void Render_x86( unsigned char* rgbaData, int u32Width, int u32Height){   
+void Render( unsigned char* rgbaData, int u32Width, int u32Height){   
     
     
     cairo_set_source_rgba(cr, 0, 0, 0, 0);  // Transparent background for buffer
@@ -191,14 +282,14 @@ void Render_x86( unsigned char* rgbaData, int u32Width, int u32Height){
     cairo_paint(cr);        
     //XSync(display, False);//seems not needed?
 
+#if defined(_x86)
     if  (forcefullscreen)
         XRaiseWindow(display, window);//Raise the window to the top
-
-    
+#endif    
     
 }
 
-void Render_x86_rect(unsigned char* rgbaData, int u32Width, int u32Height, int src_x, int src_y, int dest_x, int dest_y, int rect_width, int rect_height) {
+void Render_rect(unsigned char* rgbaData, int u32Width, int u32Height, int src_x, int src_y, int dest_x, int dest_y, int rect_width, int rect_height) {
     // Check if the bitmap has changed and recreate the image surface if necessary
     if (image_surface != NULL && cairo_image_surface_get_data(image_surface) != rgbaData) {
         cairo_surface_destroy(image_surface);
@@ -229,8 +320,8 @@ void Render_x86_rect(unsigned char* rgbaData, int u32Width, int u32Height, int s
 }
 
 
-void FlushDrawing_x86(){
-
+void FlushDrawing(){
+#if defined(_x86)
     //Hook keyboard- can't be in init procs since there the libevent is not still created.
     // base = event_base_new(); 
     if (x11_event==NULL && base!=NULL){        
@@ -255,34 +346,37 @@ void FlushDrawing_x86(){
              GrabModeAsync, GrabModeAsync); // Alt + Down Arrow
         
     }
-   
+#endif
+  
     // Copy work buffer to the display surface do avoid flickering
-    cairo_set_operator(cr_x11, CAIRO_OPERATOR_SOURCE);
+    cairo_set_operator(cr_back, CAIRO_OPERATOR_SOURCE);
     // Copy buffer to the display surface
-    cairo_set_source_surface(cr_x11, surface, 0, 0);
-    cairo_paint(cr_x11);
+    cairo_set_source_surface(cr_back, surface, 0, 0);
+    cairo_paint(cr_back);
 
-    cairo_surface_flush(surface_x11);
+    cairo_surface_flush(surface_back);
+#if defined(_x86)
     XFlush(display);
-
+#endif
     //XSync(display, False);//seems not needed?    
 }
 
 
-void Close_x86(){
+void Close(){
     // Clean up resources
     cairo_destroy(cr);
-    cairo_destroy(cr_x11);
+    cairo_destroy(cr_back);
     cairo_surface_destroy(image_surface);
     cairo_surface_destroy(surface);
-    cairo_surface_destroy(surface_x11);
+    cairo_surface_destroy(surface_back);
+#if defined(_x86)
     XDestroyWindow(display, window);
     XCloseDisplay(display);
 
      // Cleanup
     event_free(x11_event);
     event_base_free(base);
-
+#endif
 }
 
 
@@ -291,7 +385,7 @@ extern uint16_t Transform_OVERLAY_HEIGHT;
 extern float Transform_Roll;
 extern float Transform_Pitch;
 bool outlined=true;
-void drawLine_x86(int x0, int y0, int x1, int y1, uint32_t color, double thickness, bool Transpose) {
+void drawLineGS(int x0, int y0, int x1, int y1, uint32_t color, double thickness, bool Transpose) {
     
     if (Transpose){
          
@@ -359,7 +453,7 @@ void drawLine_x86(int x0, int y0, int x1, int y1, uint32_t color, double thickne
 
 
 // Function to draw rotated text with rotation
-int getTextWidth_x86(const char* text , double size) {    
+int getTextWidth(const char* text , double size) {    
     cairo_set_font_size(cr, size);      
     cairo_text_extents_t extents;
     // Get the extents of the text
@@ -371,7 +465,7 @@ int getTextWidth_x86(const char* text , double size) {
 
 
 // Function to draw rotated text with rotation
-void drawText_x86(const char* text, int x, int y, uint32_t color, double size, bool Transpose, int Outline) {
+void drawText(const char* text, int x, int y, uint32_t color, double size, bool Transpose, int Outline) {
     // Extract the RGBA components from the color
     double r = ((color >> 24) & 0xFF) / 255.0;
     double g = ((color >> 16) & 0xFF) / 255.0;
@@ -485,6 +579,4 @@ void drawRC_Channels(int posX, int posY, int m1X, int m1Y, int m2X, int m2Y){//i
     cairo_set_source_rgb(cr, 1, 1, 1);  // Set color to white for the circle
     cairo_arc(cr, rect_center_x, rect_center_y, circle_radius, 0, 2 * M_PI);
     cairo_fill(cr);
-
-    return 0;
 }

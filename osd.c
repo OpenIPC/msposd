@@ -15,7 +15,7 @@
 #include "osd/msp/msp.h"
 #include "osd/msp/msp_displayport.h"
 
-#ifdef _x86
+#if defined(_x86) || defined(__ROCKCHIP__)
     // #include <cairo/cairo.h>
     // #include <cairo/cairo-xlib.h>
     // #include <X11/Xlib.h>
@@ -23,7 +23,7 @@
     // #include <X11/Xatom.h>  
     // #include <stdio.h>
     // #include <stdbool.h>
-    #include "osd/util/Render_x86.c"
+    #include "osd/util/Render_gs.c"
  #else
     #include "bmp/region.h"
     #include "bmp/common.h"    
@@ -680,9 +680,9 @@ int y_end = 500;
  }
 
  void LineDirect(uint8_t* bmpData, uint32_t width, uint32_t height, int x0, int y0, int x1, int y1, uint8_t color, int thickness) {
-#ifdef _x86
+#if defined(_x86) || defined(__ROCKCHIP__)
 
-    drawLine_x86(x0,  y0,  x1,  y1,  getcolor(color),  thickness, false);
+    drawLineGS(x0,  y0,  x1,  y1,  getcolor(color),  thickness, false);
 #else
     drawLineI4( bmpData,  width,  height,  x0,  y0,  x1,  y1,  color,  thickness);
 #endif    
@@ -690,8 +690,8 @@ int y_end = 500;
  
 
 void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1, uint8_t color, int thickness) {
-#ifdef _x86
-    drawLine_x86(posX0,  posY0,  posX1,  posY1,  getcolor(color),  thickness, true);
+#if defined(_x86) || defined(__ROCKCHIP__)
+    drawLineGS(posX0,  posY0,  posX1,  posY1,  getcolor(color),  thickness, true);
 #else
     drawLine( bmpData, posX0,  posY0,  posX1,  posY1,  color,  thickness);
 #endif
@@ -948,11 +948,11 @@ void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1,
                     sprintf(buffer, "%+02d°", -last_pitch/10);
                 
                 int osd_font_size=18;
-#ifdef _x86
+#if defined(_x86) || defined(__ROCKCHIP__)
                  uint32_t color = getcolor(COLOR_YELLOW);
                  if ((-50 < last_pitch) && (last_pitch <50))
                     color = getcolor(COLOR_WHITE);
-                drawText_x86(buffer, start_x + width_ladder*2.5 - spacing/3, y + osd_font_size/2 - 4, color, osd_font_size, true,1);
+                drawText(buffer, start_x + width_ladder*2.5 - spacing/3, y + osd_font_size/2 - 4, color, osd_font_size, true,1);
 #endif                
 
                 if (AHI_Enabled==3){//Draw home
@@ -1021,8 +1021,8 @@ void LineTranspose(uint8_t* bmpData, int posX0, int posY0, int posX1, int posY1,
                             //needed since we may have already painted the icons                       
                         }
                     } 
-                    #ifdef _x86                            
-                        Render_x86_rect(bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,xR,yR,xR,yR,s_width,s_height);            
+                    #if defined(_x86) || defined(__ROCKCHIP__)
+                        Render_rect(bmpBuff.pData,bmpBuff.u32Width, bmpBuff.u32Height,xR,yR,xR,yR,s_width,s_height);            
                     #endif                   
 
                 }
@@ -1491,7 +1491,7 @@ bool Convert2SmallGlyph(BITMAP *fnt ,  u_int16_t *s_left, u_int16_t *s_top, u_in
 //Not needed, but somehow parsing DrawString in InjectChars sometimes does not work.
 static bool ReplaceWidgets_Slow(int* x, int* y){
   
-#ifdef _x86    
+#if defined(_x86) || defined(__ROCKCHIP__)
     if (character_map[*x][*y]=='!' && character_map[*x+1][*y]=='R' && character_map[*x+2][*y]=='C' && character_map[*x+3][*y]=='!'){                                        
                     RCWidgetX = *x *current_display_info.font_width;
                     RCWidgetY = current_display_info.font_height * *y;
@@ -1664,7 +1664,7 @@ static void draw_screenBMP(){
         }
     
         step2=get_time_ms();  
-#ifndef _x86 
+#if !defined(_x86) && !defined(__ROCKCHIP__)
        
         if (AHI_Enabled==2)
             draw_AHI();
@@ -1683,7 +1683,7 @@ static void draw_screenBMP(){
     
     stat_screen_refresh_count++;
     uint64_t step3=get_time_ms();  
-#ifdef _x86
+#if defined(_x86) || defined(__ROCKCHIP__)
 
     if (bmp_x86==NULL)//lets cache it
         bmp_x86 = malloc(bmpBuff.u32Width * bmpBuff.u32Height * 4);  // Allocate memory for RGBA data    
@@ -1699,8 +1699,8 @@ static void draw_screenBMP(){
         bmp_x86=bmpBuff.pData;
 
     if (DrawOSD){
-        //ClearScreen_x86();
-        Render_x86(bmp_x86,bmpBuff.u32Width, bmpBuff.u32Height);
+        //ClearScreen();
+        Render(bmp_x86,bmpBuff.u32Width, bmpBuff.u32Height);
 
         if (AHI_Enabled==2)
                 draw_AHI();        
@@ -1713,7 +1713,7 @@ static void draw_screenBMP(){
         if (strlen(air_unit_info_msg)>1){                           
             int osd_font_size=osds[FULL_OVERLAY_ID].size - 6; //Some offset needed to keep the same with air rendering 
             uint64_t timems=get_time_ms();
-            int width=getTextWidth_x86(air_unit_info_msg,osd_font_size);
+            int width=getTextWidth(air_unit_info_msg,osd_font_size);
                         
             int posX=0,posY=0;
             if (msg_layout%4==0)// left
@@ -1726,10 +1726,10 @@ static void draw_screenBMP(){
                 posX=20 + ((timems/16)%(bmpBuff.u32Width - width - 40))& ~1;
             posY=(msg_layout/4)== 0 ? osd_font_size : (bmpBuff.u32Height ) - 6;//Uppper or lower line
 
-            drawText_x86(air_unit_info_msg, posX , posY, getcolor(msg_colour), /*font_size*/ osd_font_size, false,0);   
+            drawText(air_unit_info_msg, posX , posY, getcolor(msg_colour), /*font_size*/ osd_font_size, false,0);   
         }
         
-        FlushDrawing_x86();
+        FlushDrawing();
     }
  
 
@@ -1778,7 +1778,7 @@ static void clear_screen()
 {
     if (cntr++<0 )
         return ;
-    //ClearScreen_x86();
+    //ClearScreen();
     //BetaFlight needs this. INAV can be configured to skip it
     if (!DrawOSD || font_pages == 1 || font_pages>2 || (get_time_ms() - LastCleared)>300) {//no faster than 0.5 per second
         memset(character_map, 0, sizeof(character_map));
@@ -1859,7 +1859,7 @@ unsigned char* loadPngToBMP(const char* filename, unsigned int* width, unsigned 
     else if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_8888){
        // memcpy(bmpData,pngData,bmpSize);
        convertRGBAToARGB( pngData, *width , *height, bmpData);
-#ifdef _x86       
+#if defined(_x86) || defined(__ROCKCHIP__)
        premultiplyAlpha((uint32_t*) bmpData, *width, *height);//RGBA format needs to be converted when using transparency?
 #endif       
     }else      
@@ -2057,7 +2057,7 @@ static void InitMSPHook(){
         PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_I4;//I4 format, 4 bits per pixel 
         PIXEL_FORMAT_BitsPerPixel = 4;
     #endif
-    #ifdef _x86
+    #if defined(_x86) || defined(__ROCKCHIP__)
         //enable this to simulate I4 Bitmap Processing on SigmaStar
         //PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_I4;//I4 format, 4 bits per pixel 
         //PIXEL_FORMAT_BitsPerPixel = 4;   
@@ -2070,10 +2070,11 @@ static void InitMSPHook(){
 
     height = GetMajesticVideoConfig(&majestic_width);
     majestic_height=height;
-    #ifdef _x86
+    #if defined(_x86) || defined(__ROCKCHIP__)
         if (DrawOSD)
-            Init_x86(&OVERLAY_WIDTH, &OVERLAY_HEIGHT);
+            Init(&OVERLAY_WIDTH, &OVERLAY_HEIGHT);
         height=OVERLAY_HEIGHT;
+        printf("OSD is %ix%i pixels\n",OVERLAY_WIDTH,OVERLAY_HEIGHT);
     #endif
 
     //Get video resolution
@@ -2232,7 +2233,7 @@ On sigmastar the BMP row stride is aligned to 8 bytes, that is 16 pixels in PIXE
                         printf("Set Goke Font Review %d:%d\r\n", bitmap.u32Width, bitmap.u32Height);
 
                     set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);//bitmap must match region dimensions!
-                #elif _x86
+                #elif defined(_x86) || defined(__ROCKCHIP__)
                     //sfRenderWindow_clear(window, sfColor_fromRGB(255, 255, 0));
                     
                     unsigned char* rgbaData = malloc(bitmap.u32Width * bitmap.u32Height * 4);  // Allocate memory for RGBA data          
@@ -2243,9 +2244,9 @@ On sigmastar the BMP row stride is aligned to 8 bytes, that is 16 pixels in PIXE
                     else
                         Convert1555ToRGBA( bitmap.pData, rgbaData, bitmap.u32Width, bitmap.u32Height);  
 
-                    Render_x86(rgbaData,bitmap.u32Width, bitmap.u32Height);
-                    //Render_x86(bitmapFnt.pData,bitmapFnt.u32Width,700);//test 
-                    FlushDrawing_x86();
+                    Render(rgbaData,bitmap.u32Width, bitmap.u32Height);
+                    //Render(bitmapFnt.pData,bitmapFnt.u32Width,700);//test 
+                    FlushDrawing();
                     free(rgbaData); 
                     //cairo_surface_destroy(image_surface); 
                     //image_surface = NULL;
@@ -2294,8 +2295,8 @@ static void CloseMSP(){
     if (deinit)
         printf("[%s:%d]RGN_DeInit failed with %#x!\n", __func__, __LINE__, s32Ret);        
     #endif
-    #ifdef _x86
-    Close_x86();
+    #if defined(_x86) || defined(__ROCKCHIP__)
+    Close();
     #endif
 
     munmap(osds, sizeof(*osds) * MAX_OSD);

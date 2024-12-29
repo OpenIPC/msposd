@@ -15,7 +15,7 @@ const double inv16 = 1.0 / 16.0;
 int create_region(int *handle, int x, int y, int width, int height)
 {
     int s32Ret = -1;
-#ifndef _x86    
+#if !defined(_x86) && !defined(__ROCKCHIP__)
 #ifdef __SIGMASTAR__
     MI_RGN_ChnPort_t stChn;
 
@@ -313,7 +313,7 @@ int prepare_bitmap(const char *filename, BITMAP *bitmap, int bFil, unsigned int 
 int set_bitmap(int handle, BITMAP *bitmap)
 {
     int s32Ret=0;
-#ifndef _x86    
+#if !defined(_x86) && !defined(__ROCKCHIP__)
 #ifdef __SIGMASTAR__
      s32Ret = MI_RGN_SetBitMap(handle, (MI_RGN_Bitmap_t *)(bitmap));
 #elif __GOKE__

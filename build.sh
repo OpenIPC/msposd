@@ -19,7 +19,7 @@ fi
 GCC=$PWD/toolchain/$CC/bin/arm-linux-gcc
 OUT=msposd
 
-if [[ "$1" != *"native"* ]]; then
+if [[ "$1" != *"native"* && "$1" != *"rockhip"* ]]; then
 	if [ ! -e toolchain/$CC ]; then
 		wget -c -q --show-progress $DL.$CC.tgz -P $PWD
 		mkdir -p toolchain/$CC
@@ -28,7 +28,6 @@ if [[ "$1" != *"native"* ]]; then
 	fi
 	OUT=msposd_$1
 fi
-
 
 if [ ! -e firmware ]; then
 	git clone https://github.com/openipc/firmware --depth=1
@@ -46,6 +45,8 @@ elif [ "$1" = "star6b0" ]; then
 elif [ "$1" = "star6e" ]; then
 	DRV=$PWD/firmware/general/package/sigmastar-osdrv-infinity6e/files/lib
 	make -B CC=$GCC DRV=$DRV TOOLCHAIN=$PWD/toolchain/$CC OUTPUT=$OUT $1
+elif [ "$1" = "rockchip" ]; then
+    ./build_rockchip.sh $1
 else
 	DRV=$PWD
 	make DRV=$DRV OUTPUT=$OUT $1
