@@ -211,7 +211,7 @@ extern void ProcessChannels();
 extern uint16_t channels[18];
 extern int matrix_size;
 extern int GetTempSigmaStar();
-extern int Get8812EU2Temp();
+extern int GetTXTemp();
 extern int SendWfbLogToGround();
 extern bool monitor_wfb;
 extern int last_board_temp;
@@ -384,7 +384,7 @@ static bool InjectChars(char* payload){
         if ( str[0]=='!' && str[1]=='T' && str[2]=='M' && str[3]=='W'&& str[4]=='!'){                                        
                         int temp = 99;
                         
-            temp = Get8812EU2Temp();
+            temp = GetTXTemp();
             if (temp<0)   
                 last_board_temp=99;
         
@@ -1205,7 +1205,7 @@ static bool first_wfb_read=true;
         }else if (str[ipos + 1] == 'W'){//get WiFi 8812EU temp
             ipos++;                     
             char c[18];
-            sprintf(c, "%d", Get8812EU2Temp());                        
+            sprintf(c, "%d", GetTXTemp());                        
             strcat(out, c);
             opos += strlen(c);
             
@@ -1528,7 +1528,7 @@ static bool ReplaceWidgets_Slow(int* x, int* y){
     if ( character_map[*x][*y]=='!' && character_map[*x+1][*y]=='T' && character_map[*x+2][*y]=='M' && character_map[*x+3][*y]=='W'&& character_map[*x+4][*y]=='!'){                                        
                     int temp = 99;
 #if __SIGMASTAR__                    
-                    temp = Get8812EU2Temp();
+                    temp = GetTXTemp();
 #else   
                     temp = last_board_temp;                    
 #endif                  

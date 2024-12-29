@@ -1,5 +1,6 @@
 #include <getopt.h>
 #include <stdio.h>
+#include <glob.h>
 #include <stdlib.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -353,30 +354,44 @@ uint64_t get_current_time_ms_Old() {
 
 int last_wifi_temp;
 static long last_wifi_temp_taken=0;
-int Get8812EU2Temp(){
+int GetTXTemp(){
 
 	if ((get_time_ms() - last_wifi_temp_taken  ) < 1000)//Set some caching to keep CPU load low                      
 		return last_wifi_temp;
     last_wifi_temp_taken= get_time_ms();
 
-	FILE *stat = popen("cat /proc/net/rtl88x2eu/wlan0/thermal_state", "r");
-	if (stat == NULL) {
-		fprintf(stderr, "Failed to run command\n");
-		return 1;
-	}
-	char buffer[128];
+    glob_t glob_result;
+    FILE *stat = NULL;
 	int temperature=0;
-	char c[25];
-	// Read the first line of output
-	if (fgets(buffer, sizeof(buffer), stat) != NULL) {               
-		if (sscanf(buffer, "rf_path: %*d, thermal_value: %*d, offset: %*d, temperature: %d", &temperature) == 1) {
-			printf("WiFi Temperature from the first line: %d\n", temperature);
-		} else {
-			fprintf(stderr, "Failed to parse wifi temperature\n");
-		}
-	}
-	// Close the pipe
-	pclose(stat);
+
+    if (glob("/proc/net/*/*/thermal_state", GLOB_NOSORT, NULL, &glob_result) == 0) {
+        if (glob_result.gl_pathc > 0) {
+            // Open the first match
+            stat = fopen(glob_result.gl_pathv[0], "r");
+            if (stat == NULL) {
+                fprintf(stderr, "Failed to open the thermal_state file: %s\n", glob_result.gl_pathv[0]);
+                globfree(&glob_result);
+                return -99;
+            }
+			char buffer[128];
+			// Read the first line of output
+			if (fgets(buffer, sizeof(buffer), stat) != NULL) {               
+				if (sscanf(buffer, "rf_path: %*d, thermal_value: %*d, offset: %*d, temperature: %d", &temperature) == 1) {
+					printf("WiFi Temperature from the first line: %d\n", temperature);
+				} else {
+					fprintf(stderr, "Failed to parse wifi temperature\n");
+				}
+			}
+            fclose(stat);
+        } else {
+            fprintf(stderr, "No thermal_state files found in /proc/net\n");
+        }
+    } else {
+        fprintf(stderr, "Failed to glob /proc/net/*/thermal_state\n");
+    }
+
+    // Clean up
+    globfree(&glob_result);
 	last_wifi_temp=temperature;
 	return temperature;
 }
