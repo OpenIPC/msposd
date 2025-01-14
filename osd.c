@@ -197,8 +197,8 @@ static int stat_MSP_draw_complete_count=0;
 static int stat_UDP_MSPframes=0;
 static uint64_t last_MSP_ATTITUDE=0;
 static int stat_attitudeDelay=0;
-int RCWidgetX=1620;
-int RCWidgetY=820;
+int RCWidgetX=0;
+int RCWidgetY=0;
 char air_unit_info_msg[255];
 
 extern bool AbortNow;
