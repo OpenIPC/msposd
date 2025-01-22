@@ -4,9 +4,9 @@
 
 
 #ifdef __SIGMASTAR__
-PIXEL_FORMAT_DEFAULT=E_MI_RGN_PIXEL_FORMAT_I4; //0 for PIXEL_FORMAT_1555 , 4 for E_MI_RGN_PIXEL_FORMAT_I8
+int PIXEL_FORMAT_DEFAULT = E_MI_RGN_PIXEL_FORMAT_I4; //0 for PIXEL_FORMAT_1555 , 4 for E_MI_RGN_PIXEL_FORMAT_I8
 #else
- PIXEL_FORMAT_DEFAULT=3;   //0 for PIXEL_FORMAT_1555 , 4 for E_MI_RGN_PIXEL_FORMAT_I8
+int PIXEL_FORMAT_DEFAULT = 3; //0 for PIXEL_FORMAT_1555 , 4 for E_MI_RGN_PIXEL_FORMAT_I8
 #endif
 
 extern bool verbose;
@@ -371,10 +371,10 @@ unsigned long set_bitmapEx(int handle, BITMAP *bitmap, int BitsPerPixel){
     //this will break, the pointer to memory is no longer valid!
     //memset((void *)(stCanvasInfo.virtAddr), PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_I4 ? 0xFF : 0x00 , bitmap->u32Height * getRowStride(bitmap->u32Width , BitsPerPixel));
 
-
-    return stCanvasInfo.virtAddr; 
+    return stCanvasInfo.virtAddr;
+#else
+    return s32Ret;
 #endif
-return NULL;   
 }
 
 int unload_region(int *handle)

@@ -111,8 +111,6 @@ extern "C"
         short width, height;
     } RECT;
 
-    int sysinfo(struct sysinfo *);
-
     static void fatal(const char *message)
     {
         fprintf(stderr, "%s\n", message);

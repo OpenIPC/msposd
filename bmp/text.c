@@ -62,12 +62,9 @@ static void loadglyph(const SFT *sft, SFT_UChar codepoint, SFT_Glyph *glyph, SFT
     if (sft_gmetrics(sft, *glyph, metrics) < 0)
         fatal("sft_gmetrics failed");
 }
-/*
-int getRowStride(int width, int BitsPerPixel){
-    int rowLength = width * BitsPerPixel;
-    return  (rowLength + 32 - ((rowLength-1) % 32)) >> 3;
-}
-*/
+
+int getRowStride(int width, int BitsPerPixel);
+
 static void newimage(SFT_Image *image, int width, int height, int color)
 {
     //size_t size = (size_t)(width * height * 2);

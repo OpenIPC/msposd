@@ -29,8 +29,12 @@
 #include <sys/socket.h>
 #include <sys/uio.h>
 
+int __assert;
 int __ctype_b;
 int __stdin;
+
+void backtrace(void) {}
+void backtrace_symbols(void) {}
 
 #if !defined(_x86) && !defined(__ROCKCHIP__)
 int __fgetc_unlocked(FILE *stream) {
