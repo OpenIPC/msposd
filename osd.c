@@ -95,6 +95,8 @@ static msp_cache_entry_t *msp_message_cache[256]; // make a slot for all possibl
 static uint8_t frame_buffer[1024]; // buffer a whole frame of MSP commands until we get a draw command. needs to fit in UDP !
 static uint32_t fb_cursor = 0;
 
+char _port_name[80];
+
 static uint8_t message_buffer[256]; // only needs to be the maximum size of an MSP packet, we only care to fwd MSP
 static char current_fc_identifier[4];
 static char current_fc_identifier_end_of_string=0x00;
@@ -492,7 +494,7 @@ GPS_update	UINT 8	a flag to indicate when a new GPS frame is received (the GPS f
                 fill(air_unit_info_msg);               
             }
 
-
+            
             
             if ( ! vtxMenuActive ) {               
                 displayport_process_message(display_driver, msp_message); 
@@ -1263,16 +1265,30 @@ static char FECFile[128]= "/tmp/MSPOSD.msg";
 
 
 void SetOSDMsg(char* msg){
-    //const char *content = "&F48 &L43 Identifying Flight Controller..."; // String to write to the file
 
-                // Open the file for writing
-                FILE *file = fopen(FECFile, "w");
-                if (file == NULL) 
-                    perror("Error opening file");
-                else{                              
-                    fprintf(file, "%s", msg);
-                    fclose(file);
-                }
+
+    // Open the file for writing
+    FILE *file = fopen(FECFile, "w");
+    if (file == NULL) 
+        perror("Error opening file");
+    else{                              
+        fprintf(file, "%s", msg);
+        fclose(file);
+    }
+
+    //this will send the message to ground even if no data is available on the uart
+/*    
+    if (!DrawOSD && out_sock>0){//send the message to the ground as msp message        
+        static uint8_t msg_buffer[256]; 
+        static uint8_t payload_buffer[256];            
+        int msglen = strlen(&msg[0]);                              
+        payload_buffer[0]=MSP_DISPLAYPORT_INFO_MSG;            
+        memcpy(&payload_buffer[1],&msg[0], msglen+1); //include the 0 for string ending 
+        construct_msp_command(msg_buffer, MSP_CMD_DISPLAYPORT, &payload_buffer[0], 80, MSP_INBOUND);
+        sendto(out_sock, msg_buffer,100 , 0, (struct sockaddr *)&sin_out, sizeof(sin_out));                                     
+        printf("Sent text msg : %s\r\n",msg);        
+    }
+*/
 }
 
 
@@ -1796,11 +1812,16 @@ static void clear_screen()
 }
 static int draws=0;
 static void draw_complete()
-{
-    
+{    
     stat_MSP_draw_complete_count++;
     draws++;
     draw_screenBMP();
+
+    if (draws<2 && bitmapFnt.pData==NULL){                    
+        char msg[200];
+        sprintf(msg,"&F38 &L43 Identifying Flight Controller...",font_load_name);
+        SetOSDMsg(msg);
+    }
 
 #ifdef _x86
    // sfRenderWindow_display(window);
@@ -2254,10 +2275,10 @@ On sigmastar the BMP row stride is aligned to 8 bytes, that is 16 pixels in PIXE
             #endif
                 //free(bitmap.pData);
             }else{//no font file still, show message on screen
-                cntr=0;
-                //const char *content = "&F48 &L43 Identifying Flight Controller..."; // String to write to the file
-                SetOSDMsg("&F48 &L43 Identifying Flight Controller...");
-                 
+                cntr=0; 
+                char msgbuff[120];      
+                sprintf(msgbuff,"&F48 &L23 Waiting for data on %s ...", _port_name);         
+                SetOSDMsg(msgbuff);                 
                 draw_screenBMP();
             }
 
@@ -2269,7 +2290,7 @@ On sigmastar the BMP row stride is aligned to 8 bytes, that is 16 pixels in PIXE
                 free(bitmap.pData);
             }
 
-        }     
+        }            
     
     display_driver = calloc(1, sizeof(displayport_vtable_t));
     display_driver->draw_character = &draw_character;

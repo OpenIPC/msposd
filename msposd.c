@@ -1070,9 +1070,9 @@ static int handle_data(const char *port_name, int baudrate,
 	struct event *sig_int = NULL, *in_ev = NULL, *temp_tmr = NULL, *msp_tmr=NULL;
 	struct event *sig_term;
 	int ret = EXIT_SUCCESS;
-	 
-	
 
+	
+	 	 	
 	if (strlen(port_name) > 0 && port_name[0] >= '0' && port_name[0] <= '9') {//Read from UDP
 
 		struct sockaddr_in sin_in = {
@@ -1101,7 +1101,7 @@ static int handle_data(const char *port_name, int baudrate,
 		};
 		evutil_make_socket_nonblocking(serial_fd);
 		printf("Listening UART on %s...\n", port_name);
-	}
+	}	
 	struct termios options;
 	tcgetattr(serial_fd, &options);
 	cfsetspeed(&options, speed_by_value(baudrate));
@@ -1392,7 +1392,7 @@ int main(int argc, char **argv)
 	}	
 
     
-
+	strcpy(_port_name,port_name);
 	if (ParseMSP){
  		//msp_process_data(rx_msp_state, serial_data[i]);
 		rx_msp_state = calloc(1, sizeof(msp_state_t));   

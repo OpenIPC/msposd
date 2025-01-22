@@ -11,7 +11,7 @@ typedef enum {
     MSP_DISPLAYPORT_DRAW_SCREEN,
     MSP_DISPLAYPORT_SET_OPTIONS,
     MSP_DISPLAYPORT_DRAW_SYSTEM,
-    MSP_DISPLAYPORT_INFO_MSG
+    MSP_DISPLAYPORT_INFO_MSG//custom type added for sending status text
 } msp_displayport_cmd_e;
 
 typedef enum {

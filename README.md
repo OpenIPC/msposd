@@ -11,7 +11,7 @@ Usage: msposd [OPTIONS]
  -b --baudrate    Serial port baudrate (%d by default)
  -o --output	  UDP endpoint to forward aggregated MSP messages
  -c --channels    RC Channel to listen for commands (0 by default) and exec channels.sh. This option can be repeated to allow listening for several channels.
- -w --wait        Delay after each command received (2000ms default)
+ -w --wait        Delay before executing a command from RC Channel (2000ms default)
  -r --fps         Max MSP Display refresh rate(1..50)
  -p --persist     How long a channel value must persist to generate a command - for multiposition switches (0ms default)
  -t --temp        Read SoC temperature
@@ -138,13 +138,11 @@ curl -L -o /usr/bin/msposd https://github.com/OpenIPC/msposd/releases/download/l
 chmod 755 /usr/bin/msposd
 ```
 
-***Since Nov 2024 ***
-Program automatically selects the appropriate font file for the FC software used.  
+___Since Nov 2024___ Program automatically selects the appropriate font file for the FC software used.  
 font_inav.png/font_inav_hd.png | font_btfl.png/font_btfl_hd.png | font_ardu.png/font_ardu_hd.png files must be present in ```/usr/share/fonts/```
 
 
-***If you prefer, you can copy only the fong files for the FC software you plan to use***  
-Copy the font files for your flight controller firmware INAV/ Betaflight/ ArduPilot from here  https://github.com/openipc/msposd/tree/main/fonts    
+**To skip the autodetect, you can copy only the font files for the FC software you plan to use**  
 **For INAV**:
 ```
 mkdir /usr/share/fonts
@@ -152,7 +150,7 @@ curl -k -L -o /usr/share/fonts/font.png https://raw.githubusercontent.com/openip
 curl -k -L -o /usr/share/fonts/font_hd.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/font_inav_hd.png
 ```
 
-**For Betaflight**: preinstalled in OpenIPC firmware since Oct 2024
+**For Betaflight**: 
 ```
 mkdir /usr/share/fonts
 curl -k -L -o /usr/share/fonts/font.png https://raw.githubusercontent.com/openipc/msposd/main/fonts/font_btfl.png
