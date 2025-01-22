@@ -218,6 +218,9 @@ extern int SendWfbLogToGround();
 extern bool monitor_wfb;
 extern int last_board_temp;
 
+void fill(char* str);
+void SetOSDMsg(char* msg);
+
 uint64_t get_time_ms() // in milliseconds
 {
     struct timespec ts;
@@ -1879,12 +1882,12 @@ unsigned char* loadPngToBMP(const char* filename, unsigned int* width, unsigned 
         convertRGBAToI4( pngData, *width , *height, bmpData, &g_stPaletteTable);
     else if (PIXEL_FORMAT_DEFAULT==PIXEL_FORMAT_8888){
        // memcpy(bmpData,pngData,bmpSize);
-       convertRGBAToARGB( pngData, *width , *height, bmpData);
+       convertRGBAToARGB( pngData, *width , *height, (uint32_t*)bmpData);
 #if defined(_x86) || defined(__ROCKCHIP__)
        premultiplyAlpha((uint32_t*) bmpData, *width, *height);//RGBA format needs to be converted when using transparency?
 #endif       
     }else      
-        convertRGBAToARGB1555( pngData, *width , *height, bmpData);
+        convertRGBAToARGB1555( pngData, *width , *height, (uint16_t*)bmpData);
 
     // Clean up
     free(pngData);

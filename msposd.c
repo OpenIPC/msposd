@@ -50,7 +50,7 @@ bool mspVTXenabled = false;
 bool vtxMenuEnabled = false;
 
 //libevent base main loop
-extern struct event_base *base = NULL;
+struct event_base *base = NULL;
 
 int serial_fd = 0;
 
@@ -802,7 +802,7 @@ static void serial_read_cb(struct bufferevent *bev, void *arg)
 				sizeof(sin_out)) == -1) {
 						perror("sendto()");
 						//event_base_loopbreak(base);
-						return false;
+						return;
 				}
 			}
 
@@ -982,7 +982,7 @@ static bool ReadSerialSimple(int showstat){
 	 // Read from the serial port once per interval
     int packet_len = read(serial_fd, data, sizeof(data));
     if (packet_len < 0) 
-		return;
+		return false;
 
 	stat_pckts++;  
 	stat_bytes+=packet_len;
@@ -1078,7 +1078,7 @@ static int handle_data(const char *port_name, int baudrate,
 		struct sockaddr_in sin_in = {
 		.sin_family = AF_INET,
 		};
-		if (!parse_host_port(port_name, (struct port_name *)&sin_in.sin_addr.s_addr,
+		if (!parse_host_port(port_name, (struct in_addr *)&sin_in.sin_addr.s_addr,
 					&sin_in.sin_port))
 			goto err;
 
