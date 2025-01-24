@@ -29,12 +29,16 @@
 #include <sys/socket.h>
 #include <sys/uio.h>
 
-int __assert;
 int __ctype_b;
 int __stdin;
 
+#if __INFINITY6C__
+int __assert;
+int _MI_PRINT_GetDebugLevel;
+
 void backtrace(void) {}
 void backtrace_symbols(void) {}
+#endif
 
 #if !defined(_x86) && !defined(__ROCKCHIP__)
 int __fgetc_unlocked(FILE *stream) {
