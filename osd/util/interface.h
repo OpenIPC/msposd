@@ -1,8 +1,8 @@
 #pragma once
-#include <stdint.h>
 #include "../msp/msp.h"
+#include <stdint.h>
 
-#define MAX_ENTRIES 100  // Maximum number of frequency-channel pairs to store
+#define MAX_ENTRIES 100 // Maximum number of frequency-channel pairs to store
 
 extern uint8_t channelFreqLabel[FREQ_TABLE_SIZE];
 extern uint8_t bandLetter[BAND_COUNT];
@@ -10,8 +10,8 @@ extern uint16_t channelFreqTable[FREQ_TABLE_SIZE];
 
 // Structure to hold frequency and channel
 typedef struct {
-    int frequency;
-    int channel;
+	int frequency;
+	int channel;
 } FrequencyChannel;
 
 // Function to extract frequency and channel from a line
