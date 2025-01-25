@@ -7,7 +7,7 @@
 #define OSD_HD_ROWS 20
 #define MAX_VTX_MENU_COLS 30
 
-void display_menu(displayport_vtable_t *display_driver,MenuSection *section, int selected_option);
+void display_menu(displayport_vtable_t *display_driver, MenuSection *section, int selected_option);
 void clear_vtx_menu();
 void doreboot();
 void exitVTXMenu();

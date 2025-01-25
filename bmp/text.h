@@ -3,8 +3,7 @@
 
 #ifdef __cplusplus
 #if __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 #endif
 
@@ -12,13 +11,13 @@ extern "C"
 
 #include "common.h"
 
-    static SFT sft;
-    static SFT_Image canvas;
-    static SFT_LMetrics lmtx;
-    static BITMAP bitmap;
+static SFT sft;
+static SFT_Image canvas;
+static SFT_LMetrics lmtx;
+static BITMAP bitmap;
 
-    RECT measure_text(const char *font, double size, const char *text);
-    BITMAP raster_text(const char *font, double size, const char *text);
+RECT measure_text(const char *font, double size, const char *text);
+BITMAP raster_text(const char *font, double size, const char *text);
 
 #ifdef __cplusplus
 #if __cplusplus

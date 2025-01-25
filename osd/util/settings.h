@@ -3,5 +3,5 @@
 
 #define MAX_LINE_LENGTH 256
 
-char* read_setting(const char *filename, char *key);
+char *read_setting(const char *filename, char *key);
 int write_setting(const char *filename, const char *key, const char *new_value);

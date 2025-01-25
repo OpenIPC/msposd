@@ -9,7 +9,7 @@ host=https://cloud.debian.org/images/cloud/bullseye
 release=latest
 system=debian-11-generic-arm64.tar
 if [ ! -f disk.raw ]; then
-    wget -nv ${host}/${release}/${system}.xz
+    curl -s -k -L ${host}/${release}/${system}.xz -O
     tar -xf ${system}.xz
     rm ${system}.xz
 fi
