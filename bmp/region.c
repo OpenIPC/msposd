@@ -170,7 +170,7 @@ int create_region(int *handle, int x, int y, int width, int height) {
 	stChnAttr.unChnAttr.stOverlayChn.stQpInfo.bQpDisable = 0;
 	stChnAttr.unChnAttr.stOverlayChn.stQpInfo.bAbsQp = 0;
 	stChnAttr.unChnAttr.stOverlayChn.stQpInfo.s32Qp = 0;
-#ifndef __16CV300__
+#ifndef __HI3536__
 	stChnAttr.unChnAttr.stOverlayChn.u16ColorLUT[0] = 0x3e0;
 	stChnAttr.unChnAttr.stOverlayChn.u16ColorLUT[1] = 0x7FFF;
 	stChnAttr.unChnAttr.stOverlayChn.enAttachDest = ATTACH_JPEG_MAIN;

@@ -52,6 +52,20 @@ extern "C" {
 #define PIXEL_FORMAT_2BPP PIX_FMT_0RGB
 #define PIXEL_FORMAT_8888 PIX_FMT_ARGB
 #define PIXEL_FORMAT_I4 E_MI_RGN_PIXEL_FORMAT_I4
+
+#elif __HI3536__
+#include "hi_common.h"
+#include "hi_math.h"
+#include "mpi_region.h"
+
+#define IO_BASE 0x12000000
+#define IO_SIZE 0x100000
+#define PIXEL_FORMAT_4444 PIXEL_FORMAT_RGB_4444
+#define PIXEL_FORMAT_1555 PIXEL_FORMAT_RGB_1555
+#define PIXEL_FORMAT_2BPP PIXEL_FORMAT_RGB_2BPP
+#define PIXEL_FORMAT_8888 PIXEL_FORMAT_RGB_8888
+#define PIXEL_FORMAT_I4 3
+
 #else
 #include "hi_common.h"
 #include "hi_math.h"
