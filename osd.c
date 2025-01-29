@@ -220,8 +220,8 @@ extern int last_board_temp;
 void fill(char *str);
 void SetOSDMsg(char *msg);
 
-uint64_t get_time_ms() // in milliseconds
-{
+// in milliseconds
+uint64_t get_time_ms() {
 	struct timespec ts;
 	int rc = clock_gettime(1 /*CLOCK_MONOTONIC*/, &ts);
 	// if (rc < 0)
@@ -230,7 +230,6 @@ uint64_t get_time_ms() // in milliseconds
 }
 
 /* MSP DisplayPort handlers for compressed mode */
-
 static void msp_draw_character(uint32_t x, uint32_t y, uint16_t c) {
 	DEBUG_PRINT("drawing char %d at x %d y %d\n", c, x, y);
 	msp_character_map_buffer[x][y] = c;
@@ -254,7 +253,6 @@ static void msp_set_options(uint8_t font_num, msp_hd_options_e is_hd) {
 /*------------CONFIGURE SWITCHES
  * ----------------------------------------------------------------*/
 static int enable_fast_layout = 0;
-
 void *io_map;
 struct osd *osds;
 char timefmt[32] = DEF_TIMEFMT;
@@ -312,12 +310,10 @@ static const display_info_t fhd_display_info = {
 #endif
 
 char font_2_name[256];
-
 uint16_t OVERLAY_WIDTH = 1800;
 uint16_t OVERLAY_HEIGHT = 1000;
 
 static displayport_vtable_t *display_driver;
-
 static display_info_t current_display_info = SD_DISPLAY_INFO;
 
 /// @brief We keep the main font glyphs here
@@ -333,7 +329,6 @@ char font_load_name[255];
 bool LoadFont();
 
 static bool InjectChars(char *payload) {
-
 	char *str = payload + 4;
 	// string starts at 4 payload[0]==MSP_subtype
 	// set Position to Widget that draws Stick Positions - only on ground side,
@@ -420,7 +415,7 @@ static bool InjectChars(char *payload) {
 static void rx_msp_callback(msp_msg_t *msp_message) {
 	// Process a received MSP message from FC and decide whether to send it to
 	// the PTY (DJI) or UDP port (MSP-OSD on Goggles)
-	DEBUG_PRINT("FC->AU MSP msg %d with data len %d \n", msp_message->cmd, msp_message->size);
+	DEBUG_PRINT("FC->AU MSP msg %d with data len %d\n", msp_message->cmd, msp_message->size);
 	stat_msp_msgs++;
 
 	// We will forward ALL MSP traffic, not only DisplayPort
@@ -445,7 +440,6 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 	//}
 
 	switch (msp_message->cmd) {
-
 	case MSP_CMD_STATUS: {
 		// we need the armed state
 		armed = (msp_message->payload[6] & 0x01);
@@ -455,7 +449,6 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 	}
 
 	case MSP_ATTITUDE: {
-
 		last_pitch = *(int16_t *)&msp_message->payload[2];
 		last_roll = *(int16_t *)&msp_message->payload[0];
 		last_heading = *(int16_t *)&msp_message->payload[4];
@@ -480,8 +473,9 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 		// roll);
 		break;
 	}
+
 	case MSP_RC: {
-		// printf("Got MSP_RC \n");
+		// printf("Got MSP_RC\n");
 		// memcpy(&channels[0], &msp_message->payload[0],32);
 		memcpy(&channels[0], &msp_message->payload[0], 16 * sizeof(uint16_t));
 
@@ -494,7 +488,6 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 	}
 
 	case MSP_CMD_DISPLAYPORT: {
-
 		if (msp_message->payload[0] == MSP_DISPLAYPORT_INFO_MSG) {
 			msp_message->payload[80] = 0; // just in case
 			strcpy(air_unit_info_msg, &msp_message->payload[1]);
@@ -531,6 +524,7 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 
 		break;
 	}
+
 	case MSP_CMD_FC_VARIANT: {
 		// This is an FC Variant response, so we want to use it to set our FC
 		// variant.
@@ -541,7 +535,7 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 			memcpy(current_fc_identifier, msp_message->payload, 4);
 			// Seems only BetaFlight needs this
 			send_version_request(serial_fd);
-			printf("Flight Controller detected: %s \r\n", current_fc_identifier);
+			printf("Flight Controller detected: %s\n", current_fc_identifier);
 			if (bitmapFnt.pData == NULL) {
 				SetOSDMsg("");
 				LoadFont();
@@ -554,6 +548,7 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 		}
 		break;
 	}
+
 	case MSP_CMD_API_VERSION: {
 		// Got an MSP API version response. Compare the version if we have
 		// Betaflight in order to see if we should send the new display size
@@ -584,6 +579,7 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 		}
 		break;
 	}
+
 	case MSP_GET_VTX_CONFIG: {
 		if (vtxInitDone) {
 			mspVtxConfigStruct *in_mspVtxConfigStruct = (mspVtxConfigStruct *)msp_message->payload;
@@ -629,6 +625,7 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 		}
 		break;
 	}
+
 	default: {
 		if (verbose)
 			printf("Received a uncatched MSP_COMMAND: %i\n", msp_message->cmd);
@@ -724,9 +721,7 @@ void LineTranspose(
 }
 
 static void draw_AHI() {
-
 	int OffsY = sin((last_pitch / 10) * (M_PI / 180.0)) * 400;
-
 	int img_width = x_end - x_start;
 	int img_height = y_end - y_start;
 
@@ -855,9 +850,11 @@ static void draw_Ladder() {
 				if (n > 90) {
 					n = 180 - k;
 				}
+
 				if (n < -90) {
 					n = -k - 180;
 				}
+
 				if (abs(n) > 20) // pitch higher than 30 degree.
 					m_color = COLOR_YELLOW;
 				if (abs(n) > 40) // pitch higher than 30 degree.
@@ -1197,13 +1194,11 @@ void fill(char *str) {
 		} else if (str[ipos + 1] == 'B') {
 			ipos++;
 			unsigned int bitrate;
-			;
 			float fps;
 			char c[25];
 #ifdef __SIGMASTAR__
 			FILE *stat = popen("cat /proc/mi_modules/mi_venc/mi_venc0 | grep Fps10s "
-							   "-A 1 | awk 'NR==2 {print $9, $10}'",
-				"r");
+							   "-A 1 | awk 'NR==2 {print $9, $10}'", "r");
 			// Sample result : 34.91 14836
 			if (stat == NULL) {
 				sscanf("34.91 14836", "%f %u", &fps, &bitrate);
@@ -1222,7 +1217,6 @@ void fill(char *str) {
 
 			strcat(out, c);
 			opos += strlen(c);
-
 		} else if (str[ipos + 1] == 'p') {
 			ipos++;
 			char c[80];
@@ -1241,7 +1235,7 @@ void fill(char *str) {
 			else {
 				sprintf(c, "+ %d ! Dropped=%d ", dropped, droppedTTL);
 				if (verbose)
-					printf("WFB_NG Dropped UDP packets: %d\r\n", dropped);
+					printf("WFB_NG Dropped UDP packets: %d\n", dropped);
 			}
 			strcat(out, c);
 			opos += strlen(c);
@@ -1351,7 +1345,7 @@ void SetOSDMsg(char *msg) {
 	   string ending construct_msp_command(msg_buffer, MSP_CMD_DISPLAYPORT,
 	   &payload_buffer[0], 80, MSP_INBOUND); sendto(out_sock, msg_buffer,100 ,
 	   0, (struct sockaddr *)&sin_out, sizeof(sin_out)); printf("Sent text msg :
-	   %s\r\n",msg);
+	   %s\n",msg);
 		}
 	*/
 }
@@ -1393,14 +1387,14 @@ bool DrawTextOnOSDBitmap(char *msg) {
 			// printf("skipped msg osd check\n");
 			return false;
 		}
-		LastOSDMsgParsed = get_time_ms(); // Do not parse and read variable too
-										  // often
+		LastOSDMsgParsed = get_time_ms(); // Do not parse and read variable too often
 	}
+
 	bool res = false;
 	int result;
-
 	char out[180];
 	size_t bytesRead = 0;
+
 	FILE *file = NULL;
 	if (msg == NULL || strlen(msg) == 0) {
 		file = fopen(FECFile, "rb");
@@ -1447,7 +1441,7 @@ bool DrawTextOnOSDBitmap(char *msg) {
 				msg_buffer, MSP_CMD_DISPLAYPORT, &payload_buffer[0], 80, MSP_INBOUND);
 			sendto(out_sock, msg_buffer, 100, 0, (struct sockaddr *)&sin_out, sizeof(sin_out));
 
-			// printf("Sent text msg : %s\r\n",out);
+			// printf("Sent text msg : %s\n",out);
 			return false;
 		}
 
@@ -1581,10 +1575,8 @@ bool Convert2SmallGlyph(BITMAP *fnt, u_int16_t *s_left, u_int16_t *s_top, u_int1
 	return false;
 }
 
-// Not needed, but somehow parsing DrawString in InjectChars sometimes does not
-// work.
+// Not needed, but somehow parsing DrawString in InjectChars sometimes does not work.
 static bool ReplaceWidgets_Slow(int *x, int *y) {
-
 #if defined(_x86) || defined(__ROCKCHIP__)
 	if (character_map[*x][*y] == '!' && character_map[*x + 1][*y] == 'R' &&
 		character_map[*x + 2][*y] == 'C' && character_map[*x + 3][*y] == '!') {
@@ -1621,6 +1613,7 @@ static bool ReplaceWidgets_Slow(int *x, int *y) {
 		//*x=*x+4;//Skip this text
 		return false; // need to render them
 	}
+
 	// WIFI card Temp
 	if (character_map[*x][*y] == '!' && character_map[*x + 1][*y] == 'T' &&
 		character_map[*x + 2][*y] == 'M' && character_map[*x + 3][*y] == 'W' &&
@@ -1670,14 +1663,13 @@ static void draw_screenBMP() {
 		// at least 2ms to reload some data after clearscreen, otherwise the
 		// screen will blink? but if there is too few chars to show we may never
 		// render it printf("%lu DrawSkipped after clear LastDrawn:%lu |
-		// %lu%\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)LastDrawn%10000 ,
+		// %lu%\n",(uint32_t)get_time_ms()%10000, (uint32_t)LastDrawn%10000 ,
 		// (uint32_t) LastCleared%10000); return ;
 	}
 
 	LastDrawn = get_time_ms();
 
 	if (bmpBuff.pData == NULL) {
-
 		bmpBuff.enPixelFormat = PIXEL_FORMAT_DEFAULT;
 		bmpBuff.u32Width = OVERLAY_WIDTH;	// current_display_info.font_width *
 											// current_display_info.char_width;
@@ -1692,7 +1684,6 @@ static void draw_screenBMP() {
 		} else
 			bmpBuff.pData = malloc(
 				bmpBuff.u32Height * getRowStride(bmpBuff.u32Width, PIXEL_FORMAT_BitsPerPixel));
-
 	} else
 		bmpBuff.pData = memset(bmpBuff.pData, PIXEL_FORMAT_DEFAULT == PIXEL_FORMAT_I4 ? 0xFF : 0x00,
 			bmpBuff.u32Height * getRowStride(bmpBuff.u32Width, PIXEL_FORMAT_BitsPerPixel));
@@ -1702,7 +1693,6 @@ static void draw_screenBMP() {
 	bmpBuff.enPixelFormat = PIXEL_FORMAT_DEFAULT; //  PIXEL_FORMAT_DEFAULT ;//PIXEL_FORMAT_1555;
 
 	if (DrawOSD) { // If we only need message without icons
-
 		bool try_smaller_font = false;
 		for (int y = 0; y < current_display_info.char_height; y++) {
 
@@ -1710,7 +1700,7 @@ static void draw_screenBMP() {
 
 				if (AbortNow) { // There is request to close app, do not copy to
 								// buffer since it may be disposed already.
-					printf("Drawing aborted! \r\n");
+					printf("Drawing aborted!\n");
 					return;
 				}
 
@@ -1748,7 +1738,7 @@ static void draw_screenBMP() {
 
 					// if (cntr<40)
 					//     printf("Using direct canvas memory mode! size:%d:%d
-					//     stride:\r\n
+					//     stride:\n
 					//     ",bmpBuff.u32Width,bmpBuff.u32Height,getRowStride(bmpBuff.u32Width
 					//     , PIXEL_FORMAT_BitsPerPixel));
 					if (PIXEL_FORMAT_DEFAULT == PIXEL_FORMAT_1555)
@@ -1857,7 +1847,7 @@ static void draw_screenBMP() {
 #else
 	int id = 0;
 	// printf("%lu set_bitmapB for:%d | %d
-	// ms\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() -
+	// ms\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() -
 	// LastDrawn));
 	if (DrawOSD)
 		if (useDirectBMPBuffer) {
@@ -1870,7 +1860,7 @@ static void draw_screenBMP() {
 			set_bitmap(osds[FULL_OVERLAY_ID].hand, &bmpBuff);
 
 			// printf("%lu set_bitmapB for:%u | %u   | %u
-			// ms\r\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() -
+			// ms\n",(uint32_t)get_time_ms()%10000, (uint32_t)(get_time_ms() -
 			// LastDrawn) , (uint32_t)(get_time_ms() -
 			// step2),(uint32_t)(get_time_ms()
 			// - step3));
@@ -1915,7 +1905,7 @@ static void clear_screen() {
 		// LastDrawn=(get_time_ms())+500;///give 200ms no refresh  to load data
 		// in buffer
 	} else if (verbose)
-		printf("%u Clear screen skipped\r\n", (uint32_t)((uint32_t)get_time_ms()) % 10000);
+		printf("%u Clear screen skipped\n", (uint32_t)((uint32_t)get_time_ms()) % 10000);
 	// LastDrawn=(get_time_ms())+200;//give 120ms more to load data
 }
 
@@ -1954,7 +1944,7 @@ static void set_options(uint8_t font, msp_hd_options_e is_hd) {
 	*/
 	// we need FullHD option?!
 	if (verbose && set_mode_global_counter++ < 10)
-		printf("FC set mode:%d\r\n", is_hd);
+		printf("FC set mode:%d\n", is_hd);
 }
 
 /**  Load and Convert PNG to BMP format, 4bit per pixel.
@@ -2124,7 +2114,7 @@ bool LoadFont() {
 		snprintf(font_load_name, 255, "%sfont%s.png", font_path, font_suffix);
 	}
 
-	printf("Loading %s for %dp mode\r\n", font_load_name, height);
+	printf("Loading %s for %dp mode\n", font_load_name, height);
 
 	if (bitmapFnt.pData != NULL) // if called by mistake
 		free(bitmapFnt.pData);
@@ -2134,12 +2124,12 @@ bool LoadFont() {
 	bitmapFnt.enPixelFormat = PIXEL_FORMAT_DEFAULT; // E_MI_RGN_PIXEL_FORMAT_I8; //I8
 
 	if (bitmapFnt.u32Width == 0 || bitmapFnt.u32Height == 0) {
-		printf("Can't find font file: %s \r\n OSD Disabled! \r\n", font_load_name);
+		printf("Can't find font file: %s\n OSD Disabled!\n", font_load_name);
 		return false;
 	}
 
 	font_pages = bitmapFnt.u32Width / current_display_info.font_width;
-	printf("Font file res %d:%d pages:%d\r\n", bitmapFnt.u32Width, bitmapFnt.u32Height, font_pages);
+	printf("Font file res %d:%d pages:%d\n", bitmapFnt.u32Width, bitmapFnt.u32Height, font_pages);
 
 	if (matrix_size == 1) { // Predefined size for matrix, standard
 		current_display_info.char_width = 50;
@@ -2151,6 +2141,7 @@ bool LoadFont() {
 		current_display_info.char_width = 53; // 53
 		current_display_info.char_height = 20;
 	}
+
 	// new mode, showing smaller icons in FHD mode
 	if (matrix_size > 10) {
 		snprintf(font_load_name, 255, "%sfont%s%s.png", font_path, font_type, "_hd");
@@ -2163,10 +2154,11 @@ bool LoadFont() {
 			(void *)loadPngToBMP(font_load_name, &bmpFntSmall.u32Width, &bmpFntSmall.u32Height);
 		bmpFntSmall.enPixelFormat = PIXEL_FORMAT_DEFAULT; // E_MI_RGN_PIXEL_FORMAT_I8; //I8
 	}
-	printf("Glyph size: %d:%d on a %d:%d matrix. Overlay %d:%d \r\n",
+
+	printf("Glyph size: %d:%d on a %d:%d matrix. Overlay: %dx%d\n",
 		current_display_info.font_width, current_display_info.font_height,
-		current_display_info.char_width, current_display_info.char_height, OVERLAY_WIDTH,
-		OVERLAY_HEIGHT);
+		current_display_info.char_width, current_display_info.char_height,
+		OVERLAY_WIDTH, OVERLAY_HEIGHT);
 }
 
 int majestic_width;
@@ -2196,6 +2188,7 @@ static void InitMSPHook() {
 
 	height = GetMajesticVideoConfig(&majestic_width);
 	majestic_height = height;
+
 #if defined(_x86) || defined(__ROCKCHIP__)
 	if (DrawOSD)
 		Init(&OVERLAY_WIDTH, &OVERLAY_HEIGHT);
@@ -2222,8 +2215,7 @@ static void InitMSPHook() {
 					(current_display_info.char_width); // must be multiple of 8 !!!
 	OVERLAY_WIDTH = (OVERLAY_WIDTH + 7) & ~7;
 	if (matrix_size > 10 && OVERLAY_WIDTH < (1920 - (53 * 2))) {
-		printf("Matrix size not supported on resolutions smaller than "
-			   "1920x1080p!\r\n");
+		printf("Matrix size not supported on resolutions smaller than 1920x1080p!\n");
 		matrix_size = 0;
 	}
 	/*
@@ -2240,10 +2232,10 @@ static void InitMSPHook() {
 	//     OVERLAY_HEIGHT =current_display_info.font_height*2;//We do not need
 	//     the whole screen, let's use only top part of the screen for drawing
 
-	printf("Glyph size:%d:%d on a %d:%d matrix. Overlay %d:%d \r\n",
+	printf("Glyph size: %d:%d on a %d:%d matrix. Overlay: %dx%d\n",
 		current_display_info.font_width, current_display_info.font_height,
-		current_display_info.char_width, current_display_info.char_height, OVERLAY_WIDTH,
-		OVERLAY_HEIGHT);
+		current_display_info.char_width, current_display_info.char_height,
+		OVERLAY_WIDTH, OVERLAY_HEIGHT);
 
 	int rgn = 0;
 
@@ -2263,7 +2255,7 @@ static void InitMSPHook() {
 #ifdef __SIGMASTAR__
 	int s32Ret = MI_RGN_Init(&g_stPaletteTable);
 	if (verbose)
-		printf("MI_RGN_Init results: %d \r\n", s32Ret);
+		printf("MI_RGN_Init results: %d\n", s32Ret);
 	if (s32Ret)
 		fprintf(stderr, "[%s:%d]RGN_Init failed with %#x!\n", __func__, __LINE__, s32Ret);
 #endif
@@ -2285,8 +2277,7 @@ static void InitMSPHook() {
 		rgn =
 			create_region(&osds[FULL_OVERLAY_ID].hand, XOffs, YOffs, OVERLAY_WIDTH, OVERLAY_HEIGHT);
 	if (verbose)
-		printf("Create_region PixelFormat:%d Size: %d:%d X_Offset:%d Y_Offset:%d "
-			   "results: %d \r\n",
+		printf("Create_region PixelFormat:%d Size: %d:%d X_Offset:%d Y_Offset:%d results: %d\n",
 			PIXEL_FORMAT_DEFAULT, OVERLAY_WIDTH, OVERLAY_HEIGHT, XOffs, YOffs, rgn);
 
 	if (DrawOSD) { // Show Font Preview
@@ -2364,14 +2355,14 @@ static void InitMSPHook() {
 
 			if (true) {
 				useDirectBMPBuffer = true;
-				printf("USING DIRECT VIDEO MEM MODE!!!\r\n");
+				printf("USING DIRECT VIDEO MEM MODE!!!\n");
 
 			} else
 				useDirectBMPBuffer = false;
 
 #elif __GOKE__
 			if (verbose)
-				printf("Set Goke Font Review %d:%d\r\n", bitmap.u32Width, bitmap.u32Height);
+				printf("Set Goke Font Review %d:%d\n", bitmap.u32Width, bitmap.u32Height);
 
 			set_bitmap(osds[FULL_OVERLAY_ID].hand,
 				&bitmap); // bitmap must match region dimensions!
