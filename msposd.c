@@ -107,6 +107,7 @@ static void print_usage() {
 		"	-a --ahi         Draw graphic AHI, mode [0-No, 2-Simple 1-Ladder, 3-LadderEx]\n"
 		"	-x --matrix      OSD matrix (0 - 53:20, 1 - 50:18 chars)\n"
 		"	   --mspvtx      Enable mspvtx support\n"
+		"	   --size        Set OSD resolution\n"
 		"	-v --verbose     Show debug info\n"
 		"	--help           Display this help\n",
 		default_master, default_baudrate, default_out_addr);
@@ -1259,6 +1260,20 @@ static void resetLastStartValues() {
 	}
 }
 
+static void set_resolution(int width, int height) {
+	if (width < 1280 || width > 3840) {
+		width = 1280;
+	}
+
+	majestic_width = width;
+
+	if (height < 720 || height > 2160) {
+		height = 720;
+	}
+
+	majestic_height = height;
+}
+
 int main(int argc, char **argv) {
 	const struct option long_options[] = {
 		{"master", required_argument, NULL, 'm'},
@@ -1277,6 +1292,7 @@ int main(int argc, char **argv) {
 		{"temp", no_argument, NULL, 't'},
 		{"wfb", no_argument, NULL, 'j'},
 		{"mspvtx", no_argument, NULL, '1'},
+		{"size", required_argument, NULL, '2'},
 		{"help", no_argument, NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
@@ -1371,6 +1387,16 @@ int main(int argc, char **argv) {
 
 		case '1':
 			mspVTXenabled = true;
+			break;
+
+		case '2':
+			char buffer[16];
+			strncpy(buffer, optarg, sizeof(buffer));
+			char *limit = strchr(buffer, 'x');
+			if (limit) {
+				buffer[limit - buffer] = '\0';
+				set_resolution(atoi(buffer), atoi(limit + 1));
+			}
 			break;
 
 		case 'v':

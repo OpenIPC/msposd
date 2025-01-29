@@ -2075,9 +2075,11 @@ void getExecutablePath(char *buffer, size_t bufferSize) {
 
 char *font_path;
 char *font_suffix;
-
-int height = 0;
 char font_type[20];
+
+int fd_mem = 0;
+int majestic_width = 0;
+int majestic_height = 0;
 
 // Try to get the font name for different FC
 // if font.png file is present, assumes it is for the correct FC SW Type
@@ -2114,7 +2116,7 @@ bool LoadFont() {
 		snprintf(font_load_name, 255, "%sfont%s.png", font_path, font_suffix);
 	}
 
-	printf("Loading %s for %dp mode\n", font_load_name, height);
+	printf("Loading %s for %dx%d\n", font_load_name, majestic_width, majestic_height);
 
 	if (bitmapFnt.pData != NULL) // if called by mistake
 		free(bitmapFnt.pData);
@@ -2145,7 +2147,8 @@ bool LoadFont() {
 	// new mode, showing smaller icons in FHD mode
 	if (matrix_size > 10) {
 		snprintf(font_load_name, 255, "%sfont%s%s.png", font_path, font_type, "_hd");
-		printf("Loading small size glyphs %s for %dp mode\r\n", font_load_name, height);
+		printf("Loading small size glyphs %s for %dx%d\n",
+			font_load_name, majestic_width, majestic_height);
 
 		if (bmpFntSmall.pData != NULL) // if called by mistake
 			free(bmpFntSmall.pData);
@@ -2160,10 +2163,6 @@ bool LoadFont() {
 		current_display_info.char_width, current_display_info.char_height,
 		OVERLAY_WIDTH, OVERLAY_HEIGHT);
 }
-
-int majestic_width;
-int majestic_height;
-int fd_mem;
 
 static void InitMSPHook() {
 	memset(character_map, 0, sizeof(character_map));
@@ -2186,18 +2185,20 @@ static void InitMSPHook() {
 	PIXEL_FORMAT_BitsPerPixel = 32;
 #endif
 
-	height = GetMajesticVideoConfig(&majestic_width);
-	majestic_height = height;
+	if (!majestic_width && !majestic_height) {
+		majestic_height = GetMajesticVideoConfig(&majestic_width);
+	}
 
 #if defined(_x86) || defined(__ROCKCHIP__)
 	if (DrawOSD)
 		Init(&OVERLAY_WIDTH, &OVERLAY_HEIGHT);
-	height = OVERLAY_HEIGHT;
+
+	majestic_height = OVERLAY_HEIGHT;
 	printf("OSD is %ix%i pixels\n", OVERLAY_WIDTH, OVERLAY_HEIGHT);
 #endif
 
 	// Get video resolution
-	if (height < 1000 && height > 400) {
+	if (majestic_height < 1000 && majestic_height > 400) {
 		font_suffix = "_hd";
 		current_display_info = hd_display_info;
 	} else {
