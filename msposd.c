@@ -52,22 +52,16 @@ bool vtxMenuEnabled = false;
 struct event_base *base = NULL;
 
 int serial_fd = 0;
-
 int in_sock = 0;
-
 int MSPUDPPort = 0;
-
 int MSP_PollRate = 20;
-
 int matrix_size = 0;
-
 int AHI_Enabled = 1;
-
 bool enable_simple_uart = false;
 
 const char *default_master = "/dev/ttyAMA0";
 const int default_baudrate = 115200;
-const char *defualt_out_addr = "";
+const char *default_out_addr = "";
 const char *default_in_addr = "127.0.0.1:0";
 const int RC_CHANNELS = 65;		// RC_CHANNELS ( #65 ) for regular MAVLINK RC Channels read
 								// (https://mavlink.io/en/messages/common.html#RC_CHANNELS)
@@ -82,16 +76,14 @@ struct bufferevent *serial_bev;
 struct sockaddr_in sin_out = {
 	.sin_family = AF_INET,
 };
-int out_sock = 0;
 
+int out_sock = 0;
 long aggregate = 1;
-/*
-When aggregating packets, we flush when a message that draws artifical horizon
-(AHI). This shows the minimum size of packets in the buffer in order to flush If
-we need smooth response of the OSD, then set this to 1. Value of 3 is a
-compromise, 3 sequential packets for AHI change will be aggregated, this will
-save bandwidth, but will reduse the frame rate of the OSD.
-*/
+/*	When aggregating packets, we flush when a message that draws artifical horizon
+	(AHI). This shows the minimum size of packets in the buffer in order to flush If
+	we need smooth response of the OSD, then set this to 1. Value of 3 is a
+	compromise, 3 sequential packets for AHI change will be aggregated, this will
+	save bandwidth, but will reduse the frame rate of the OSD.	*/
 int minAggPckts = 3;
 
 bool monitor_wfb = false;
@@ -99,34 +91,26 @@ static int temp = false;
 
 static void print_usage() {
 	printf("Usage: msposd [OPTIONS]\n"
-		   "Where:\n"
-
-		   "	-m --master      Serial port to receive MSP (%s by default)\n"
-		   "	-b --baudrate    Serial port baudrate (%d by default)\n"
-		   "	-o --output	  	 UDP endpoint to forward aggregated MSP "
-		   "messages (%s)\n"
-		   "	-c --channels    RC Channel to listen for commands (0 by default) "
-		   "and "
-		   "exec channels.sh. This command can be repeated. Channel values are "
-		   "1-based.\n"
-		   "	-w --wait        Delay after each command received(2000ms "
-		   "default)\n"
-		   "	-r --fps         Max MSP Display refresh rate(5..50)\n"
-		   "	-p --persist     How long a channel value must persist to generate "
-		   "a "
-		   "command - for multiposition switches (0ms default)\n"
-		   "	-t --temp        Read SoC temperature\n"
-		   "	-d --wfb         Monitors wfb.log file and reports errors via HUD "
-		   "messages\n"
-		   "	-s --osd         Parse MSP and draw OSD over the video\n"
-		   "	-a --ahi         Draw graphic AHI, mode [0-No, 2-Simple 1-Ladder, "
-		   "3-LadderEx]\n"
-		   "	-x --matrix      OSD matrix (0 - 53:20 , 1- 50:18 chars)\n"
-		   "	   --mspvtx      Enable mspvtx support\n"
-		   "	-v --verbose     Show debug infot\n"
-		   "	--help           Display this help\n",
-
-		default_master, default_baudrate, defualt_out_addr);
+		"Where:\n"
+		"	-m --master      Serial port to receive MSP (%s by default)\n"
+		"	-b --baudrate    Serial port baudrate (%d by default)\n"
+		"	-o --output      UDP endpoint to forward aggregated MSP messages (%s)\n"
+		"	-c --channels    RC Channel to listen for commands (0 by default) and exec channels.sh."
+			" This command can be repeated. Channel values are 1-based.\n"
+		"	-w --wait        Delay after each command received(2000ms default)\n"
+		"	-r --fps         Max MSP Display refresh rate(5..50)\n"
+		"	-p --persist     How long a channel value must persist to generate a command"
+			" - for multiposition switches (0ms default)\n"
+		"	-t --temp        Read SoC temperature\n"
+		"	-d --wfb         Monitors wfb.log file and reports errors via HUD messages\n"
+		"	-s --osd         Parse MSP and draw OSD over the video\n"
+		"	-a --ahi         Draw graphic AHI, mode [0-No, 2-Simple 1-Ladder, 3-LadderEx]\n"
+		"	-x --matrix      OSD matrix (0 - 53:20, 1 - 50:18 chars)\n"
+		"	   --mspvtx      Enable mspvtx support\n"
+		"	   --size        Set OSD resolution\n"
+		"	-v --verbose     Show debug info\n"
+		"	--help           Display this help\n",
+		default_master, default_baudrate, default_out_addr);
 }
 
 static speed_t speed_by_value(int baudrate) {
@@ -814,8 +798,7 @@ static void serial_read_cb(struct bufferevent *bev, void *arg) {
 			// Let's try to parse the stream
 			if (aggregate > 0 || rc_channel_mon_enabled) // if no RC channel control needed, only
 														 // forward the data
-				process_mavlink(data, packet_len,
-					arg); // Let's try to parse the stream
+				process_mavlink(data, packet_len, arg); // Let's try to parse the stream
 		}
 
 		evbuffer_drain(input, packet_len);
@@ -856,10 +839,12 @@ void stdin_read_callback(int fd, short event, void *arg) {
 			if (vtxMenuEnabled)
 				vtxMenuActive = true;
 		}
+
 		if (buffer[0] == 'q') {
 			printf("Enableing msposd\n");
 			vtxMenuActive = false;
 		}
+
 		if (buffer[0] == 'w') {
 			uint16_t channels[18];
 			channels[0] = 1500;
@@ -977,6 +962,7 @@ static bool ReadSerialSimple(int showstat) {
 
 			showchannels(18);
 		}
+
 		stat_screen_refresh_count = 0;
 		stat_pckts = 0;
 		stat_bytes = 0;
@@ -1017,8 +1003,10 @@ static bool ReadSerialSimple(int showstat) {
 static void send_variant_request2(int serial_fd) {
 	uint8_t buffer[6];
 	int res = 0;
+
 	if (AbortNow)
 		return;
+
 	if (enable_simple_uart) {
 		int rate_divider = MSP_PollRate / (1000 / MinTimeBetweenScreenRefresh);
 		if (rate_divider < 1 || rate_divider > MSP_PollRate)
@@ -1048,10 +1036,9 @@ static void send_variant_request2(int serial_fd) {
 		construct_msp_command(buffer, MSP_CMD_FC_VARIANT, NULL, 0, MSP_OUTBOUND);
 		res = write(serial_fd, &buffer, sizeof(buffer));
 
-		// Sending several request right one after another does not work well on
-		// INAV ...
-		if (bitmapFnt.pData != NULL &&
-			mspVTXenabled) { // no need to poll when no fonts are still loaded
+		// Sending several request right one after another does not work well on INAV ...
+		// no need to poll when no fonts are still loaded
+		if (bitmapFnt.pData != NULL && mspVTXenabled) {
 			// Poll for mspVTX
 			construct_msp_command(buffer, MSP_GET_VTX_CONFIG, NULL, 0, MSP_OUTBOUND);
 			res = write(serial_fd, &buffer, sizeof(buffer));
@@ -1060,8 +1047,7 @@ static void send_variant_request2(int serial_fd) {
 		VariantCounter = 0;
 	}
 
-	// Sending several request right one after another does not work well on
-	// INAV
+	// Sending several request right one after another does not work well on INAV
 	// ...
 	if (MSP_PollRate - 2 == VariantCounter) { // poll every one second, but one by one!
 		// poll for FC_STATUS
@@ -1086,11 +1072,12 @@ static int handle_data(const char *port_name, int baudrate, const char *out_addr
 	struct event *sig_term;
 	int ret = EXIT_SUCCESS;
 
-	if (strlen(port_name) > 0 && port_name[0] >= '0' && port_name[0] <= '9') { // Read from UDP
-
+	// Read from UDP
+	if (strlen(port_name) > 0 && port_name[0] >= '0' && port_name[0] <= '9') {
 		struct sockaddr_in sin_in = {
 			.sin_family = AF_INET,
 		};
+
 		if (!parse_host_port(
 				port_name, (struct in_addr *)&sin_in.sin_addr.s_addr, &sin_in.sin_port))
 			goto err;
@@ -1098,15 +1085,16 @@ static int handle_data(const char *port_name, int baudrate, const char *out_addr
 		if (sin_in.sin_port > 0)
 			in_sock = socket(AF_INET, SOCK_DGRAM, 0);
 
-		if (in_sock > 0 && bind(in_sock, (struct sockaddr *)&sin_in,
-							   sizeof(sin_in))) { // we may not need this
+		// we may not need this
+		if (in_sock > 0 && bind(in_sock, (struct sockaddr *)&sin_in, sizeof(sin_in))) {
 			perror("bind()");
 			exit(EXIT_FAILURE);
 		}
+
 		if (in_sock > 0)
 			printf("Listening UDP on %s...\n", port_name);
-
-	} else { // Read from UART
+	// Read from UART
+	} else {
 		serial_fd = open(port_name, O_RDWR | O_NOCTTY);
 		if (serial_fd < 0) {
 			printf("Error while opening port %s: %s\n", port_name, strerror(errno));
@@ -1115,6 +1103,7 @@ static int handle_data(const char *port_name, int baudrate, const char *out_addr
 		evutil_make_socket_nonblocking(serial_fd);
 		printf("Listening UART on %s...\n", port_name);
 	}
+
 	struct termios options;
 	tcgetattr(serial_fd, &options);
 	cfsetspeed(&options, speed_by_value(baudrate));
@@ -1126,7 +1115,6 @@ static int handle_data(const char *port_name, int baudrate, const char *out_addr
 	options.c_cflag &= ~CSTOPB; // set one stop bit
 
 	options.c_cflag |= (CLOCAL | CREAD);
-
 	options.c_oflag &= ~OPOST;
 
 	options.c_lflag &= 0;
@@ -1176,17 +1164,13 @@ static int handle_data(const char *port_name, int baudrate, const char *out_addr
 	sig_term = evsignal_new(base, SIGTERM, signal_cb, base);
 	event_add(sig_term, NULL);
 
-	// Test inject a simple packet to test malvink communication Camera to
-	// Ground
+	// Test inject a simple packet to test malvink communication Camera to Ground
 	signal(SIGUSR1, sendtestmsg);
 
-	if (serial_fd > 0 && !enable_simple_uart) { // if UART opened and we need to
-												// read it via events
-
+	if (serial_fd > 0 && !enable_simple_uart) { // if UART opened and we need to read it via events
 		serial_bev = bufferevent_socket_new(base, serial_fd, 0);
 
-		/* Trigger the read callback only whenever there is at least 16 bytes of
-		 * data in the buffer. */
+		// Trigger the read callback only whenever there is at least 16 bytes of data in the buffer.
 		// So that the read event is not triggered so often
 		bufferevent_setwatermark(serial_bev, EV_READ, 16, 0);
 		bufferevent_setcb(serial_bev, serial_read_cb, NULL, serial_event_cb, base);
@@ -1194,9 +1178,9 @@ static int handle_data(const char *port_name, int baudrate, const char *out_addr
 	}
 
 	if (in_sock > 0) {
-		// in_ev = event_new(base, in_sock, EV_READ | EV_PERSIST, in_read,
-		// NULL); event_add(in_ev, NULL);
-		//  Using bufferevent for the UDP socket too, for a unified callback
+		// in_ev = event_new(base, in_sock, EV_READ | EV_PERSIST, in_read, NULL);
+		// event_add(in_ev, NULL);
+		// Using bufferevent for the UDP socket too, for a unified callback
 		struct bufferevent *udp_bev = bufferevent_socket_new(base, in_sock, 0);
 		bufferevent_setcb(udp_bev, serial_read_cb, NULL, NULL, base);
 		bufferevent_enable(udp_bev, EV_READ | EV_PERSIST);
@@ -1237,8 +1221,8 @@ static int handle_data(const char *port_name, int baudrate, const char *out_addr
 	}
 
 	event_base_dispatch(base);
-err:
 
+err:
 	if (temp_tmr) {
 		event_del(temp_tmr);
 		event_free(temp_tmr);
@@ -1270,35 +1254,61 @@ err:
 	return ret;
 }
 
-void resetLastStartValues() {
+static void resetLastStartValues() {
 	for (int i = 0; i < kChannelCount; ++i) {
 		LastStart[i] = get_current_time_ms();
 	}
 }
 
+static void set_resolution(int width, int height) {
+	if (width < 1280 || width > 3840) {
+		width = 1280;
+	}
+
+	majestic_width = width;
+
+	if (height < 720 || height > 2160) {
+		height = 720;
+	}
+
+	majestic_height = height;
+}
+
 int main(int argc, char **argv) {
-	const struct option long_options[] = {{"master", required_argument, NULL, 'm'},
-		{"baudrate", required_argument, NULL, 'b'}, {"out", required_argument, NULL, 'o'},
-		{"ahi", required_argument, NULL, 'a'}, {"in", required_argument, NULL, 'i'},
-		{"channels", required_argument, NULL, 'c'}, {"wait_time", required_argument, NULL, 'w'},
-		{"refreshrate", required_argument, NULL, 'r'}, {"folder", required_argument, NULL, 'f'},
-		{"persist", required_argument, NULL, 'p'}, {"matrix", required_argument, NULL, 'x'},
-		{"osd", no_argument, NULL, 'd'}, {"verbose", no_argument, NULL, 'v'},
-		{"temp", no_argument, NULL, 't'}, {"wfb", no_argument, NULL, 'j'},
-		{"mspvtx", no_argument, NULL, '1'}, {"help", no_argument, NULL, 'h'}, {NULL, 0, NULL, 0}};
+	const struct option long_options[] = {
+		{"master", required_argument, NULL, 'm'},
+		{"baudrate", required_argument, NULL, 'b'},
+		{"out", required_argument, NULL, 'o'},
+		{"ahi", required_argument, NULL, 'a'},
+		{"in", required_argument, NULL, 'i'},
+		{"channels", required_argument, NULL, 'c'},
+		{"wait_time", required_argument, NULL, 'w'},
+		{"refreshrate", required_argument, NULL, 'r'},
+		{"folder", required_argument, NULL, 'f'},
+		{"persist", required_argument, NULL, 'p'},
+		{"matrix", required_argument, NULL, 'x'},
+		{"osd", no_argument, NULL, 'd'},
+		{"verbose", no_argument, NULL, 'v'},
+		{"temp", no_argument, NULL, 't'},
+		{"wfb", no_argument, NULL, 'j'},
+		{"mspvtx", no_argument, NULL, '1'},
+		{"size", required_argument, NULL, '2'},
+		{"help", no_argument, NULL, 'h'},
+		{NULL, 0, NULL, 0}
+	};
 
 	const char *port_name = default_master;
 	int baudrate = default_baudrate;
-	const char *out_addr = defualt_out_addr;
+	const char *out_addr = default_out_addr;
 	const char *in_addr = default_in_addr;
 	MinTimeBetweenScreenRefresh = 50;
 	last_board_temp = -100;
 
-	printf("Version: %s, compiled at: %s\n", GIT_VERSION, VERSION_STRING);
-	int opt;
-	int r;
+	int opt = 0, r = 0;
 	int long_index = 0;
 	int rc_channel_no = 0;
+
+	printf("Version: %s, compiled at: %s\n", GIT_VERSION, VERSION_STRING);
 
 	while ((opt = getopt_long_only(argc, argv, "", long_options, &long_index)) != -1) {
 		switch (opt) {
@@ -1306,18 +1316,20 @@ int main(int argc, char **argv) {
 			port_name = optarg;
 			printf("Listen on port: %s\n", port_name);
 			break;
+
 		case 'b':
 			baudrate = atoi(optarg);
 			break;
+
 		case 'o':
 			out_addr = optarg;
 			break;
-		case 'i':
 
+		case 'i':
 			break;
+
 		case 'a':
 			AHI_Enabled = atoi(optarg);
-
 			break;
 
 		case 'c':
@@ -1377,6 +1389,16 @@ int main(int argc, char **argv) {
 			mspVTXenabled = true;
 			break;
 
+		case '2':
+			char buffer[16];
+			strncpy(buffer, optarg, sizeof(buffer));
+			char *limit = strchr(buffer, 'x');
+			if (limit) {
+				buffer[limit - buffer] = '\0';
+				set_resolution(atoi(buffer), atoi(limit + 1));
+			}
+			break;
+
 		case 'v':
 			verbose = true;
 			printf("Verbose mode!\n");
@@ -1400,15 +1422,12 @@ int main(int argc, char **argv) {
 		rx_msp_state = calloc(1, sizeof(msp_state_t));
 		rx_msp_state->cb = &rx_msp_callback;
 		// if (DrawOSD)
-		InitMSPHook(); // We need to create screen overlay if we gonna show
-					   // message on screen
+		InitMSPHook(); // We need to create screen overlay if we gonna show message on screen
 
 		if (false) { // Forwarding MSP enabled
-			// this opens the UDP port so that it can be used ith file
-			// descriptors
+			// this opens the UDP port so that it can be used with file descriptors
 			socket_fd = bind_socket(MSP_PORT + 1);
-			// Connect the socket to the target address and port so that we can
-			// debug
+			// Connect the socket to the target address and port so that we can debug
 			struct sockaddr_in si_other;
 			memset((char *)&si_other, 0, sizeof(si_other));
 			si_other.sin_family = AF_INET;
