@@ -36,7 +36,7 @@ int create_region(int *handle, int x, int y, int width, int height) {
 		PIXEL_FORMAT_DEFAULT; // PIXEL_FORMAT_1555;// E_MI_RGN_PIXEL_FORMAT_I4;
 							  // //;PIXEL_FORMAT_1555;//E_MI_RGN_PIXEL_FORMAT_I4;//PIXEL_FORMAT_1555
 
-	s32Ret = MI_RGN_GetAttr(*handle, &stRegionCurrent);
+	s32Ret = MI_RGN_GetAttr(DEV *handle, &stRegionCurrent);
 #else
 	MPP_CHN_S stChn;
 
@@ -64,7 +64,7 @@ int create_region(int *handle, int x, int y, int width, int height) {
 			fprintf(stderr, "[%s:%d]RGN_GetAttr failed with %#x , creating region %d...\n",
 				__func__, __LINE__, s32Ret, *handle);
 #ifdef __SIGMASTAR__
-		s32Ret = MI_RGN_Create(*handle, &stRegion);
+		s32Ret = MI_RGN_Create(DEV *handle, &stRegion);
 #else
 		s32Ret = HI_MPI_RGN_Create(*handle, &stRegion);
 #endif
@@ -89,11 +89,11 @@ int create_region(int *handle, int x, int y, int width, int height) {
 				__LINE__);
 #ifdef __SIGMASTAR__
 			stChn.s32OutputPortId = 1;
-			MI_RGN_DetachFromChn(*handle, &stChn);
+			MI_RGN_DetachFromChn(DEV *handle, &stChn);
 			stChn.s32OutputPortId = 0;
-			MI_RGN_DetachFromChn(*handle, &stChn);
-			MI_RGN_Destroy(*handle);
-			s32Ret = MI_RGN_Create(*handle, &stRegion);
+			MI_RGN_DetachFromChn(DEV *handle, &stChn);
+			MI_RGN_Destroy(DEV *handle);
+			s32Ret = MI_RGN_Create(DEV *handle, &stRegion);
 #else
 			HI_MPI_RGN_DetachFromChn(*handle, &stChn);
 			HI_MPI_RGN_Destroy(*handle);
@@ -107,7 +107,7 @@ int create_region(int *handle, int x, int y, int width, int height) {
 	}
 
 #ifdef __SIGMASTAR__
-	s32Ret = MI_RGN_GetDisplayAttr(*handle, &stChn, &stChnAttrCurrent);
+	s32Ret = MI_RGN_GetDisplayAttr(DEV *handle, &stChn, &stChnAttrCurrent);
 #else
 	s32Ret = HI_MPI_RGN_GetDisplayAttr(*handle, &stChn, &stChnAttrCurrent);
 #endif
@@ -129,9 +129,9 @@ int create_region(int *handle, int x, int y, int width, int height) {
 					__func__, __LINE__, *handle, &stChn.s32ChnId);
 #ifdef __SIGMASTAR__
 			stChn.s32OutputPortId = 1;
-			MI_RGN_DetachFromChn(*handle, &stChn);
+			MI_RGN_DetachFromChn(DEV *handle, &stChn);
 			stChn.s32OutputPortId = 0;
-			MI_RGN_DetachFromChn(*handle, &stChn);
+			MI_RGN_DetachFromChn(DEV *handle, &stChn);
 #else
 			HI_MPI_RGN_DetachFromChn(*handle, &stChn);
 #endif
@@ -158,9 +158,9 @@ int create_region(int *handle, int x, int y, int width, int height) {
 	*/
 
 	stChn.s32OutputPortId = 0;
-	s32Ret = MI_RGN_AttachToChn(*handle, &stChn, &stChnAttr);
+	s32Ret = MI_RGN_AttachToChn(DEV *handle, &stChn, &stChnAttr);
 	stChn.s32OutputPortId = 1;
-	s32Ret = MI_RGN_AttachToChn(*handle, &stChn, &stChnAttr);
+	s32Ret = MI_RGN_AttachToChn(DEV *handle, &stChn, &stChnAttr);
 #else
 	memset(&stChnAttr, 0, sizeof(RGN_CHN_ATTR_S));
 	stChnAttr.bShow = 1;
@@ -312,7 +312,7 @@ int set_bitmap(int handle, BITMAP *bitmap) {
 	int s32Ret = 0;
 #if !defined(_x86) && !defined(__ROCKCHIP__)
 #ifdef __SIGMASTAR__
-	s32Ret = MI_RGN_SetBitMap(handle, (MI_RGN_Bitmap_t *)(bitmap));
+	s32Ret = MI_RGN_SetBitMap(DEV handle, (MI_RGN_Bitmap_t *)(bitmap));
 #elif __GOKE__
 	s32Ret = HI_MPI_RGN_SetBitMap(handle, (BITMAP_S *)(bitmap));
 #endif
@@ -365,7 +365,7 @@ unsigned long set_bitmapEx(int handle, BITMAP *bitmap, int BitsPerPixel) {
 	// bitmap->u32Height
 	// * byteWidth);
 
-	s32Ret = MI_RGN_UpdateCanvas(handle);
+	s32Ret = MI_RGN_UpdateCanvas(DEV handle);
 
 	if (verbose)
 		printf("MI_RGN_UpdateCanvas completed byteWidth:%d!\n", byteWidth);
@@ -390,10 +390,10 @@ int unload_region(int *handle) {
 
 	stChn.eModId = E_MI_RGN_MODID_VPE;
 	stChn.s32OutputPortId = 1;
-	MI_RGN_DetachFromChn(*handle, &stChn);
+	MI_RGN_DetachFromChn(DEV *handle, &stChn);
 	stChn.s32OutputPortId = 0;
-	MI_RGN_DetachFromChn(*handle, &stChn);
-	s32Ret = MI_RGN_Destroy(*handle);
+	MI_RGN_DetachFromChn(DEV *handle, &stChn);
+	s32Ret = MI_RGN_Destroy(DEV *handle);
 	if (s32Ret)
 		fprintf(stderr, "[%s:%d]RGN_Destroy failed with %#x %d!\n", __func__, __LINE__, s32Ret,
 			*handle);
@@ -414,7 +414,7 @@ int unload_region(int *handle) {
 #ifdef __SIGMASTAR__
 
 int GetCanvas(int handle, MI_RGN_CanvasInfo_t *stCanvasInfo) {
-	int s32Result = MI_RGN_GetCanvasInfo(handle, stCanvasInfo);
+	int s32Result = MI_RGN_GetCanvasInfo(DEV handle, stCanvasInfo);
 	if (s32Result != MI_RGN_OK)
 		return s32Result;
 
@@ -468,7 +468,3 @@ void DrawBitmap1555ToI4(uint16_t *srcBitmap, uint32_t width, uint32_t height, ui
 }
 
 #endif
-//     //if (MI_RGN_UpdateCanvas(hHandle) != MI_RGN_OK)
-//      //   return s32Result;
-
-// }

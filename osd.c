@@ -1851,7 +1851,7 @@ static void draw_screenBMP() {
 	// LastDrawn));
 	if (DrawOSD)
 		if (useDirectBMPBuffer) {
-			int s32Ret = MI_RGN_UpdateCanvas(osds[FULL_OVERLAY_ID].hand);
+			int s32Ret = MI_RGN_UpdateCanvas(DEV osds[FULL_OVERLAY_ID].hand);
 			bmpBuff.pData = NULL; // we must reset it so that we get it the next
 								  // iteration to draw!
 			if (verbose && s32Ret != 0)
@@ -2254,7 +2254,12 @@ static void InitMSPHook() {
 	}
 
 #ifdef __SIGMASTAR__
-	int s32Ret = MI_RGN_Init(&g_stPaletteTable);
+#if __INFINITY6C__
+	if (MI_SYS_Init(0))
+		fprintf(stderr, "[%s:%d]MI_SYS_Init failed with!\n", __func__, __LINE__);
+#endif
+
+	int s32Ret = MI_RGN_Init(DEV &g_stPaletteTable);
 	if (verbose)
 		printf("MI_RGN_Init results: %d\n", s32Ret);
 	if (s32Ret)
@@ -2352,7 +2357,7 @@ static void InitMSPHook() {
 			void *bmp = get_directBMP(osds[FULL_OVERLAY_ID].hand);
 			memcpy(bmp, bitmap.pData,
 				bitmap.u32Height * getRowStride(bitmap.u32Width, PIXEL_FORMAT_BitsPerPixel));
-			MI_RGN_UpdateCanvas(osds[FULL_OVERLAY_ID].hand);
+			MI_RGN_UpdateCanvas(DEV osds[FULL_OVERLAY_ID].hand);
 
 			if (true) {
 				useDirectBMPBuffer = true;
@@ -2423,7 +2428,7 @@ static void CloseMSP() {
 	// s32Ret = MI_RGN_Destroy(&osds[FULL_OVERLAY_ID].hand);
 	s32Ret = unload_region(&osds[FULL_OVERLAY_ID].hand);
 
-	deinit = MI_RGN_DeInit();
+	deinit = MI_RGN_DeInit(DEV2);
 	if (deinit)
 		printf("[%s:%d]RGN_DeInit failed with %#x!\n", __func__, __LINE__, s32Ret);
 #endif

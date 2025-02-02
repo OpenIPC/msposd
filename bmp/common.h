@@ -29,10 +29,7 @@ extern "C" {
 #include "config.h"
 
 #ifdef __SIGMASTAR__
-#include "mi_common.h"
 #include "mi_rgn.h"
-//#include "mi_vpe.h"
-#include "mi_venc.h"
 
 #define IO_BASE 0x1F000000
 #define IO_SIZE 0x400000
