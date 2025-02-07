@@ -56,7 +56,7 @@ int in_sock = 0;
 int MSPUDPPort = 0;
 int MSP_PollRate = 20;
 int matrix_size = 0;
-int AHI_Enabled = 1;
+int AHI_Enabled = 0;
 bool enable_simple_uart = false;
 
 const char *default_master = "/dev/ttyAMA0";
@@ -94,23 +94,22 @@ static void print_usage() {
 		"Where:\n"
 		"	-m --master      Serial port to receive MSP (%s by default)\n"
 		"	-b --baudrate    Serial port baudrate (%d by default)\n"
-		"	-o --output      UDP endpoint to forward aggregated MSP messages (%s)\n"
-		"	-c --channels    RC Channel to listen for commands (0 by default) and exec channels.sh."
-			" This command can be repeated. Channel values are 1-based.\n"
-		"	-w --wait        Delay after each command received(2000ms default)\n"
-		"	-r --fps         Max MSP Display refresh rate(5..50)\n"
-		"	-p --persist     How long a channel value must persist to generate a command"
-			" - for multiposition switches (0ms default)\n"
-		"	-t --temp        Read SoC temperature\n"
-		"	-d --wfb         Monitors wfb.log file and reports errors via HUD messages\n"
-		"	-s --osd         Parse MSP and draw OSD over the video\n"
-		"	-a --ahi         Draw graphic AHI, mode [0-No, 2-Simple 1-Ladder, 3-LadderEx]\n"
-		"	-x --matrix      OSD matrix (0 - 53:20, 1 - 50:18 chars)\n"
+		"	-o --out         UDP endpoint to forward aggregated MSP messages (%s)\n"
+		"	-c --channels    RC Channel to listen for commands (0 by default) and exec channels.sh\n"
+		"	-w --wait        Delay after each command received (2000ms default)\n"
+		"	-r --fps         Max MSP Display refresh rate (5..50)\n"
+		"	-p --persist     How long a channel value must persist for multiposition switches (0ms default)\n"
+		"	-t --temp        Read chipset temperature\n"
+		"	-j --wfb         Monitors wfb.log file and reports errors via HUD messages\n"
+		"	-f --folder      Log file output directory\n"
+		"	-d --osd         Parse MSP and draw OSD over the video\n"
+		"	-a --ahi         Draw graphic AHI, mode (1: Ladder, 2: Simple, 3: LadderEx)\n"
+		"	-x --matrix      OSD matrix (0: 53:20, 1: 50:18 chars)\n"
+		"	-z --size        Set OSD resolution\n"
 		"	   --mspvtx      Enable mspvtx support\n"
-		"	   --size        Set OSD resolution\n"
 		"	-v --verbose     Show debug info\n"
-		"	--help           Display this help\n",
-		default_master, default_baudrate, default_out_addr);
+		"	-h --help        Display this help\n",
+			default_master, default_baudrate, default_out_addr);
 }
 
 static speed_t speed_by_value(int baudrate) {
@@ -1279,20 +1278,19 @@ int main(int argc, char **argv) {
 		{"master", required_argument, NULL, 'm'},
 		{"baudrate", required_argument, NULL, 'b'},
 		{"out", required_argument, NULL, 'o'},
-		{"ahi", required_argument, NULL, 'a'},
-		{"in", required_argument, NULL, 'i'},
 		{"channels", required_argument, NULL, 'c'},
-		{"wait_time", required_argument, NULL, 'w'},
-		{"refreshrate", required_argument, NULL, 'r'},
-		{"folder", required_argument, NULL, 'f'},
+		{"wait", required_argument, NULL, 'w'},
+		{"fps", required_argument, NULL, 'r'},
 		{"persist", required_argument, NULL, 'p'},
-		{"matrix", required_argument, NULL, 'x'},
-		{"osd", no_argument, NULL, 'd'},
-		{"verbose", no_argument, NULL, 'v'},
 		{"temp", no_argument, NULL, 't'},
 		{"wfb", no_argument, NULL, 'j'},
+		{"folder", required_argument, NULL, 'f'},
+		{"osd", no_argument, NULL, 'd'},
+		{"ahi", required_argument, NULL, 'a'},
+		{"matrix", required_argument, NULL, 'x'},
+		{"size", required_argument, NULL, 'z'},
 		{"mspvtx", no_argument, NULL, '1'},
-		{"size", required_argument, NULL, '2'},
+		{"verbose", no_argument, NULL, 'v'},
 		{"help", no_argument, NULL, 'h'},
 		{NULL, 0, NULL, 0}
 	};
@@ -1310,7 +1308,8 @@ int main(int argc, char **argv) {
 
 	printf("Version: %s, compiled at: %s\n", GIT_VERSION, VERSION_STRING);
 
-	while ((opt = getopt_long_only(argc, argv, "", long_options, &long_index)) != -1) {
+	while ((opt = getopt_long_only(argc, argv, "m:b:o:c:w:r:p:tjf:da:x:z:1vh",
+			long_options, &long_index)) != -1) {
 		switch (opt) {
 		case 'm':
 			port_name = optarg;
@@ -1323,13 +1322,6 @@ int main(int argc, char **argv) {
 
 		case 'o':
 			out_addr = optarg;
-			break;
-
-		case 'i':
-			break;
-
-		case 'a':
-			AHI_Enabled = atoi(optarg);
 			break;
 
 		case 'c':
@@ -1345,20 +1337,9 @@ int main(int argc, char **argv) {
 			resetLastStartValues();
 			break;
 
-		case 'f':
-			if (optarg != NULL) {
-				snprintf(MavLinkMsgFile, sizeof(MavLinkMsgFile), "%smavlink.msg", optarg);
-				snprintf(WfbLogFile, sizeof(MavLinkMsgFile), "%swfb.log", optarg);
-			}
-			break;
-
 		case 'w':
 			wait_after_bash = atoi(optarg);
 			resetLastStartValues();
-			break;
-
-		case 'x':
-			matrix_size = atoi(optarg);
 			break;
 
 		case 'r':
@@ -1378,18 +1359,34 @@ int main(int argc, char **argv) {
 			break;
 
 		case 't':
-			temp = 1; // 1  HiSilicon/Goke , 2 SigmaStar SOC
+			temp = 1;
 			break;
 
 		case 'j':
 			monitor_wfb = true;
 			break;
 
-		case '1':
-			mspVTXenabled = true;
+		case 'f':
+			if (optarg != NULL) {
+				snprintf(MavLinkMsgFile, sizeof(MavLinkMsgFile), "%smavlink.msg", optarg);
+				snprintf(WfbLogFile, sizeof(MavLinkMsgFile), "%swfb.log", optarg);
+			}
 			break;
 
-		case '2':
+		case 'd':
+			DrawOSD = true;
+			printf("MSP to OSD mode!\n");
+			break;
+
+		case 'a':
+			AHI_Enabled = atoi(optarg);
+			break;
+
+		case 'x':
+			matrix_size = atoi(optarg);
+			break;
+
+		case 'z':
 			char buffer[16];
 			strncpy(buffer, optarg, sizeof(buffer));
 			char *limit = strchr(buffer, 'x');
@@ -1399,14 +1396,13 @@ int main(int argc, char **argv) {
 			}
 			break;
 
+		case '1':
+			mspVTXenabled = true;
+			break;
+
 		case 'v':
 			verbose = true;
 			printf("Verbose mode!\n");
-			break;
-
-		case 'd':
-			DrawOSD = true;
-			printf("MSP to OSD mode!\n");
 			break;
 
 		case 'h':
