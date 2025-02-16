@@ -54,6 +54,9 @@
 #include "osd/util/interface.h"
 #include "osd/util/settings.h"
 
+#include "osd.h"
+#include "osd/util/subtitle.h"
+
 #define CPU_TEMP_PATH "/sys/devices/platform/soc/f0a00000.apb/f0a71000.omc/temp1"
 #define AU_VOLTAGE_PATH "/sys/devices/platform/soc/f0a00000.apb/f0a71000.omc/voltage4"
 
@@ -96,7 +99,7 @@ char _port_name[80];
 
 static uint8_t message_buffer[256]; // only needs to be the maximum size of an
 									// MSP packet, we only care to fwd MSP
-static char current_fc_identifier[4];
+char current_fc_identifier[4];
 static char current_fc_identifier_end_of_string = 0x00;
 
 /* For compressed full-frame transmission */
@@ -160,6 +163,9 @@ extern bool vtxMenuEnabled;
 extern bool armed;
 extern bool vtxInitDone;
 extern bool DrawOSD;
+
+// SRT/OSD
+extern bool recording_running;
 
 static void send_display_size(int serial_fd) {
 	uint8_t buffer[8];
@@ -1920,6 +1926,12 @@ static void draw_complete() {
 		char msg[200];
 		sprintf(msg, "&F38 &L43 Identifying Flight Controller...", font_load_name);
 		SetOSDMsg(msg);
+	}
+
+	if (recording_running) {
+		handle_osd_out();
+		write_srt_file();
+		check_recoding_file();
 	}
 
 #ifdef _x86

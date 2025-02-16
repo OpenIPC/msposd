@@ -20,6 +20,7 @@ Usage: msposd [OPTIONS]
  -a --ahi         Draw graphic AHI, mode [0-No, 2-Simple 1-Ladder, 3-LadderEx (home indicator on ladder)]
  -x --matrix      OSD matrix [0- 53:20 , 1- 50:18 chars, 11- Variable font size, 9-bottom align 720p mode, 8-center align 720p mode]
     --mspvtx      Enable alpha mspvtx functionality
+    --subtitle <path>  Enable OSD/SRT recording
  -v --verbose     Show debug info
  --help           Display this help
 ```
@@ -87,6 +88,17 @@ Use `Exit Camera menu` stick command (one or more times) to exit all flightcontr
 ### MSPVTX
 
 msposd has **alpha** support for mspVTX to Betaflight. use the `--mspvtx` switch to activate this. This will configure Betaflight vtx tables with the supported channles by the vtx. You can switch channels from within Betaflight menu, Betaflight Configurator, SpeedyBee App, ELRS VTXAdmin.
+
+
+## OSD/SRT Recoding
+
+msposd supports recording MSP DisplayPort messages to an OSD file. This can later be used to overlay the OSD if the video was recorded without it.
+The OSD file is compatible with the [walksnail-osd-tool](https://github.com/avsaase/walksnail-osd-tool).
+The SRT file is currently not very useful and is only generated for compatibility with walksnail-osd-tool.
+
+This feature monitors the recording directory for newly started .mp4 files.
+Once detected, the SRT and OSD files will be created with the same name.
+As soon as the MP4 file is closed, the recording of SRT and OSD files stops as well.
 
 ##  Options.
 Forwarding of MSP packets via UDP.  
