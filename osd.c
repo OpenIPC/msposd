@@ -1378,6 +1378,7 @@ void remove_carriage_returns(char *out) {
 }
 
 char osdmsg[180];
+char ready_osdmsg[80];
 
 bool DrawTextOnOSDBitmap(char *msg) {
 	char *font;
@@ -1446,6 +1447,9 @@ bool DrawTextOnOSDBitmap(char *msg) {
 			construct_msp_command(
 				msg_buffer, MSP_CMD_DISPLAYPORT, &payload_buffer[0], 80, MSP_INBOUND);
 			sendto(out_sock, msg_buffer, 100, 0, (struct sockaddr *)&sin_out, sizeof(sin_out));
+
+			// store ready osdmsg to be used in subtitle srt writeing
+			memcpy(&ready_osdmsg[0], &out[0], msglen + 1);
 
 			// printf("Sent text msg : %s\n",out);
 			return false;

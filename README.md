@@ -100,6 +100,12 @@ This feature monitors the recording directory for newly started .mp4 files.
 Once detected, the SRT and OSD files will be created with the same name.
 As soon as the MP4 file is closed, the recording of SRT and OSD files stops as well.
 
+Air side needs special config to detect recordings. No recursive file watching is implmented.
+Therefor majestic needs to record to a flat directory layout.
+
+`cli -i /etc/majestic.yaml -s .records.path /mnt/mmcblk0p1/%F/..`
+
+
 ##  Options.
 Forwarding of MSP packets via UDP.  
 Can monitor RC Channels values in FC and call the script `channels.sh` (located at /usr/bin or /usr/sbin).Will passing the channel number and its value to it as $1 and $2 parameters. This allows for controlling the camera via the Remote Control Transmitter.  

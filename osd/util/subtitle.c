@@ -18,6 +18,7 @@
 
 extern char air_unit_info_msg[255];
 extern int msg_colour;
+extern char ready_osdmsg[80];
 extern uint16_t character_map[MAX_OSD_WIDTH][MAX_OSD_HEIGHT];
 extern bool verbose;
 uint32_t subtitle_start_time = 0; // Start time in milliseconds
@@ -62,6 +63,24 @@ const char* get_color_name(uint8_t index) {
     return "unknown"; // Return "unknown" if the index is out of bounds
 }
 
+void remove_control_codes(char *str) {
+    int i, j;
+    for (i = 0, j = 0; str[i] != '\0'; i++) {
+        // Check for &L or &F followed by two digits
+        if (str[i] == '&' && (str[i+1] == 'L' || str[i+1] == 'F') && 
+            str[i+2] >= '0' && str[i+2] <= '9' && 
+            str[i+3] >= '0' && str[i+3] <= '9') {
+            // Skip the &LXX or &FXX substring
+            i += 3;
+        } else {
+            // Copy the character to the new position
+            str[j++] = str[i];
+        }
+    }
+    // Null-terminate the modified string
+    str[j] = '\0';
+}
+
 void write_srt_file() {
     static uint32_t last_flight_time = 0; // Store the last FlightTime written
 
@@ -99,8 +118,12 @@ void write_srt_file() {
     fprintf(srt_file, "%02u:%02u:%02u,%03u --> %02u:%02u:%02u,%03u\n",
             start_hours, start_minutes, start_seconds, start_milliseconds,
             end_hours, end_minutes, end_seconds, end_milliseconds);
-    fprintf(srt_file, "<font color=\"%s\">%s</font>\n\n", get_color_name(msg_colour), air_unit_info_msg);
-
+    if (msg_colour) // ground mode
+        fprintf(srt_file, "<font color=\"%s\">%s</font>\n\n", get_color_name(msg_colour), air_unit_info_msg);
+    else {// air mode
+        remove_control_codes(ready_osdmsg);
+        fprintf(srt_file, "%s\n\n", ready_osdmsg);
+    }
     // Increment the sequence number and update the last FlightTime written
     sequence_number++;
     last_flight_time = current_flight_time_seconds;
