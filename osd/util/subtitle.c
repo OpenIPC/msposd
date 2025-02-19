@@ -16,6 +16,8 @@
 #define EVENT_SIZE  (sizeof(struct inotify_event))
 #define BUF_LEN     (1024 * (EVENT_SIZE + NAME_MAX + 1))
 
+extern char air_unit_info_msg[255];
+extern int msg_colour;
 extern uint16_t character_map[MAX_OSD_WIDTH][MAX_OSD_HEIGHT];
 extern bool verbose;
 uint32_t subtitle_start_time = 0; // Start time in milliseconds
@@ -36,6 +38,28 @@ void write_osd_header(FILE *file) {
     // Add any additional header data here if needed
 
     fwrite(header, 1, HEADER_BYTES, file);
+}
+
+// Function to get the color name as a string
+const char* get_color_name(uint8_t index) {
+    // Array of color names corresponding to indices
+    static const char* colorNames[] = {
+        "unknown",  // Index 0
+        "red",  // Index 1
+        "green",    // Index 2
+        "blue",  // Index 3
+        "yellow",   // Index 4
+        "magenta", // Index 5
+        "cyan",   // Index 6
+        "white",  // Index 7
+        "black"   // Index 8
+    };
+
+    // Check if the index is within bounds
+    if (index < sizeof(colorNames) / sizeof(colorNames[0])) {
+        return colorNames[index]; // Return the color name if the index is valid
+    }
+    return "unknown"; // Return "unknown" if the index is out of bounds
 }
 
 void write_srt_file() {
@@ -75,7 +99,7 @@ void write_srt_file() {
     fprintf(srt_file, "%02u:%02u:%02u,%03u --> %02u:%02u:%02u,%03u\n",
             start_hours, start_minutes, start_seconds, start_milliseconds,
             end_hours, end_minutes, end_seconds, end_milliseconds);
-    fprintf(srt_file, "FlightTime: %u seconds\n\n", current_flight_time_seconds);
+    fprintf(srt_file, "<font color=\"%s\">%s</font>\n\n", get_color_name(msg_colour), air_unit_info_msg);
 
     // Increment the sequence number and update the last FlightTime written
     sequence_number++;

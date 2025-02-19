@@ -94,7 +94,7 @@ msposd has **alpha** support for mspVTX to Betaflight. use the `--mspvtx` switch
 
 msposd supports recording MSP DisplayPort messages to an OSD file. This can later be used to overlay the OSD if the video was recorded without it.
 The OSD file is compatible with the [walksnail-osd-tool](https://github.com/avsaase/walksnail-osd-tool).
-The SRT file is currently not very useful and is only generated for compatibility with walksnail-osd-tool.
+The SRT file records the additional MSPOSD.msg. This is not supported by walksnail-osd-tool but can be used in later video editing pipeline tools.
 
 This feature monitors the recording directory for newly started .mp4 files.
 Once detected, the SRT and OSD files will be created with the same name.
