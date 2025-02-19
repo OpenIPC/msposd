@@ -179,7 +179,7 @@ void check_recoding_file() {
         struct inotify_event *event = (struct inotify_event *) ptr;
 
         if (event->mask & IN_CLOSE_WRITE || event->mask & IN_CLOSE_NOWRITE) {
-            printf("Stopping OSD/STR writeing\n", event->name);
+            printf("Stopping OSD/STR writeing\n");
             if (srt_file) {
                 fclose(srt_file);
                 srt_file = NULL;
@@ -198,7 +198,7 @@ void check_recoding_file() {
 }
 
 // Function to handle new file creation
-void handle_new_file(const char* filename) {
+void handle_new_file(char* filename) {
     printf("New recording detected: %s\r\n", filename);
 
     // detected a new recodring, closeing current files
