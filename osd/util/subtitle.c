@@ -124,6 +124,8 @@ void write_srt_file() {
         remove_control_codes(ready_osdmsg);
         fprintf(srt_file, "%s\n\n", ready_osdmsg);
     }
+    fflush(srt_file);
+
     // Increment the sequence number and update the last FlightTime written
     sequence_number++;
     last_flight_time = current_flight_time_seconds;
@@ -149,6 +151,7 @@ void handle_osd_out() {
                 fwrite(&character_map[x][y], sizeof(uint16_t), 1, osd_file);
             }
         }
+        fflush(osd_file);
 	}
 }
 
