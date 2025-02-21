@@ -41,28 +41,6 @@ void write_osd_header(FILE *file) {
     fwrite(header, 1, HEADER_BYTES, file);
 }
 
-// Function to get the color name as a string
-const char* get_color_name(uint8_t index) {
-    // Array of color names corresponding to indices
-    static const char* colorNames[] = {
-        "unknown",  // Index 0
-        "red",  // Index 1
-        "green",    // Index 2
-        "blue",  // Index 3
-        "yellow",   // Index 4
-        "magenta", // Index 5
-        "cyan",   // Index 6
-        "white",  // Index 7
-        "black"   // Index 8
-    };
-
-    // Check if the index is within bounds
-    if (index < sizeof(colorNames) / sizeof(colorNames[0])) {
-        return colorNames[index]; // Return the color name if the index is valid
-    }
-    return "unknown"; // Return "unknown" if the index is out of bounds
-}
-
 void remove_control_codes(char *str) {
     int i, j;
     for (i = 0, j = 0; str[i] != '\0'; i++) {
@@ -82,7 +60,7 @@ void remove_control_codes(char *str) {
 }
 
 void write_srt_file() {
-    static uint32_t last_flight_time = 0; // Store the last FlightTime written
+    static uint32_t last_flight_time_seconds = 0; // Store the last FlightTime in seconds
 
     // Open the file if it hasn't been opened yet
     if (!srt_file) {
@@ -93,14 +71,16 @@ void write_srt_file() {
         }
     }
 
-    // Only write if the FlightTime has changed (by at least 1 second)
+    // Convert current time to seconds
     uint32_t current_flight_time_seconds = subtitle_current_time / 1000;
-    if (current_flight_time_seconds == last_flight_time) {
+
+    // Only write if the FlightTime has changed by at least 1 second
+    if (current_flight_time_seconds == last_flight_time_seconds) {
         return; // No change, do nothing
     }
 
     // Calculate start and end times in SRT format (HH:MM:SS,ms)
-    uint32_t start_time_ms = subtitle_current_time; // Start time in milliseconds
+    uint32_t start_time_ms = current_flight_time_seconds * 1000; // Start time in milliseconds (aligned to the second)
     uint32_t end_time_ms = start_time_ms + 1000; // Each subtitle lasts 1 second
 
     uint32_t start_hours = start_time_ms / 3600000;
@@ -118,9 +98,9 @@ void write_srt_file() {
     fprintf(srt_file, "%02u:%02u:%02u,%03u --> %02u:%02u:%02u,%03u\n",
             start_hours, start_minutes, start_seconds, start_milliseconds,
             end_hours, end_minutes, end_seconds, end_milliseconds);
-    if (msg_colour) // ground mode
-        fprintf(srt_file, "<font color=\"%s\">%s</font>\n\n", get_color_name(msg_colour), air_unit_info_msg);
-    else {// air mode
+    if (msg_colour) { // ground mode
+        fprintf(srt_file, "%s\n\n", air_unit_info_msg);
+    } else { // air mode
         remove_control_codes(ready_osdmsg);
         fprintf(srt_file, "%s\n\n", ready_osdmsg);
     }
@@ -128,7 +108,7 @@ void write_srt_file() {
 
     // Increment the sequence number and update the last FlightTime written
     sequence_number++;
-    last_flight_time = current_flight_time_seconds;
+    last_flight_time_seconds = current_flight_time_seconds;
 }
 
 void handle_osd_out() {
