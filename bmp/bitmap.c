@@ -686,16 +686,14 @@ MI_RGN_PaletteTable_t g_stPaletteTable = {{// index0 ~ index15
 	{0xFF, 0x00, 0xF8, 0xF8}, // 0x03FF -> Cyan
 	{0xFF, 0xFF, 0xFF, 0xFF}, // 0x7FFF -> White
 	{0xFF, 0x00, 0x00, 0x00}, // 0x0000 -> Black  index 8
-	{0xFF, 0x84, 0x10, 0x10}, //
+	{0xAF, 0x00, 0x00, 0x00}, // Semi transparent
 	{0xFF, 0x42, 0x08, 0x08}, //
 	{0xFF, 0x63, 0x18, 0xC6}, //
 	{0xFF, 0xAD, 0x52, 0xD6}, //
-	{0xFF, 0xCC, 0xCC, 0xCC}, // 0x739C -> Gray (Light)
+	{0xFF, 0xCC, 0xCC, 0xCC}, // 0x739C -> Gray (Light) {0xFF, 0xCC, 0xCC, 0xCC}
 	{0xFF, 0x77, 0x77, 0x77}, // 0x18C6 -> Gray (Dark)
-
 	{0x00, 0, 0, 0}, // transparent  index 15, 0x0A
 	{0x00, 0, 0, 0}, // 0x7BDE -> transparent
-
 	// index17 ~ index31
 	{0xFF, 0xF0, 0xF0, 0xF0}, // this is the predefined TRANSARANT Color index17
 	{0, 0, 255, 60}, {0, 128, 0, 90}, {255, 0, 0, 120}, {0, 255, 255, 150}, {255, 255, 0, 180},
@@ -1117,12 +1115,14 @@ int getRowStride(int width, int BitsPerPixel) {
 }
 
 void convertBitmap1555ToI4(
-	uint16_t *srcBitmap, uint32_t width, uint32_t height, uint8_t *destBitmap, int singleColor) {
+	uint16_t *srcBitmap, uint32_t width, uint32_t height, uint8_t *destBitmap, int singleColor, int colourBackground) {
 	MI_RGN_PaletteTable_t *paletteTable = &g_stPaletteTable;
 	// Calculate the number of bytes required per line without padding
-
+	 
 	if (singleColor == -1) // The color that we assume as transparent
 		singleColor = 15;
+	 
+
 	unsigned char u8Value = 0;
 	uint32_t u32Stride = (width + 1) / 2;
 
@@ -1154,6 +1154,8 @@ void convertBitmap1555ToI4(
 			if (paletteIndex != 15 & paletteIndex >= 0) {
 				paletteIndex = singleColor;
 			}
+			if (colourBackground>=0 && paletteIndex==15)
+				paletteIndex=colourBackground;
 
 			// No Fucking idea why this is different for x86 and Sigmastar, BUT
 			// !!! SigmaStar I4 format needs it reversit 4bit pairs.   0x0A,

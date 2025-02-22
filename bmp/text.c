@@ -25,7 +25,7 @@ static void copyimage(SFT_Image *dest, const SFT_Image *source, int x0, int y0, 
 			*/
 			unsigned char pixel = s[x];
 			// If the pixel is not zero (assuming non-zero means black)
-			if (pixel > 64)	   // 128 makes them too thin...
+			if (pixel > 96)	   // 128 makes them too thin... 64 is best
 				d[x] = 0x8000; // Set pixel to opaque black (ARGB1555: 1000 0000
 							   // 0000 0000)
 			else

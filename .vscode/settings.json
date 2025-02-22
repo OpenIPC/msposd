@@ -63,6 +63,7 @@
         "stdint-uintn.h": "c",
         "interface.h": "c",
         "valarray": "c",
-        "complex": "c"
+        "complex": "c",
+        "source_location": "c"
     }
 }
