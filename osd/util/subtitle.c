@@ -16,9 +16,9 @@
 #define EVENT_SIZE  (sizeof(struct inotify_event))
 #define BUF_LEN     (1024 * (EVENT_SIZE + NAME_MAX + 1))
 
-extern char air_unit_info_msg[255];
+extern char air_unit_info_msg[MAX_STATUS_MSG_LEN];
 extern int msg_colour;
-extern char ready_osdmsg[80];
+extern char ready_osdmsg[MAX_STATUS_MSG_LEN+100];
 extern uint16_t character_map[MAX_OSD_WIDTH][MAX_OSD_HEIGHT];
 extern bool verbose;
 uint32_t subtitle_start_time = 0; // Start time in milliseconds

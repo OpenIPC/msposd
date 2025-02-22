@@ -207,7 +207,6 @@ static int stat_attitudeDelay = 0;
 int RCWidgetX = 0;
 int RCWidgetY = 0;
 
-#define MAX_STATUS_MSG_LEN 500
 char air_unit_info_msg[MAX_STATUS_MSG_LEN];
 
 extern bool AbortNow;
@@ -1422,7 +1421,7 @@ void split_lines(char *str, char *lines[MAX_LINES], int *line_count) {
 }
 
 char osdmsg[MAX_STATUS_MSG_LEN];
-char ready_osdmsg[80];
+char ready_osdmsg[MAX_STATUS_MSG_LEN+100];
 
 bool DrawTextOnOSDBitmap(char *msg) {
 	char *font;	    
