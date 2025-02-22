@@ -24,6 +24,7 @@ extern bool verbose;
 uint32_t subtitle_start_time = 0; // Start time in milliseconds
 uint32_t subtitle_current_time = 0; // Current FlightTime in seconds
 uint32_t sequence_number = 1; // Subtitle sequence number
+uint32_t last_flight_time_seconds = 0; // Store the last FlightTime in seconds
 char* recording_dir = NULL;
 FILE* srt_file = NULL;
 FILE* osd_file = NULL;
@@ -60,7 +61,6 @@ void remove_control_codes(char *str) {
 }
 
 void write_srt_file() {
-    static uint32_t last_flight_time_seconds = 0; // Store the last FlightTime in seconds
 
     // Open the file if it hasn't been opened yet
     if (!srt_file) {
@@ -221,6 +221,7 @@ void handle_new_file(char* filename) {
     subtitle_start_time = 0;
     subtitle_current_time = 0;
     sequence_number = 1;
+    last_flight_time_seconds = 0;
 
     setup_recording_watch(filename);
 
