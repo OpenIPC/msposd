@@ -22,7 +22,7 @@ make osd-x86 VERBOSE=1
 cc msposd.c -I ./include -L/usr/lib/x86_64-linux-gnu/  -lcsfml-graphics -lcsfml-window -lcsfml-system -O1 -g -fsanitize=address -fno-omit-frame-pointer -Wall -Wextra -D_x86 -g -fsanitize=address -levent_core -o msposd
 
 #copy on cam
-scp -O ./release/star6e/msposd root@192.168.1.88:/usr/bin/msposd
+
 scp -O ./msposd_star6e root@192.168.1.88:/usr/bin/msposd
 
 on the camera

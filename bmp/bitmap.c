@@ -1117,12 +1117,14 @@ int getRowStride(int width, int BitsPerPixel) {
 }
 
 void convertBitmap1555ToI4(
-	uint16_t *srcBitmap, uint32_t width, uint32_t height, uint8_t *destBitmap, int singleColor) {
+	uint16_t *srcBitmap, uint32_t width, uint32_t height, uint8_t *destBitmap, int singleColor, int colourBackground) {
 	MI_RGN_PaletteTable_t *paletteTable = &g_stPaletteTable;
 	// Calculate the number of bytes required per line without padding
-
+	 
 	if (singleColor == -1) // The color that we assume as transparent
 		singleColor = 15;
+	 
+
 	unsigned char u8Value = 0;
 	uint32_t u32Stride = (width + 1) / 2;
 
@@ -1154,6 +1156,8 @@ void convertBitmap1555ToI4(
 			if (paletteIndex != 15 & paletteIndex >= 0) {
 				paletteIndex = singleColor;
 			}
+			if (colourBackground>=0 && paletteIndex==15)
+				paletteIndex=colourBackground;
 
 			// No Fucking idea why this is different for x86 and Sigmastar, BUT
 			// !!! SigmaStar I4 format needs it reversit 4bit pairs.   0x0A,
