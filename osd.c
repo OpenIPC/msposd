@@ -79,8 +79,6 @@ enum { MAX_DISPLAY_X = 60, MAX_DISPLAY_Y = 22 };
 // supported.
 #define MSP_DISPLAY_SIZE_VERSION 45
 
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
-
 extern FrequencyChannel fc_list[MAX_ENTRIES]; // Array to store frequency-channel pairs
 
 typedef struct msp_cache_entry_s {
@@ -1325,7 +1323,7 @@ void fill(char *str) {
 				else if (msg_colour_background == 1)
 					msg_colour_background = COLOR_BLACK;
 				else if (msg_colour_background == 8)
-					msg_colour_background = 10;//dark_gray
+					msg_colour_background = 9;//semi-transparent
 				else if (msg_colour_background == 9)//remove it, i.e. make it transparent
 					msg_colour_background = -1;
 				else
@@ -1498,9 +1496,9 @@ bool DrawTextOnOSDBitmap(char *msg) {
 
 		RECT rect;// = measure_text(font, osds[FULL_OVERLAY_ID].size, out);
 
-		if (bitmapText.pData != NULL) {
-			bitmapText.pData = NULL;
-			free(bitmapText.pData);			
+		if (bitmapText.pData != NULL) {			
+			free(bitmapText.pData);		
+			bitmapText.pData = NULL;	
 		}
 		char *lines[MAX_LINES];  // Array to hold pointers to each line
     	int line_count = 0;
@@ -1526,6 +1524,7 @@ bool DrawTextOnOSDBitmap(char *msg) {
 				bitmapText.pData, bitmapText.u32Width, bitmapText.u32Height,			
 				0, 0, MIN(bitmapTextLine.u32Width,bitmapText.u32Width) , MIN(bitmapTextLine.u32Height, bitmapText.u32Height), 
 				0, i*rect.height);
+			free(bitmapTextLine.pData);  // Free the memory allocated by raster_text !!!
 		}
 
 		if (PIXEL_FORMAT_DEFAULT ==
