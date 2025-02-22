@@ -200,7 +200,9 @@ static uint64_t last_MSP_ATTITUDE = 0;
 static int stat_attitudeDelay = 0;
 int RCWidgetX = 0;
 int RCWidgetY = 0;
-char air_unit_info_msg[255];
+
+#define MAX_STATUS_MSG_LEN 500
+char air_unit_info_msg[MAX_STATUS_MSG_LEN];
 
 extern bool AbortNow;
 extern bool verbose;
@@ -1107,7 +1109,7 @@ static void draw_Ladder() {
 
 static int droppedTTL = 0;
 static bool first_wfb_read = true;
-#define MAX_STATUS_MSG_LEN 500
+
 
 void fill(char *str) {
 	unsigned int rxb_l, txb_l, cpu_l[7];
@@ -1416,7 +1418,7 @@ void split_lines(char *str, char *lines[MAX_LINES], int *line_count) {
 char osdmsg[MAX_STATUS_MSG_LEN];
 
 bool DrawTextOnOSDBitmap(char *msg) {
-	char *font;
+	char *font;	    
 #ifdef _x86
 	asprintf(&font, "fonts/%s.ttf", osds[FULL_OVERLAY_ID].font);
 #else
