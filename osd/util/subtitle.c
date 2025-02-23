@@ -184,8 +184,8 @@ void check_recoding_file() {
     for (char *ptr = buffer; ptr < buffer + len; ) {
         struct inotify_event *event = (struct inotify_event *) ptr;
 
-        if (event->mask & IN_CLOSE_WRITE || event->mask & IN_CLOSE_NOWRITE) {
-            printf("Stopping OSD/STR writeing\n");
+        if (event->mask & IN_CLOSE_WRITE) {
+            printf("Stopping OSD/SRT writeing\n");
             if (srt_file) {
                 fclose(srt_file);
                 srt_file = NULL;
@@ -195,12 +195,11 @@ void check_recoding_file() {
                 osd_file = NULL;
             }
             recording_running = false;
+            inotify_rm_watch(inotify_fd, watch_desc);
+            close(inotify_fd);            
         }
         ptr += EVENT_SIZE + event->len;
     }
-
-    inotify_rm_watch(inotify_fd, watch_desc);
-    close(inotify_fd);
 }
 
 // Function to handle new file creation
@@ -276,7 +275,8 @@ void inotify_callback(evutil_socket_t fd, short events, void* arg) {
             snprintf(filename, PATH_MAX, "%s/%s", (const char*) arg, event->name);
 
             // Filter file names
-            if (strstr(event->name, ".mp4") != NULL) {
+            if (strlen(event->name) >= 4 && 
+                strcmp(event->name + strlen(event->name) - 4, ".mp4") == 0) {
                 // Handle the new file
                 handle_new_file(filename);
             } else {
