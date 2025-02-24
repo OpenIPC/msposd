@@ -93,18 +93,22 @@ void write_srt_file() {
     uint32_t end_seconds = (end_time_ms % 60000) / 1000;
     uint32_t end_milliseconds = end_time_ms % 1000;
 
-    // Write the subtitle to the file
-    fprintf(srt_file, "%u\n", sequence_number);
-    fprintf(srt_file, "%02u:%02u:%02u,%03u --> %02u:%02u:%02u,%03u\n",
-            start_hours, start_minutes, start_seconds, start_milliseconds,
-            end_hours, end_minutes, end_seconds, end_milliseconds);
-    if (msg_colour) { // ground mode
-        fprintf(srt_file, "%s\n\n", air_unit_info_msg);
-    } else { // air mode
-        remove_control_codes(ready_osdmsg);
-        fprintf(srt_file, "%s\n\n", ready_osdmsg);
+    if ( strlen(air_unit_info_msg) || strlen(ready_osdmsg) ) {
+        // Write the subtitle to the file
+        fprintf(srt_file, "%u\n", sequence_number);
+        fprintf(srt_file, "%02u:%02u:%02u,%03u --> %02u:%02u:%02u,%03u\n",
+                start_hours, start_minutes, start_seconds, start_milliseconds,
+                end_hours, end_minutes, end_seconds, end_milliseconds);
+        if (msg_colour) { // ground mode
+            fprintf(srt_file, "%s\n\n", air_unit_info_msg);
+        } else { // air mode
+            remove_control_codes(ready_osdmsg);
+            fprintf(srt_file, "%s\n\n", ready_osdmsg);
+        }
+        fflush(srt_file);
+    } else { 
+        return;
     }
-    fflush(srt_file);
 
     // Increment the sequence number and update the last FlightTime written
     sequence_number++;
