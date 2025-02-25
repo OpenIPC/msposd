@@ -1421,7 +1421,7 @@ void split_lines(char *str, char *lines[MAX_LINES], int *line_count) {
 }
 
 char osdmsg[MAX_STATUS_MSG_LEN];
-char ready_osdmsg[MAX_STATUS_MSG_LEN+100];
+char ready_osdmsg[MAX_STATUS_MSG_LEN+1];
 
 bool DrawTextOnOSDBitmap(char *msg) {
 	char *font;	    
