@@ -18,13 +18,14 @@
 
 extern char air_unit_info_msg[MAX_STATUS_MSG_LEN];
 extern int msg_colour;
-extern char ready_osdmsg[MAX_STATUS_MSG_LEN+100];
+extern char ready_osdmsg[MAX_STATUS_MSG_LEN+1];
 extern uint16_t character_map[MAX_OSD_WIDTH][MAX_OSD_HEIGHT];
 extern bool verbose;
 uint32_t subtitle_start_time = 0; // Start time in milliseconds
 uint32_t subtitle_current_time = 0; // Current FlightTime in seconds
 uint32_t sequence_number = 1; // Subtitle sequence number
-uint32_t last_flight_time_seconds = 0; // Store the last FlightTime in seconds
+uint32_t last_flight_time_ms = 0; // Store the last FlightTime in milli-seconds
+static unsigned int last_hash = 0; // Store the last OSD message HASH
 char* recording_dir = NULL;
 FILE* srt_file = NULL;
 FILE* osd_file = NULL;
@@ -32,6 +33,18 @@ char* srt_file_name = NULL;
 char* osd_file_name = NULL;
 bool recording_running = false;
 
+#define FNV_32_INIT  0x811c9dc5
+#define FNV_32_PRIME 0x01000193
+
+// FNV-1a HASH
+unsigned int fnv1a_hash(const char *str) {
+    unsigned int hash = FNV_32_INIT;
+    while (*str) {
+        hash ^= (unsigned char)(*str++);
+        hash *= FNV_32_PRIME;
+    }
+    return hash;
+}
 
 // Function to write Walksnail OSD header
 void write_osd_header(FILE *file) {
@@ -71,17 +84,21 @@ void write_srt_file() {
         }
     }
 
-    // Convert current time to seconds
-    uint32_t current_flight_time_seconds = subtitle_current_time / 1000;
+    unsigned int current_hash = 0;
+    if (msg_colour) { // ground mode
+        current_hash = fnv1a_hash(air_unit_info_msg);
+    } else { // air mode
+        current_hash = fnv1a_hash(ready_osdmsg);
+    }
 
-    // Only write if the FlightTime has changed by at least 1 second
-    if (current_flight_time_seconds == last_flight_time_seconds) {
-        return; // No change, do nothing
+    if ( current_hash == last_hash 
+        && (subtitle_current_time - last_flight_time_ms < 1000)) {
+        return;
     }
 
     // Calculate start and end times in SRT format (HH:MM:SS,ms)
-    uint32_t start_time_ms = current_flight_time_seconds * 1000; // Start time in milliseconds (aligned to the second)
-    uint32_t end_time_ms = start_time_ms + 1000; // Each subtitle lasts 1 second
+    uint32_t start_time_ms = last_flight_time_ms;
+    uint32_t end_time_ms = subtitle_current_time;
 
     uint32_t start_hours = start_time_ms / 3600000;
     uint32_t start_minutes = (start_time_ms % 3600000) / 60000;
@@ -112,7 +129,8 @@ void write_srt_file() {
 
     // Increment the sequence number and update the last FlightTime written
     sequence_number++;
-    last_flight_time_seconds = current_flight_time_seconds;
+    last_flight_time_ms = subtitle_current_time;
+    last_hash = current_hash;
 }
 
 void handle_osd_out() {
@@ -224,7 +242,7 @@ void handle_new_file(char* filename) {
     subtitle_start_time = 0;
     subtitle_current_time = 0;
     sequence_number = 1;
-    last_flight_time_seconds = 0;
+    last_flight_time_ms = 0;
 
     setup_recording_watch(filename);
 
@@ -279,12 +297,13 @@ void inotify_callback(evutil_socket_t fd, short events, void* arg) {
             snprintf(filename, PATH_MAX, "%s/%s", (const char*) arg, event->name);
 
             // Filter file names
-            if (strlen(event->name) >= 4 && 
-                strcmp(event->name + strlen(event->name) - 4, ".mp4") == 0) {
+            int len = strlen(event->name);
+            if ((len >= 4 && strcmp(event->name + len - 4, ".mp4") == 0) ||
+                (len >= 4 && strcmp(event->name + len - 4, ".mkv") == 0)) {
                 // Handle the new file
                 handle_new_file(filename);
             } else {
-                printf("Ignoring non-.mp4 file: %s\n", event->name);
+                printf("Ignoring non-.mp4/.mkv file: %s\n", event->name);
             }
         }
 
