@@ -85,11 +85,14 @@ void write_srt_file() {
     }
 
     unsigned int current_hash = 0;
-    if (msg_colour) { // ground mode
-        current_hash = fnv1a_hash(air_unit_info_msg);
-    } else { // air mode
-        current_hash = fnv1a_hash(ready_osdmsg);
+    char *current_message = "No MSPOSD.msg available";
+    if (msg_colour && '\0' != air_unit_info_msg[0]) { // ground mode
+        current_message = air_unit_info_msg;
+    } else if ('\0' != ready_osdmsg[0]) { // air mode
+        current_message = ready_osdmsg;
+        remove_control_codes(current_message);
     }
+    current_hash = fnv1a_hash(current_message);
 
     if ( current_hash == last_hash 
         && (subtitle_current_time - last_flight_time_ms < 1000)) {
@@ -110,22 +113,13 @@ void write_srt_file() {
     uint32_t end_seconds = (end_time_ms % 60000) / 1000;
     uint32_t end_milliseconds = end_time_ms % 1000;
 
-    if ( strlen(air_unit_info_msg) || strlen(ready_osdmsg) ) {
-        // Write the subtitle to the file
-        fprintf(srt_file, "%u\n", sequence_number);
-        fprintf(srt_file, "%02u:%02u:%02u,%03u --> %02u:%02u:%02u,%03u\n",
-                start_hours, start_minutes, start_seconds, start_milliseconds,
-                end_hours, end_minutes, end_seconds, end_milliseconds);
-        if (msg_colour) { // ground mode
-            fprintf(srt_file, "%s\n\n", air_unit_info_msg);
-        } else { // air mode
-            remove_control_codes(ready_osdmsg);
-            fprintf(srt_file, "%s\n\n", ready_osdmsg);
-        }
-        fflush(srt_file);
-    } else { 
-        return;
-    }
+    // Write the subtitle to the file
+    fprintf(srt_file, "%u\n", sequence_number);
+    fprintf(srt_file, "%02u:%02u:%02u,%03u --> %02u:%02u:%02u,%03u\n",
+            start_hours, start_minutes, start_seconds, start_milliseconds,
+            end_hours, end_minutes, end_seconds, end_milliseconds);
+    fprintf(srt_file, "%s\n\n", current_message);
+    fflush(srt_file);
 
     // Increment the sequence number and update the last FlightTime written
     sequence_number++;
