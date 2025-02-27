@@ -1386,15 +1386,17 @@ int main(int argc, char **argv) {
 			matrix_size = atoi(optarg);
 			break;
 
-		case 'z':
+		case 'z': {
 			char buffer[16];
 			strncpy(buffer, optarg, sizeof(buffer));
 			char *limit = strchr(buffer, 'x');
 			if (limit) {
-				buffer[limit - buffer] = '\0';
+				*limit = '\0';
 				set_resolution(atoi(buffer), atoi(limit + 1));
+				DrawOSD = true;
 			}
 			break;
+		}
 
 		case '1':
 			mspVTXenabled = true;

@@ -678,7 +678,7 @@ int msg_layout = 0;
 /// white font
 int msg_colour = 0;
 
-int msg_colour_background=-1;
+int msg_colour_background = -1;
 
 static unsigned long long LastCleared = 0;
 static bool osd_msg_enabled = false;
@@ -1110,10 +1110,9 @@ static void draw_Ladder() {
 static int droppedTTL = 0;
 static bool first_wfb_read = true;
 
-
 void fill(char *str) {
 	unsigned int rxb_l, txb_l, cpu_l[7];
-	char out[MAX_STATUS_MSG_LEN+100] = "";
+	char out[MAX_STATUS_MSG_LEN + 100] = "";
 	char param = 0;
 	int ipos = 0, opos = 0;
 
@@ -1311,30 +1310,29 @@ void fill(char *str) {
 					msg_colour--;
 
 				ipos += 3;
-			}			
-		} else if (str[ipos + 1] == 'G' && isdigit(str[ipos + 2]) ) {
-			if (!DrawOSD) {// we need to keep &Cx
+			}
+		} else if (str[ipos + 1] == 'G' && isdigit(str[ipos + 2])) {
+			if (!DrawOSD) { // we need to keep &Cx
 				strncat(out, str + ipos, 1);
 				opos++;
 			} else {
 				// Extract the one digit after $C as an integer
-				 
-				msg_colour_background = str[ipos + 2]-'0';
+
+				msg_colour_background = str[ipos + 2] - '0';
 				if (msg_colour_background == 0)
 					msg_colour_background = COLOR_WHITE;
 				else if (msg_colour_background == 1)
 					msg_colour_background = COLOR_BLACK;
 				else if (msg_colour_background == 8)
-					msg_colour_background = 9;//semi-transparent
-				else if (msg_colour_background == 9)//remove it, i.e. make it transparent
+					msg_colour_background = 9;		 // semi-transparent
+				else if (msg_colour_background == 9) // remove it, i.e. make it transparent
 					msg_colour_background = -1;
 				else
 					msg_colour_background--;
- 
+
 				ipos += 2;
 			}
-		}
-		else if (str[ipos + 1] == '&') {
+		} else if (str[ipos + 1] == '&') {
 			ipos++;
 			strcat(out, "&");
 			opos++;
@@ -1398,27 +1396,26 @@ void remove_carriage_returns(char *out) {
 	out[j] = '\0'; // Null-terminate the modified string
 }
 
-
-#define MAX_LINES 100  // Maximum number of lines we expect to handle
+#define MAX_LINES 100 // Maximum number of lines we expect to handle
 void split_lines(char *str, char *lines[MAX_LINES], int *line_count) {
-    *line_count = 0;  // Initialize the line count
-    lines[(*line_count)++] = str;  // Store the pointer to the first line
+	*line_count = 0;			  // Initialize the line count
+	lines[(*line_count)++] = str; // Store the pointer to the first line
 
-    while (*str) {
-        if (*str == '\n') {//'@'
-            *str = '\0';  // Replace the carriage return with a null terminator
-            if (*(str + 1) != '\0') {  // Check if it's not the end of the string
-                lines[(*line_count)++] = str + 1;  // Store the pointer to the next line
-            }
-        }
-        str++;
-    }
+	while (*str) {
+		if (*str == '\n') {			  //'@'
+			*str = '\0';			  // Replace the carriage return with a null terminator
+			if (*(str + 1) != '\0') { // Check if it's not the end of the string
+				lines[(*line_count)++] = str + 1; // Store the pointer to the next line
+			}
+		}
+		str++;
+	}
 }
 
 char osdmsg[MAX_STATUS_MSG_LEN];
 
 bool DrawTextOnOSDBitmap(char *msg) {
-	char *font;	    
+	char *font;
 #ifdef _x86
 	asprintf(&font, "fonts/%s.ttf", osds[FULL_OVERLAY_ID].font);
 #else
@@ -1475,7 +1472,7 @@ bool DrawTextOnOSDBitmap(char *msg) {
 		if (!DrawOSD && out_sock > 0) { // send the line to the ground
 			static uint8_t msg_buffer[256];
 			static uint8_t payload_buffer[256];
-			//out[79] = 0; // just in case
+			// out[79] = 0; // just in case
 			int msglen = strlen(&out[0]);
 
 			payload_buffer[0] = MSP_DISPLAYPORT_INFO_MSG;
@@ -1495,38 +1492,40 @@ bool DrawTextOnOSDBitmap(char *msg) {
 		if ((osds[FULL_OVERLAY_ID].size < 5.0) || (osds[FULL_OVERLAY_ID].size > 99.0))
 			osds[FULL_OVERLAY_ID].size = 20.0;
 
+		RECT rect; // = measure_text(font, osds[FULL_OVERLAY_ID].size, out);
 
-		RECT rect;// = measure_text(font, osds[FULL_OVERLAY_ID].size, out);
-
-		if (bitmapText.pData != NULL) {			
-			free(bitmapText.pData);		
-			bitmapText.pData = NULL;	
+		if (bitmapText.pData != NULL) {
+			free(bitmapText.pData);
+			bitmapText.pData = NULL;
 		}
-		char *lines[MAX_LINES];  // Array to hold pointers to each line
-    	int line_count = 0;
-				
-    	split_lines(out, lines, &line_count);//Here we will modify the message
-		int maxwidth=0;
-    	
-    	for (int i = 0; i < line_count; i++) {
-        	//printf("OSD Statistics Line %d: %s\n", i + 1, lines[i]);
-			rect = measure_text(font, osds[FULL_OVERLAY_ID].size, lines[i]);			
-			maxwidth=(rect.width>maxwidth)?rect.width:maxwidth;
-    	}		
-		
-		bitmapText.u32Height = line_count * rect.height ;// preview_height;//rows *		
-		bitmapText.u32Width = MIN( (maxwidth + 15) & ~15, bmpBuff.u32Width-16) ;// should be multiple of 16 OVERLAY_WIDTH-16 
-		bitmapText.pData = (unsigned char *) malloc(bitmapText.u32Height * getRowStride(bitmapText.u32Width, 16));
+		char *lines[MAX_LINES]; // Array to hold pointers to each line
+		int line_count = 0;
+
+		split_lines(out, lines, &line_count); // Here we will modify the message
+		int maxwidth = 0;
+
+		for (int i = 0; i < line_count; i++) {
+			// printf("OSD Statistics Line %d: %s\n", i + 1, lines[i]);
+			rect = measure_text(font, osds[FULL_OVERLAY_ID].size, lines[i]);
+			maxwidth = (rect.width > maxwidth) ? rect.width : maxwidth;
+		}
+
+		bitmapText.u32Height = line_count * rect.height; // preview_height;//rows *
+		bitmapText.u32Width = MIN((maxwidth + 15) & ~15,
+			bmpBuff.u32Width - 16); // should be multiple of 16 OVERLAY_WIDTH-16
+		bitmapText.pData =
+			(unsigned char *)malloc(bitmapText.u32Height * getRowStride(bitmapText.u32Width, 16));
 		memset(bitmapText.pData, 0, bitmapText.u32Height * getRowStride(bitmapText.u32Width, 16));
 
-		for(int i=0;i<line_count;i++){			
-			BITMAP bitmapTextLine = raster_text(font, osds[FULL_OVERLAY_ID].size, lines[i]); // allocates new bitmap, Bus error on goke ?!
-			//raster_text always return argb1555
-			copyRectARGB1555(bitmapTextLine.pData, bitmapTextLine.u32Width, bitmapTextLine.u32Height, 
-				bitmapText.pData, bitmapText.u32Width, bitmapText.u32Height,			
-				0, 0, MIN(bitmapTextLine.u32Width,bitmapText.u32Width) , MIN(bitmapTextLine.u32Height, bitmapText.u32Height), 
-				0, i*rect.height);
-			free(bitmapTextLine.pData);  // Free the memory allocated by raster_text !!!
+		for (int i = 0; i < line_count; i++) {
+			BITMAP bitmapTextLine = raster_text(font, osds[FULL_OVERLAY_ID].size,
+				lines[i]); // allocates new bitmap, Bus error on goke ?!
+			// raster_text always return argb1555
+			copyRectARGB1555(bitmapTextLine.pData, bitmapTextLine.u32Width,
+				bitmapTextLine.u32Height, bitmapText.pData, bitmapText.u32Width,
+				bitmapText.u32Height, 0, 0, MIN(bitmapTextLine.u32Width, bitmapText.u32Width),
+				MIN(bitmapTextLine.u32Height, bitmapText.u32Height), 0, i * rect.height);
+			free(bitmapTextLine.pData); // Free the memory allocated by raster_text !!!
 		}
 
 		if (PIXEL_FORMAT_DEFAULT ==
@@ -1537,7 +1536,7 @@ bool DrawTextOnOSDBitmap(char *msg) {
 								  getRowStride(bitmapText.u32Width, PIXEL_FORMAT_BitsPerPixel));
 
 			convertBitmap1555ToI4(bitmapText.pData, bitmapText.u32Width, bitmapText.u32Height,
-				destBitmap, msg_colour,msg_colour_background);
+				destBitmap, msg_colour, msg_colour_background);
 
 			free(bitmapText.pData); // free ARGB1555 bitmap
 			// This is inefficient, we use 4 times more memory, but the buffer
