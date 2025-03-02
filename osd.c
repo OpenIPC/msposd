@@ -54,6 +54,9 @@
 #include "osd/util/interface.h"
 #include "osd/util/settings.h"
 
+#include "osd.h"
+#include "osd/util/subtitle.h"
+
 #define CPU_TEMP_PATH "/sys/devices/platform/soc/f0a00000.apb/f0a71000.omc/temp1"
 #define AU_VOLTAGE_PATH "/sys/devices/platform/soc/f0a00000.apb/f0a71000.omc/voltage4"
 
@@ -96,7 +99,7 @@ char _port_name[80];
 
 static uint8_t message_buffer[256]; // only needs to be the maximum size of an
 									// MSP packet, we only care to fwd MSP
-static char current_fc_identifier[4];
+char current_fc_identifier[4];
 static char current_fc_identifier_end_of_string = 0x00;
 
 /* For compressed full-frame transmission */
@@ -161,6 +164,9 @@ extern bool armed;
 extern bool vtxInitDone;
 extern bool DrawOSD;
 
+// SRT/OSD
+extern bool recording_running;
+
 static void send_display_size(int serial_fd) {
 	uint8_t buffer[8];
 	uint8_t payload[2] = {MAX_DISPLAY_X, MAX_DISPLAY_Y};
@@ -201,7 +207,6 @@ static int stat_attitudeDelay = 0;
 int RCWidgetX = 0;
 int RCWidgetY = 0;
 
-#define MAX_STATUS_MSG_LEN 500
 char air_unit_info_msg[MAX_STATUS_MSG_LEN];
 
 extern bool AbortNow;
@@ -1413,6 +1418,7 @@ void split_lines(char *str, char *lines[MAX_LINES], int *line_count) {
 }
 
 char osdmsg[MAX_STATUS_MSG_LEN];
+char ready_osdmsg[MAX_STATUS_MSG_LEN+1];
 
 bool DrawTextOnOSDBitmap(char *msg) {
 	char *font;
@@ -1481,6 +1487,9 @@ bool DrawTextOnOSDBitmap(char *msg) {
 			construct_msp_command(
 				msg_buffer, MSP_CMD_DISPLAYPORT, &payload_buffer[0], 80, MSP_INBOUND);
 			sendto(out_sock, msg_buffer, 100, 0, (struct sockaddr *)&sin_out, sizeof(sin_out));
+
+			// store ready osdmsg to be used in subtitle srt writeing
+			memcpy(&ready_osdmsg[0], &out[0], msglen + 1);
 
 			// printf("Sent text msg : %s\n",out);
 			return false;
@@ -1984,6 +1993,12 @@ static void draw_complete() {
 		char msg[200];
 		sprintf(msg, "&F38 &L43 Identifying Flight Controller...", font_load_name);
 		SetOSDMsg(msg);
+	}
+
+	if (recording_running) {
+		handle_osd_out();
+		write_srt_file();
+		check_recoding_file();
 	}
 
 #ifdef _x86

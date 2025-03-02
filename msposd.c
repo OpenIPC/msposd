@@ -16,6 +16,7 @@
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/inotify.h>
 
 #include <event2/buffer.h>
 #include <event2/bufferevent.h>
@@ -47,6 +48,7 @@ bool ParseMSP = true;
 bool DrawOSD = false;
 bool mspVTXenabled = false;
 bool vtxMenuEnabled = false;
+extern char* recording_dir;
 
 // libevent base main loop
 struct event_base *base = NULL;
@@ -107,6 +109,7 @@ static void print_usage() {
 		"	-x --matrix      OSD matrix (0: 53:20, 1: 50:18 chars)\n"
 		"	-z --size        Set OSD resolution\n"
 		"	   --mspvtx      Enable mspvtx support\n"
+        "      --subtitle <path>  Enable OSD/SRT recording\n"
 		"	-v --verbose     Show debug info\n"
 		"	-h --help        Display this help\n",
 			default_master, default_baudrate, default_out_addr);
@@ -1194,6 +1197,40 @@ static int handle_data(const char *port_name, int baudrate, const char *out_addr
 	event_add(stdin_event, NULL);
 #endif
 
+	//SRT/OSD Recording
+	if (recording_dir) {
+		printf("SRT/OSD recording enabled for directory: %s\n",recording_dir);
+
+		int inotify_fd, watch_fd;
+
+		// Initialize inotify
+		inotify_fd = inotify_init();
+		if (inotify_fd < 0) {
+			perror("inotify_init");
+			return 1;
+		}
+
+		// Add a watch for the directory
+		watch_fd = inotify_add_watch(inotify_fd, recording_dir, IN_CREATE);
+		if (watch_fd < 0) {
+			perror("inotify_add_watch");
+			close(inotify_fd);
+			return 1;
+		}
+
+		// Create an event for the inotify file descriptor
+		struct event* inotify_event = event_new(base, inotify_fd, EV_READ | EV_PERSIST, inotify_callback, (void*) recording_dir);
+		if (!inotify_event) {
+			fprintf(stderr, "Could not create event!\n");
+			event_base_free(base);
+			close(inotify_fd);
+			return 1;
+		}
+
+		// Add the event to the event base
+		event_add(inotify_event, NULL);		
+	}	
+
 	if (temp) {
 		if (GetTempSigmaStar() > -90) {
 			temp = 2; // SigmaStar
@@ -1290,6 +1327,7 @@ int main(int argc, char **argv) {
 		{"matrix", required_argument, NULL, 'x'},
 		{"size", required_argument, NULL, 'z'},
 		{"mspvtx", no_argument, NULL, '1'},
+		{"subtitle", required_argument, NULL, 's'},
 		{"verbose", no_argument, NULL, 'v'},
 		{"help", no_argument, NULL, 'h'},
 		{NULL, 0, NULL, 0}
@@ -1400,6 +1438,10 @@ int main(int argc, char **argv) {
 
 		case '1':
 			mspVTXenabled = true;
+			break;
+
+		case 's':
+		    recording_dir = strdup(optarg);
 			break;
 
 		case 'v':

@@ -3,7 +3,7 @@ VERSION_STRING := $(shell date +"%Y%m%d_%H%M%S")
 CFLAGS ?=
 CFLAGS += -Wno-address-of-packed-member -DVERSION_STRING="\"$(VERSION_STRING)\""
 
-SRCS := compat.c msposd.c bmp/bitmap.c bmp/region.c bmp/lib/schrift.c bmp/text.c osd/net/network.c osd/msp/msp.c osd/msp/msp_displayport.c libpng/lodepng.c osd/util/interface.c osd/util/settings.c osd/util/ini_parser.c osd/msp/vtxmenu.c
+SRCS := compat.c msposd.c bmp/bitmap.c bmp/region.c bmp/lib/schrift.c bmp/text.c osd/net/network.c osd/msp/msp.c osd/msp/msp_displayport.c libpng/lodepng.c osd/util/interface.c osd/util/settings.c osd/util/ini_parser.c osd/msp/vtxmenu.c osd/util/subtitle.c
 OUTPUT ?= $(PWD)
 BUILD = $(CC) $(SRCS) -I $(SDK)/include -I$(TOOLCHAIN)/usr/include -I$(PWD) -L$(DRV) $(CFLAGS) $(LIB) -levent_core -Os -s $(CFLAGS) -o $(OUTPUT)
 
