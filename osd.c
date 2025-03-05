@@ -461,6 +461,10 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 		last_heading = *(int16_t *)&msp_message->payload[4];
 		stat_msp_msg_attitude++;
 		stat_attitudeDelay = get_time_ms() - last_MSP_ATTITUDE;
+
+		if (strncmp(current_fc_identifier, "ARDU", 4) == 0)
+			if (abs(last_roll) < 900) // ARDU Pilot needs this fix to revert vertical AHI Direction
+				last_pitch = -last_pitch;
 		// printf("\n Got MSG_ATTITUDE            pitch:%d  roll:%d\n", pitch,
 		// roll);
 		break;
@@ -811,14 +815,17 @@ static void draw_Ladder() {
 		// Line always drawn in the center to have some orientation where the
 		// center is
 		int line_w = 100 * horizonWidth * 0.2;
-
 		LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, px - 20, pos_y - 3, px + 20,
-			pos_y - 3, COLOR_GRAY_Light, 2);
+			pos_y - 3, (fabs(roll_degree) > 20) ? COLOR_YELLOW : COLOR_GRAY_Light,
+			(fabs(roll_degree) > 20) ? 3 : 2);
 
 		LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, px + width_ladder - 20, pos_y - 3,
-			px + width_ladder + 20, pos_y - 3, COLOR_GRAY_Light, 2);
+			px + width_ladder + 20, pos_y - 3,
+			(fabs(roll_degree) > 20) ? COLOR_YELLOW : COLOR_GRAY_Light,
+			(fabs(roll_degree) > 20) ? 3 : 2);
 	}
 
+	int osd_font_size = 18;
 	int ratio = horizonSpacing; // pixels per degree
 	int vrange = horizonRange;	// total vertical range in degrees
 	int step = horizonStep;		// degrees per line
@@ -909,6 +916,15 @@ static void draw_Ladder() {
 						(px + width_ladder * 2 / 3) + width_ladder / 3 - 1, y, m_color,
 						subline_thickness); // Top side
 
+#if defined(_x86) || defined(__ROCKCHIP__)
+					char buff_sub_line[6];
+					if (abs(last_pitch) > 150) {
+						sprintf(buff_sub_line, "%d°", n);
+						drawText(buff_sub_line, (px + width_ladder / 2) - 12, y + 8,
+							getcolor(COLOR_WHITE), osd_font_size, true, 1);
+					}
+#endif
+
 				} else if (i < 0) {
 					// Lower ladders
 					// default to stroke strength of 2 (I think it is pixels)
@@ -975,6 +991,15 @@ static void draw_Ladder() {
 					LineTranspose(bmpBuff.pData, px + (width_ladder * .9166), y,
 						px + (width_ladder * .9166) + width_ladder / 12, y, m_color,
 						subline_thickness); // Top side
+
+#if defined(_x86) || defined(__ROCKCHIP__)
+					char buff_sub_line[6];
+					if (abs(last_pitch) > 150) {
+						sprintf(buff_sub_line, "%d°", n);
+						drawText(buff_sub_line, (px + width_ladder / 2) - 16, y + 4,
+							getcolor(COLOR_WHITE), osd_font_size, true, 1);
+					}
+#endif
 				}
 			} else { // i==0
 				// Main AHI Line
@@ -995,16 +1020,28 @@ static void draw_Ladder() {
 				rect_width = rect_width - spacing; // Length of a small line
 				// Calculate the starting X position for the first rectangle
 				int start_x = pos_x - width_ladder * 2.5 / 2;
-
+				int ahi_colour=COLOR_WHITE;
 				// Draw 6 rectangles in a line
 				for (int i = 0; i < fragments; i++) {
 					// Calculate the X position for the current rectangle
 					int rect_x = start_x + i * (rect_width + spacing) + spacing / 2;
 
-					bool isPlaneLevel =
-						(-2 < last_pitch / 10 && last_pitch / 10 < 2) && (i == 2 || i == 3);
+					int ahi_thickness = 3;
+					int ahi_line_color = COLOR_WHITE;
+					if ((i == 2 || i == 3)) {
+						if (abs(last_pitch) < 20)
+							ahi_colour = COLOR_GREEN;
+						else if (abs(last_pitch) < 50)
+							ahi_colour = COLOR_YELLOW;
+						else if (abs(last_pitch) > 100) {
+							ahi_colour = COLOR_RED;
+							ahi_thickness = 5;
+						}
+						ahi_line_color = ahi_colour;
+					}
+
 					LineTranspose(bmpBuff.pData, rect_x, y, rect_x + rect_width, y,
-						isPlaneLevel ? COLOR_GREEN : COLOR_WHITE, 3);
+						ahi_line_color, ahi_thickness);
 				}
 
 				int LAST_ROLL = -5; // Example integer value (change as needed)
@@ -1020,13 +1057,10 @@ static void draw_Ladder() {
 				else
 					sprintf(buffer, "%+02d°", -last_pitch / 10);
 
-				int osd_font_size = 18;
+				 
 #if defined(_x86) || defined(__ROCKCHIP__)
-				uint32_t color = getcolor(COLOR_YELLOW);
-				if ((-50 < last_pitch) && (last_pitch < 50))
-					color = getcolor(COLOR_WHITE);
 				drawText(buffer, start_x + width_ladder * 2.5 - spacing / 3,
-					y + osd_font_size / 2 - 4, color, osd_font_size, true, 1);
+					y + osd_font_size / 2 - 4, getcolor(/*ahi_colour*/COLOR_WHITE), osd_font_size, true, 1);
 #endif
 
 				if (AHI_Enabled == 3) { // Draw home

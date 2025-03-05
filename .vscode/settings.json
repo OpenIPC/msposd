@@ -1,5 +1,8 @@
 {
     "workbench.colorTheme": "Default High Contrast",
+    "editor.formatOnSave": false,
+    "editor.formatOnType": false,
+    "editor.formatOnPaste": false,
     "files.associations": {
         "mavlink.h": "c",
         "system_error": "c",
