@@ -496,9 +496,12 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 
 	case MSP_CMD_DISPLAYPORT: {
 		if (msp_message->payload[0] == MSP_DISPLAYPORT_INFO_MSG) {
-			msp_message->payload[80] = 0; // just in case
+			msp_message->payload[255] = 0; // just in case
 			strcpy(air_unit_info_msg, &msp_message->payload[1]);
+			// printf("payload: %s\n", &msp_message->payload[1]);
+			// printf("air_unit_info_msg: %s\n", air_unit_info_msg);
 			fill(air_unit_info_msg);
+			// printf("fill: %s\n", air_unit_info_msg);
 		}
 
 		if (!vtxMenuActive) {
@@ -1476,22 +1479,22 @@ bool DrawTextOnOSDBitmap(char *msg) {
 		//  so we simply send it to the ground
 
 		if (!DrawOSD && out_sock > 0) { // send the line to the ground
-			static uint8_t msg_buffer[256];
-			static uint8_t payload_buffer[256];
-			// out[79] = 0; // just in case
+			static uint8_t msg_buffer[MAX_STATUS_MSG_LEN + 6];
+			static uint8_t payload_buffer[MAX_STATUS_MSG_LEN];
+			out[MAX_STATUS_MSG_LEN-1] = 0; // just in case
 			int msglen = strlen(&out[0]);
 
 			payload_buffer[0] = MSP_DISPLAYPORT_INFO_MSG;
 			memcpy(&payload_buffer[1], &out[0],
 				msglen + 1); // include the 0 for string ending
 			construct_msp_command(
-				msg_buffer, MSP_CMD_DISPLAYPORT, &payload_buffer[0], 80, MSP_INBOUND);
-			sendto(out_sock, msg_buffer, 100, 0, (struct sockaddr *)&sin_out, sizeof(sin_out));
+				msg_buffer, MSP_CMD_DISPLAYPORT, &payload_buffer[0], msglen + 1, MSP_INBOUND);
+			sendto(out_sock, msg_buffer, msglen + 1 + 6, 0, (struct sockaddr *)&sin_out, sizeof(sin_out));
 
 			// store ready osdmsg to be used in subtitle srt writeing
 			memcpy(&ready_osdmsg[0], &out[0], msglen + 1);
 
-			// printf("Sent text msg : %s\n",out);
+			// printf("Sent text msg(%d): %s\n", msglen, out);
 			return false;
 		}
 
