@@ -506,6 +506,27 @@ void drawText(
 
 	cairo_set_font_size(cr, size);
 
+#ifdef _x86
+	// Function to handle multi-line text rendering
+	void draw_text_with_newlines(cairo_t *cr, const char *text) {
+		char *text_copy = strdup(text); // Duplicate the text for modification
+		char *line = strtok(text_copy, "\n"); // Split text by newline
+		double line_spacing = size * 1.2; // Adjust line height
+
+		printf("draw_text_with_newlines:%s\n", text);
+
+		int y_offset = 0; // Offset for line placement
+		while (line) {
+			printf("draw_text_line:%s\n", line);
+			cairo_move_to(cr, 0, y_offset);
+			cairo_show_text(cr, line);
+			y_offset += line_spacing; // Move down for the next line
+			line = strtok(NULL, "\n");
+		}
+		free(text_copy);
+	}
+#endif
+
 	if (false) {
 		cairo_move_to(cr, x, y);
 		cairo_show_text(cr, text);
@@ -532,7 +553,11 @@ void drawText(
 			a); // Set the original color for the text
 		// Fill the text path with the text color
 		cairo_move_to(cr, 0, 0);
+#ifdef _x86
+		draw_text_with_newlines(cr, text);
+#else
 		cairo_text_path(cr, text); // Create the path for the text
+#endif
 		cairo_fill(cr);			   // Fill the path with the text color
 
 		// cairo_move_to(cr, 0, 0);
