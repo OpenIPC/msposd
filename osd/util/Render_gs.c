@@ -512,11 +512,11 @@ void drawText(
 		char *line = strtok(text_copy, "\n"); // Split text by newline
 		double line_spacing = size * 1.2; // Adjust line height
 
-		printf("draw_text_with_newlines:%s\n", text);
+		// printf("draw_text_with_newlines:%s\n", text);
 
 		int y_offset = 0; // Offset for line placement
 		while (line) {
-			printf("draw_text_line:%s\n", line);
+			// printf("draw_text_line:%s\n", line);
 			cairo_move_to(cr, 0, y_offset);
 			cairo_show_text(cr, line);
 			y_offset += line_spacing; // Move down for the next line
