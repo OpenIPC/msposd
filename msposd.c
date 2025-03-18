@@ -1066,6 +1066,10 @@ static void send_variant_request2(int serial_fd) {
 
 static void poll_msp(evutil_socket_t sock, short event, void *arg) {
 	int serial_fd = *((int *)arg);
+
+	if (matrix_size==99)//We need to check for messages even without FC msp input
+		draw_screenBMP();
+	
 	send_variant_request2(serial_fd);
 }
 
