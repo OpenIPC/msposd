@@ -219,6 +219,7 @@ extern void ProcessChannels();
 extern uint16_t channels[18];
 extern int matrix_size;
 extern int GetTempSigmaStar();
+extern int GetTempGoke();
 extern int GetTXTemp();
 extern int SendWfbLogToGround();
 extern bool monitor_wfb;
@@ -357,6 +358,8 @@ static bool InjectChars(char *payload) {
 #if __SIGMASTAR__
 			temp = 102;
 			temp = GetTempSigmaStar();
+#elif defined(__GOKE__)
+			temp = GetTempGoke(); // 1370 * (400 - ((unsigned
 #else
 			temp = last_board_temp;
 			if (temp == -100)
@@ -553,7 +556,7 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 			if (bitmapFnt.pData == NULL) {
 				SetOSDMsg("");
 				LoadFont();
-				if (bitmapFnt.pData == NULL) {
+				if (bitmapFnt.pData == NULL && DrawOSD) {
 					char msg[200];
 					sprintf(msg, "&F38 &L43 No Font File %s found!", font_load_name);
 					SetOSDMsg(msg);
@@ -1304,7 +1307,10 @@ void fill(char *str) {
 #elif defined(__16CV300__)
 			unsigned short temp = 0; // (((unsigned short*)io_map)[0x300A4 >> 1]
 									 // - 125) / 806.0f * 165.0f - 40;
+#elif defined(__GOKE__)
+			unsigned short temp = GetTempGoke(); // 1370 * (400 - ((unsigned
 #else
+
 			unsigned short temp = 0; //;(((unsigned short*)io_map)[0x280BC >> 1]
 									 //- 117) / 798.0f * 165.0f - 40;
 #endif

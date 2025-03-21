@@ -417,6 +417,23 @@ int GetTempSigmaStar() {
 	return last_board_temp;
 }
 
+static char GokeTempFile[28] = "/tmp/board_temperature.msg";
+/** To make this work you need temp exported via the temp_reader tool for Goke */
+int GetTempGoke() {
+	char buffer[6];
+	int temp = 0;
+	FILE *file = fopen(GokeTempFile, "r");
+
+	if (file != NULL) {
+		if (fgets(buffer, sizeof(buffer), file) != NULL) {
+			temp = atoi(buffer);
+			last_board_temp = temp;
+		}
+		fclose(file); // Close the file
+	}
+	return temp;
+}
+
 static uint64_t LastTempSent;
 
 static int SendTempToGround(unsigned char *mavbuf) {
