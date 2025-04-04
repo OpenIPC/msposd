@@ -129,7 +129,7 @@ Extra params withing the message to be shown:
 ###  Custom OSD elements  
 Custom elements can be added via the standard inav/bf/ardu OSD Configurator. A keyword needs to be added on the screen, that will be replaced by the corresponding widget.  
 This keywords can be added using the PilotName/CraftName fields(INAV/BF/Ardu), or custom Text Elements(INAV only).  
- - ```!TWP!``` Camera board temp  
+ - ```!TMP!``` Camera board temp  
  - ```!TMW!``` WiFi module tem(only 8812EU2 chipsets supported)  
  - ```!RC!``` Sticks Position widget (Ground Side only)  
 
