@@ -108,8 +108,9 @@ static void print_usage() {
 		"	-a --ahi         Draw graphic AHI, mode (1: Ladder, 2: Simple, 3: LadderEx)\n"
 		"	-x --matrix      OSD matrix (0: 53:20, 1: 50:18 chars)\n"
 		"	-z --size        Set OSD resolution\n"
+		"	-M --mavlink     Use mavlink protocol\n"
 		"	   --mspvtx      Enable mspvtx support\n"
-        "      --subtitle <path>  Enable OSD/SRT recording\n"
+		"      --subtitle <path>  Enable OSD/SRT recording\n"
 		"	-v --verbose     Show debug info\n"
 		"	-h --help        Display this help\n",
 			default_master, default_baudrate, default_out_addr);
@@ -1349,6 +1350,7 @@ int main(int argc, char **argv) {
 		{"size", required_argument, NULL, 'z'},
 		{"mspvtx", no_argument, NULL, '1'},
 		{"subtitle", required_argument, NULL, 's'},
+		{"mavlink", required_argument, NULL, 'M'},
 		{"verbose", no_argument, NULL, 'v'},
 		{"help", no_argument, NULL, 'h'},
 		{NULL, 0, NULL, 0}
@@ -1367,7 +1369,7 @@ int main(int argc, char **argv) {
 
 	printf("Version: %s, compiled at: %s\n", GIT_VERSION, VERSION_STRING);
 
-	while ((opt = getopt_long_only(argc, argv, "m:b:o:c:w:r:p:tjf:da:x:z:1vh",
+	while ((opt = getopt_long_only(argc, argv, "m:b:o:c:w:r:p:tjf:da:x:z:1vMh",
 			long_options, &long_index)) != -1) {
 		switch (opt) {
 		case 'm':
@@ -1468,6 +1470,11 @@ int main(int argc, char **argv) {
 		case 'v':
 			verbose = true;
 			printf("Verbose mode!\n");
+			break;
+
+		case 'M':
+			ParseMSP = false;
+			printf("Mavlink mode\n");
 			break;
 
 		case 'h':

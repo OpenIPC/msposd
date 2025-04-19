@@ -54,7 +54,7 @@ star6c: version.h
 star6e: version.h
 	$(eval SDK = ./sdk/infinity6)
 	$(eval CFLAGS += -D__SIGMASTAR__ -D__INFINITY6__ -D__INFINITY6E__)
-	$(eval LIB = -lcam_os_wrapper -lm -lmi_rgn -lmi_sys -lmi_venc)
+	$(eval LIB = -lcam_os_wrapper -lm -lmi_rgn -lmi_sys)
 	$(BUILD)
 
 native: version.h
