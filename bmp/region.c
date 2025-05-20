@@ -24,9 +24,14 @@ int create_region(int *handle, int x, int y, int width, int height) {
 	MI_RGN_ChnPortParam_t stChnAttr;
 	MI_RGN_ChnPortParam_t stChnAttrCurrent;
 
+#if __INFINITY6C__
+	stChn.eModId = E_MI_MODULE_ID_VENC;
+#else
 	stChn.eModId = E_MI_RGN_MODID_VPE;
+#endif
 	stChn.s32DevId = 0;
 	stChn.s32ChnId = 0;
+	stChn.s32OutputPortId = 0;
 
 	stRegion.eType = E_MI_RGN_TYPE_OSD;
 	stRegion.stOsdInitParam.stSize.u32Height = height;
@@ -88,17 +93,6 @@ int create_region(int *handle, int x, int y, int width, int height) {
 			fprintf(stderr, "[%s:%d] Region parameters are different, recreating ... \n", __func__,
 				__LINE__);
 #ifdef __SIGMASTAR__
-#if __INFINITY6C__
-			stChn.s32ChnId = 1;
-#else
-			stChn.s32OutputPortId = 1;
-#endif
-			MI_RGN_DetachFromChn(DEV *handle, &stChn);
-#if __INFINITY6C__
-			stChn.s32ChnId = 0;
-#else
-			stChn.s32OutputPortId = 0;
-#endif
 			MI_RGN_DetachFromChn(DEV *handle, &stChn);
 			MI_RGN_Destroy(DEV *handle);
 			s32Ret = MI_RGN_Create(DEV *handle, &stRegion);
@@ -136,17 +130,6 @@ int create_region(int *handle, int x, int y, int width, int height) {
 					"channel %d...\n",
 					__func__, __LINE__, *handle, &stChn.s32ChnId);
 #ifdef __SIGMASTAR__
-#if __INFINITY6C__
-			stChn.s32ChnId = 1;
-#else
-			stChn.s32OutputPortId = 1;
-#endif
-			MI_RGN_DetachFromChn(DEV *handle, &stChn);
-#if __INFINITY6C__
-			stChn.s32ChnId = 0;
-#else
-			stChn.s32OutputPortId = 0;
-#endif
 			MI_RGN_DetachFromChn(DEV *handle, &stChn);
 #else
 			HI_MPI_RGN_DetachFromChn(*handle, &stChn);
@@ -409,21 +392,15 @@ int unload_region(int *handle) {
 	int s32Ret = 0;
 #ifdef __SIGMASTAR__
 	MI_RGN_ChnPort_t stChn;
+#if __INFINITY6C__
+	stChn.eModId = E_MI_MODULE_ID_VENC;
+#else
+	stChn.eModId = E_MI_RGN_MODID_VPE;
+#endif
 	stChn.s32DevId = 0;
 	stChn.s32ChnId = 0;
-
-	stChn.eModId = E_MI_RGN_MODID_VPE;
-#if __INFINITY6C__
-	stChn.s32ChnId = 1;
-#else
-	stChn.s32OutputPortId = 1;
-#endif
-	MI_RGN_DetachFromChn(DEV *handle, &stChn);
-#if __INFINITY6C__
-	stChn.s32ChnId = 0;
-#else
 	stChn.s32OutputPortId = 0;
-#endif
+
 	MI_RGN_DetachFromChn(DEV *handle, &stChn);
 	s32Ret = MI_RGN_Destroy(DEV *handle);
 	if (s32Ret)
