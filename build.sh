@@ -25,7 +25,7 @@ OUT=msposd
 
 if [[ "$1" != *"native"* && "$1" != *"rockhip"* ]]; then
 	if [ ! -e toolchain/$CC ]; then
-		wget -c -q --show-progress $DL.$CC.tgz -P $PWD
+		wget -c -q --show-progress --no-check-certificate $DL.$CC.tgz -P $PWD
 		mkdir -p toolchain/$CC
 		tar -xf toolchain.$CC.tgz -C toolchain/$CC --strip-components=1 || exit 1
 		rm -f $CC.tgz
