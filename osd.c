@@ -748,7 +748,7 @@ static void draw_AHI() {
 	Transform_OVERLAY_WIDTH = OVERLAY_WIDTH;
 	Transform_OVERLAY_HEIGHT = OVERLAY_HEIGHT;
 	Transform_Pitch = last_pitch / 10;
-	Transform_Roll = -last_roll / 10;
+	Transform_Roll = -last_roll / 10;	
 
 	Point img_center = {OVERLAY_WIDTH / 2, OVERLAY_HEIGHT / 2}; // Center of the image (example)
 	Point original_point = {600, 500};							// Example point
@@ -786,14 +786,16 @@ static void draw_Ladder() {
 	const bool horizonInvertPitch = false;
 	const bool horizonInvertRoll = false;
 	double horizonWidth = 3;
-	const int horizonSpacing = 165; //????//pixels per degree 165
+	const int horizonSpacing = 150; // This is the zoom level of the vertical axis that AHI will be drawn with, Need to be adjusted for the lens FO
+									// So that the AHI follows the horizon when changing pitch angle
 	const bool horizonShowLadder = true;
-	int horizonRange = 80;					  // total vertical range in degrees
+	int horizonRange = 75;					  // total vertical range that the AHI will be drawn over in degrees
 	const int horizonStep = 10;				  //????//degrees per line
 	const bool show_center_indicator = false; ////m_show_center_indicator;
 
 	const double ladder_stroke_faktor = 0.1;
 	const int subline_thickness = 1;
+	double K_AHI_Step = 0.5;
 
 	if (OVERLAY_HEIGHT < 900) { // 720p mode
 		horizonWidth = 2;
@@ -812,7 +814,7 @@ static void draw_Ladder() {
 
 	const int pos_x = OVERLAY_WIDTH / 2;
 	const int pos_y = (OVERLAY_HEIGHT / 2) + TiltY;
-	const int width_ladder = 100 * horizonWidth;
+	const int width_ladder = 80 * horizonWidth;
 
 	int px = pos_x - width_ladder / 2;
 
@@ -862,33 +864,24 @@ static void draw_Ladder() {
 			i = i + 30 / ratio;
 
 		k = i * step;
-		y = pos_y - (i - 1.0 * pitch_degree / step) * ratio;
+		y = pos_y - (i - K_AHI_Step * pitch_degree / step) * ratio;
+		
+		//sin((Transform_Pitch) * (M_PI / 180.0))
 		if (horizonShowLadder == true) {
 			if (i != 0) {
-
 				// fix pitch line wrap around at extreme nose up/down
 				n = k; // this is the line index number relative to the main
 					   // one.
-				if (n > 90) {
-					n = 180 - k;
-				}
-
-				if (n < -90) {
-					n = -k - 180;
-				}
+				if (n > 90) 
+					n = 180 - k;				
+				if (n < -90) 
+					n = -k - 180;				
 
 				if (abs(n) > 20) // pitch higher than 30 degree.
 					m_color = COLOR_YELLOW;
 				if (abs(n) > 40) // pitch higher than 30 degree.
 					m_color = COLOR_RED;
 
-				// left numbers
-				// painter->setPen(m_color);
-				// painter->drawText(px-30, y+6, QString::number(n));
-
-				// right numbers
-				// painter->drawText((px + width_ladder)+8, y+6,
-				// QString::number(n)); painter->setPen(m_color);
 
 				if ((i > 0)) {
 					// Upper ladders
@@ -896,114 +889,84 @@ static void draw_Ladder() {
 					int stroke_s = 2 * ladder_stroke_faktor;
 
 					// left upper cap
-					// drawRectangleI4(bmpBuff.pData, px , y , stroke_s ,
-					// width_ladder/24, m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px, y, px, y + width_ladder / 24, m_color,
 						subline_thickness); // Top side
 
 					// left upper line
-					// drawRectangleI4(bmpBuff.pData, px , y , width_ladder/3 ,
-					// stroke_s, m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px, y, px + width_ladder / 3, y, m_color,
 						subline_thickness); // Top side
 
 					// right upper cap
-					// drawRectangleI4(bmpBuff.pData, px+width_ladder-2 , y ,
-					// px+width_ladder-2 + stroke_s , width_ladder/24,
-					// m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px + width_ladder - 2, y, px + width_ladder - 2,
 						y + width_ladder / 24, m_color,
 						subline_thickness); // Top side
 
 					// right upper line
-					// drawRectangleI4(bmpBuff.pData, px+width_ladder*2/3 , y ,
-					// width_ladder/3 , stroke_s, m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px + width_ladder * 2 / 3, y,
 						(px + width_ladder * 2 / 3) + width_ladder / 3 - 1, y, m_color,
 						subline_thickness); // Top side
 
 #if defined(_x86) || defined(__ROCKCHIP__)
 					char buff_sub_line[6];
-					if (abs(last_pitch) > 150) {
+					if (abs(last_pitch) > 150 || abs(last_roll) > 100) {
 						sprintf(buff_sub_line, "%d°", n);
 						drawText(buff_sub_line, (px + width_ladder / 2) - 12, y + 8,
-							getcolor(COLOR_WHITE), osd_font_size, true, 1);
+							getcolor(COLOR_WHITE), osd_font_size-2, true, 1);
 					}
 #endif
 
 				} else if (i < 0) {
 					// Lower ladders
 					// default to stroke strength of 2 (I think it is pixels)
-
 					int stroke_s = 2 * ladder_stroke_faktor;
 
 					// left to right
 					// left lower cap
-					// drawRectangleI4(bmpBuff.pData, px, y-(width_ladder/24)+2
-					// , stroke_s , width_ladder/24, m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px, y - (width_ladder / 24) + 2, px,
 						y - (width_ladder / 24) + 1 + width_ladder / 24, m_color,
 						subline_thickness); // Top side
 
 					// 1l
-					// drawRectangleI4(bmpBuff.pData, px , y , width_ladder/12 ,
-					// stroke_s, m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px, y, px + width_ladder / 12, y, m_color,
 						subline_thickness); // Top side
 
 					// 2l
-					// drawRectangleI4(bmpBuff.pData, px+(width_ladder/12)*1.5 ,
-					// y , width_ladder/12 , stroke_s,
-					// m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px + (width_ladder / 12) * 1.5, y,
 						px + (width_ladder / 12) * 1.5 + width_ladder / 12, y, m_color,
 						subline_thickness); // Top side
 
 					// 3l
-					// drawRectangleI4(bmpBuff.pData, px+(width_ladder/12)*3 , y
-					// , width_ladder/12 , stroke_s, m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px + (width_ladder / 12) * 3, y,
 						px + (width_ladder / 12) * 3 + width_ladder / 12, y, m_color,
 						subline_thickness); // Top side
 
 					// right lower cap
-					// drawRectangleI4(bmpBuff.pData, px+width_ladder-2 ,
-					// y-(width_ladder/24)+2 , stroke_s , width_ladder/24,
-					// m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px + width_ladder - 2, y - (width_ladder / 24) + 2,
 						px + width_ladder - 2, y - (width_ladder / 24) + 1 + width_ladder / 24,
 						m_color,
 						subline_thickness); // Top side
 
 					// 1r ///spacing on these might be a bit off
-					// drawRectangleI4(bmpBuff.pData, px+(width_ladder/12)*8 , y
-					// , width_ladder/12 , stroke_s, m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px + (width_ladder / 12) * 8, y,
 						px + (width_ladder / 12) * 8 + width_ladder / 12, y, m_color,
 						subline_thickness); // Top side
 
 					// 2r ///spacing on these might be a bit off
-					// drawRectangleI4(bmpBuff.pData, px+(width_ladder/12)*9.5 ,
-					// y , width_ladder/12 , stroke_s,
-					// m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px + (width_ladder / 12) * 9.5, y,
 						px + (width_ladder / 12) * 9.5 + width_ladder / 12, y, m_color,
 						subline_thickness); // Top side
 
 					// 3r  ///spacing on these might be a bit off tried a
-					// decimal here drawRectangleI4(bmpBuff.pData,
-					// px+(width_ladder*.9166) , y , width_ladder/12 , stroke_s,
-					// m_color,subline_thickness);
 					LineTranspose(bmpBuff.pData, px + (width_ladder * .9166), y,
 						px + (width_ladder * .9166) + width_ladder / 12, y, m_color,
 						subline_thickness); // Top side
 
 #if defined(_x86) || defined(__ROCKCHIP__)
 					char buff_sub_line[6];
-					if (abs(last_pitch) > 150) {
+					if (abs(last_pitch) > 150 || abs(last_roll) > 100) {
 						sprintf(buff_sub_line, "%d°", n);
 						drawText(buff_sub_line, (px + width_ladder / 2) - 16, y + 4,
-							getcolor(COLOR_WHITE), osd_font_size, true, 1);
+							getcolor(COLOR_WHITE), osd_font_size-2, true, 1);
 					}
 #endif
 				}
@@ -1015,7 +978,7 @@ static void draw_Ladder() {
 
 				int rect_height = 5; // Height of the rectangles (as per your original code)
 				int fragments = 6;
-				float SpacingK = 0.6;
+				float SpacingK = 0.4;
 				// int rect_width = (width_ladder*2.5/(fragments +
 				// (float)SpacingK*fragments));  // Width of a single rectangle
 				int rect_width =
