@@ -2532,5 +2532,5 @@ static void CloseMSP() {
 
 	int res_mun = munmap(osds, sizeof(*osds) * MAX_OSD);
 
-	printf("RGN_Destroy=%X, RGN_DeInit:%X\n", s32Ret, deinit);
+	printf("RGN_Destroy: %X, RGN_DeInit: %X\n", s32Ret, deinit);
 }
