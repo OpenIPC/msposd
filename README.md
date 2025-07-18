@@ -124,13 +124,13 @@ Extra params withing the message to be shown:
 - &Fxx - Set text font size (10 to 99)  
 - &Lxx - Set text colour (first digit 0- white, 1 - black, 2- blue, 3 - green, 4 - red, 5 - yellow, 6 - magenta, 7 - cyan) and postion on the screen(second digit)  0-TopLeft, 1-TopCenter, 2-TopRight, 3-TopMoving,4-BottomLeft, 5-BottomCenter, 6-BottomRight, 7-BottomMoving   
 - &Gx - Set text backGround color (0- white, 1 - black, 2- blue, 3 - green, 4 - red, 5 - yellow, 6 - magenta, 7 - cyan,  8 - semi-transparent, 9 - transparent)
- -&p - Dropped packet injections by wfb-ng  
+ -&p - Dropped packet injections by wfb-ng (on 8812xx extracted from /sys/class/net/wlan0/statistics/tx_dropped)  
 
 ###  Custom OSD elements  
 Custom elements can be added via the standard inav/bf/ardu OSD Configurator. A keyword needs to be added on the screen, that will be replaced by the corresponding widget.  
 This keywords can be added using the PilotName/CraftName fields(INAV/BF/Ardu), or custom Text Elements(INAV only).  
  - ```!TMP!``` Camera board temp  
- - ```!TMW!``` WiFi module tem(only 8812EU2 chipsets supported)  
+ - ```!TMW!``` WiFi module temperature (only 8812EU2/8733BU chipsets supported)  
  - ```!RC!``` Sticks Position widget (Ground Side only)  
 
 ### Usage Example:

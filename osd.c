@@ -388,7 +388,7 @@ static bool InjectChars(char *payload) {
 			// return true;
 		}
 
-		// set extra temp on screen
+		// set extra temp on screen !TMW!
 		if (str[0] == '!' && str[1] == 'T' && str[2] == 'M' && str[3] == 'W' && str[4] == '!') {
 			int temp = 99;
 
@@ -1116,6 +1116,7 @@ static void draw_Ladder() {
 }
 
 static int droppedTTL = 0;
+static int droppedTTL_start=0;
 static bool first_wfb_read = true;
 
 void fill(char *str) {
@@ -1233,21 +1234,37 @@ void fill(char *str) {
 			ipos++;
 			char c[80];
 			monitor_wfb = true;
-			int dropped = SendWfbLogToGround();
-			if (first_wfb_read) {
-				dropped = 0;
-				droppedTTL = 0;
+			int dropped;
+			int droppedTTL_last = 0;
+
+			// --- Get 8812xx Dropped Count.
+			const char *tx_dropped_path = "/sys/class/net/wlan0/statistics/tx_dropped";
+			FILE *fp = fopen(tx_dropped_path, "r");
+			if (fp) {
+				if (fscanf(fp, "%d", &droppedTTL_last) != 1)
+					fprintf(stderr, "Failed to read integer from %s\n", tx_dropped_path);
+				fclose(fp);
+				dropped = first_wfb_read ? 0 : (droppedTTL_last - droppedTTL);
+				droppedTTL = droppedTTL_last;
+			} else {
+				dropped = SendWfbLogToGround();
+				if (first_wfb_read) {
+					dropped = 0;
+					droppedTTL = 0;
+				}
+
+				droppedTTL += dropped;
 			}
 
 			first_wfb_read = false;
-			droppedTTL += dropped;
+
 			// Print the value with one digit after the decimal point
 			if (dropped == 0)
-				sprintf(c, "d=%d", droppedTTL);
+				sprintf(c, "(%d)", droppedTTL);
 			else {
-				sprintf(c, "+ %d ! Dropped=%d ", dropped, droppedTTL);
+				sprintf(c, "+%d!(%d) ", dropped, droppedTTL);
 				if (verbose)
-					printf("WFB_NG Dropped UDP packets: %d\n", dropped);
+					printf("WiFi Dropped UDP packets: %d\n", dropped);
 			}
 			strcat(out, c);
 			opos += strlen(c);
