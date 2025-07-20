@@ -126,6 +126,11 @@ Extra params withing the message to be shown:
 - &Gx - Set text backGround color (0- white, 1 - black, 2- blue, 3 - green, 4 - red, 5 - yellow, 6 - magenta, 7 - cyan,  8 - semi-transparent, 9 - transparent)
  -&p - Dropped packet injections by wfb-ng (on 8812xx extracted from /sys/class/net/wlan0/statistics/tx_dropped)  
 
+Can have the text in multiple lines, each with different color and size, seperated by \n character
+```echo -e "&L52&F24Line1 is purple with size24\nLine 2 is red, font size 20 &L32 &F20 \nLine3 bluish size 28&L42&F28&G8" > ./MSPOSD.msg```
+will show three lines of text, each with different color and size. 
+Unicode font characters can be specified with hexadecimal escape sequences in a C string literal. ```xEF\x80\x92 some battery``` will show battery symbol if present in the ttf font file used.
+
 ###  Custom OSD elements  
 Custom elements can be added via the standard inav/bf/ardu OSD Configurator. A keyword needs to be added on the screen, that will be replaced by the corresponding widget.  
 This keywords can be added using the PilotName/CraftName fields(INAV/BF/Ardu), or custom Text Elements(INAV only).  

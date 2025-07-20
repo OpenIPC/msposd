@@ -674,6 +674,29 @@ void convertBitmap1555ToI8(uint16_t *srcBitmap, uint32_t width, uint32_t height,
 	}
 }
 
+uint16_t ConvertARGB8888ToARGB1555(MI_RGN_PaletteElement_t color) {
+    uint16_t a = (color.u8Alpha >= 128) ? 1 : 0;  // 1-bit alpha
+    uint16_t r = (color.u8Red >> 3) & 0x1F;
+    uint16_t g = (color.u8Green >> 3) & 0x1F;
+    uint16_t b = (color.u8Blue >> 3) & 0x1F;
+
+    return (a << 15) | (r << 10) | (g << 5) | b;
+}
+
+uint16_t GetARGB1555From_RGN_Palette(int index) {
+    if (index < 0 || index >= 256)
+        return 0;  // Return black or error fallback
+
+    MI_RGN_PaletteElement_t color = g_stPaletteTable.astElement[index];
+
+    uint16_t a = (color.u8Alpha >= 128) ? 1 : 0;  // 1-bit alpha
+    uint16_t r = (color.u8Red >> 3) & 0x1F;
+    uint16_t g = (color.u8Green >> 3) & 0x1F;
+    uint16_t b = (color.u8Blue >> 3) & 0x1F;
+
+    return (a << 15) | (r << 10) | (g << 5) | b;
+}
+
 // static MI_RGN_PaletteTable_t g_stPaletteTable ;//= {{{0, 0, 0, 0}}};
 MI_RGN_PaletteTable_t g_stPaletteTable = {{// index0 ~ index15
 	{255, 0, 0, 0},						   // reserved
@@ -1119,8 +1142,8 @@ void convertBitmap1555ToI4(uint16_t *srcBitmap, uint32_t width, uint32_t height,
 	MI_RGN_PaletteTable_t *paletteTable = &g_stPaletteTable;
 	// Calculate the number of bytes required per line without padding
 
-	if (singleColor == -1) // The color that we assume as transparent
-		singleColor = 15;
+	//if (singleColor == -1) // The color that we assume as transparent
+	//	singleColor = 15;
 
 	unsigned char u8Value = 0;
 	uint32_t u32Stride = (width + 1) / 2;
@@ -1150,7 +1173,7 @@ void convertBitmap1555ToI4(uint16_t *srcBitmap, uint32_t width, uint32_t height,
 				paletteIndex = 8;  // black
 
 			// convert to black and white
-			if (paletteIndex != 15 & paletteIndex >= 0) {
+			if (singleColor>=0 && paletteIndex != 15 && paletteIndex >= 0) {
 				paletteIndex = singleColor;
 			}
 			if (colourBackground >= 0 && paletteIndex == 15)

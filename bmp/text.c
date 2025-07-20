@@ -26,11 +26,9 @@ static void copyimage(SFT_Image *dest, const SFT_Image *source, int x0, int y0, 
 			unsigned char pixel = s[x];
 			// If the pixel is not zero (assuming non-zero means black)
 			if (pixel > 96)	   // 128 makes them too thin... 64 is best
-				d[x] = 0x8000; // Set pixel to opaque black (ARGB1555: 1000 0000
-							   // 0000 0000)
+				d[x] = color | 0x8000 ; //d[x] = 0x8000; // Set pixel to opaque black (ARGB1555: 1000 0000 0000 0000)
 			else
-				d[x] = 0x0000; // Set pixel to transparent (ARGB1555: 0000 0000
-							   // 0000 0000)
+				d[x] =  color & 0x7FFF; //0x0000; // Set pixel to transparent (ARGB1555: 0000 0000 0000 0000)
 		}
 		d += dest->width; // rowStride
 		s += source->width;
@@ -124,7 +122,7 @@ RECT measure_text(const char *font, double size, const char *text) {
 	return rect;
 }
 
-BITMAP raster_text(const char *font, double size, const char *text) {
+BITMAP raster_text(const char *font, double size, const char *text, uint16_t color) {
 	loadfont(&sft, font, size, &lmtx);
 
 	double margin, height, width;
@@ -166,7 +164,7 @@ BITMAP raster_text(const char *font, double size, const char *text) {
 		sft_render(&sft, gid, image);
 		sft_kerning(&sft, ogid, gid, &kerning);
 		x += kerning.xShift;
-		copyimage(&canvas, &image, x + mtx.leftSideBearing, y + mtx.yOffset, 0xFFFF);
+		copyimage(&canvas, &image, x + mtx.leftSideBearing, y + mtx.yOffset, color/*0xFFFF*/);
 		x += mtx.advanceWidth;
 		free(image.pixels);
 		ogid = gid;

@@ -17,7 +17,7 @@ static SFT_LMetrics lmtx;
 static BITMAP bitmap;
 
 RECT measure_text(const char *font, double size, const char *text);
-BITMAP raster_text(const char *font, double size, const char *text);
+BITMAP raster_text(const char *font, double size, const char *text, uint16_t color);
 
 #ifdef __cplusplus
 #if __cplusplus

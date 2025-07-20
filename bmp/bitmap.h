@@ -171,6 +171,8 @@ void copyRectI4(uint8_t *srcBitmap, uint32_t srcWidth, uint32_t srcHeight, uint8
 
 int getRowStride(int width, int BitsPerPixel);
 
+uint16_t GetARGB1555From_RGN_Palette(int index);
+
 #define COLOR_RED 1
 #define COLOR_GREEN 2
 #define COLOR_BLUE 3

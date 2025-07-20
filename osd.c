@@ -503,11 +503,10 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 
 	case MSP_CMD_DISPLAYPORT: {
 		if (msp_message->payload[0] == MSP_DISPLAYPORT_INFO_MSG) {
-			msp_message->payload[255] = 0; // just in case
+			//msp_message->payload[255] = 0; // just in case. why, may crash ?! 
+			
 			strcpy(air_unit_info_msg, &msp_message->payload[1]);
-			// printf("payload: %s\n", &msp_message->payload[1]);
-			// printf("air_unit_info_msg: %s\n", air_unit_info_msg);
-			fill(air_unit_info_msg);
+			fill(air_unit_info_msg);//Strip font settings from the text and set color, alignment , size etc 
 			// printf("fill: %s\n", air_unit_info_msg);
 		}
 
@@ -1115,6 +1114,45 @@ static void draw_Ladder() {
 	} // draw ladder
 }
 
+
+/* ChatGPT
+Takes a multi-line string as input.
+Counts how many lines it contains.
+For each line, extracts the values prefixed by &L and &F
+*/
+int parse_LF(const char *input, int *L, int *F, int max_lines) {
+    const char *ptr = input;
+    int line_count = 0;
+
+    while (*ptr && line_count < max_lines) {
+        char line[512] = {0};
+        int len = 0;
+
+        // Extract a single line
+        while (*ptr && *ptr != '\n' && len < sizeof(line) - 1) {
+            line[len++] = *ptr++;
+        }
+        if (*ptr == '\n') ptr++;  // skip newline
+        line[len] = '\0';
+
+        // Find &L and &F
+        char *l_ptr = strstr(line, "&L");
+        char *f_ptr = strstr(line, "&F");
+
+        if (l_ptr && f_ptr) {
+            L[line_count] = atoi(l_ptr + 2);
+            F[line_count] = atoi(f_ptr + 2);
+        } else {
+            L[line_count] = -1;
+            F[line_count] = -1;
+        }
+
+        line_count++;
+    }
+
+    return line_count;
+}
+
 static int droppedTTL = 0;
 static int droppedTTL_start=0;
 static bool first_wfb_read = true;
@@ -1306,7 +1344,7 @@ void fill(char *str) {
 			opos += strlen(c);
 
 		} else if (str[ipos + 1] == 'F' && isdigit(str[ipos + 2]) && isdigit(str[ipos + 3])) {
-			if (!DrawOSD) {
+			if (!DrawOSD) { // we need to keep &Fxx , it is needed for the ground
 				strncat(out, str + ipos, 1);
 				opos++;
 			} else {
@@ -1488,9 +1526,13 @@ bool DrawTextOnOSDBitmap(char *msg) {
 		LastOSDMsgParsed = timems; // Do not parse and read variable too often
 
 		strcpy(out, osdmsg);
-		// sprintf(out,"$M $B Size: %d",(int)osds[FULL_OVERLAY_ID].size);
-		// osds[FULL_OVERLAY_ID].size=18+((cntr/10)%10);//TEST
+		int L[20]={0}, F[20]={0};  // Support up to 20 lines
+
 		if (strstr(out, "&")) {
+			//Allow for color and size setting per line, must be here since the fill() function will strip that info 			
+			if (DrawOSD)//Only on the air unit
+    			parse_LF(out, L, F, 20);
+
 			fill(out);
 			osds[FULL_OVERLAY_ID].updt = 0; //
 		}
@@ -1501,7 +1543,7 @@ bool DrawTextOnOSDBitmap(char *msg) {
 		if (!DrawOSD && out_sock > 0) { // send the line to the ground
 			static uint8_t msg_buffer[MAX_STATUS_MSG_LEN + 6];
 			static uint8_t payload_buffer[MAX_STATUS_MSG_LEN];
-			out[MAX_STATUS_MSG_LEN-1] = 0; // just in case
+			out[MAX_STATUS_MSG_LEN-1] = 0; // just in case.
 			int msglen = strlen(&out[0]);
 
 			payload_buffer[0] = MSP_DISPLAYPORT_INFO_MSG;
@@ -1535,28 +1577,46 @@ bool DrawTextOnOSDBitmap(char *msg) {
 
 		split_lines(out, lines, &line_count); // Here we will modify the message
 		int maxwidth = 0;
-
+		int heighttl = 0;
 		for (int i = 0; i < line_count; i++) {
 			// printf("OSD Statistics Line %d: %s\n", i + 1, lines[i]);
+			// If we've extracted font size info per line
+			if (F[i] > 0)
+				osds[FULL_OVERLAY_ID].size = F[i];
 			rect = measure_text(font, osds[FULL_OVERLAY_ID].size, lines[i]);
 			maxwidth = (rect.width > maxwidth) ? rect.width : maxwidth;
+			heighttl += rect.height - 2 - ((i>0)?1:0);
 		}
 
-		bitmapText.u32Height = line_count * rect.height; // preview_height;//rows *
+		bitmapText.u32Height = heighttl; // line_count * rect.height;
 		bitmapText.u32Width = MIN((maxwidth + 15) & ~15,
 			bmpBuff.u32Width - 16); // should be multiple of 16 OVERLAY_WIDTH-16
 		bitmapText.pData =
 			(unsigned char *)malloc(bitmapText.u32Height * getRowStride(bitmapText.u32Width, 16));
 		memset(bitmapText.pData, 0, bitmapText.u32Height * getRowStride(bitmapText.u32Width, 16));
 
+		heighttl = 0;
 		for (int i = 0; i < line_count; i++) {
-			BITMAP bitmapTextLine = raster_text(font, osds[FULL_OVERLAY_ID].size,
-				lines[i]); // allocates new bitmap, Bus error on goke ?!
+
+			if (F[i] > 0)
+				osds[FULL_OVERLAY_ID].size = F[i];
+
+			uint16_t color = 0xFFFF;
+			if (L[i] > 0) {
+				msg_colour = L[i] / 10;
+				color = GetARGB1555From_RGN_Palette(msg_colour);
+			}
+
+			BITMAP bitmapTextLine = raster_text(font, osds[FULL_OVERLAY_ID].size, lines[i],
+				color // Create in the desired color instead of  converting it later!
+			);		  // allocates new bitmap, Bus error on goke ?!
 			// raster_text always return argb1555
 			copyRectARGB1555(bitmapTextLine.pData, bitmapTextLine.u32Width,
 				bitmapTextLine.u32Height, bitmapText.pData, bitmapText.u32Width,
 				bitmapText.u32Height, 0, 0, MIN(bitmapTextLine.u32Width, bitmapText.u32Width),
-				MIN(bitmapTextLine.u32Height, bitmapText.u32Height), 0, i * rect.height);
+				MIN(bitmapTextLine.u32Height, bitmapText.u32Height), 0, heighttl);
+
+			heighttl += bitmapTextLine.u32Height - 2;
 			free(bitmapTextLine.pData); // Free the memory allocated by raster_text !!!
 		}
 
@@ -1568,7 +1628,8 @@ bool DrawTextOnOSDBitmap(char *msg) {
 								  getRowStride(bitmapText.u32Width, PIXEL_FORMAT_BitsPerPixel));
 
 			convertBitmap1555ToI4(bitmapText.pData, bitmapText.u32Width, bitmapText.u32Height,
-				destBitmap, msg_colour, msg_colour_background);
+				destBitmap, (L[1] > 0) ? -1 : msg_colour,
+				msg_colour_background); // If different color per line is used
 
 			free(bitmapText.pData); // free ARGB1555 bitmap
 			// This is inefficient, we use 4 times more memory, but the buffer
@@ -2278,13 +2339,13 @@ static void InitMSPHook() {
 	PIXEL_FORMAT_BitsPerPixel = 4;
 #endif
 #if defined(_x86) || defined(__ROCKCHIP__)
-	// enable this to simulate I4 Bitmap Processing on SigmaStar
-	// PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_I4;//I4 format, 4 bits per pixel
-	// PIXEL_FORMAT_BitsPerPixel = 4;
+	// enable this to simulate I4 Bitmap Processing of SigmaStar ON THE DESKOP !
+	 PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_I4;//I4 format, 4 bits per pixel
+	 PIXEL_FORMAT_BitsPerPixel = 4;
 
 	// Default 32 bit rendering on the ground
-	PIXEL_FORMAT_DEFAULT = PIXEL_FORMAT_8888; // ARGB format, 32 bits per pixel
-	PIXEL_FORMAT_BitsPerPixel = 32;
+	//PIXEL_FORMAT_DEFAULT = PIXEL_FORMAT_8888; // ARGB format, 32 bits per pixel
+	//PIXEL_FORMAT_BitsPerPixel = 32;
 #endif
 
 	if (!majestic_width && !majestic_height) {

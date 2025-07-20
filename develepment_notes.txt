@@ -65,3 +65,6 @@ cp ./msposd_x86 ./release/x86/msposd
 cp ./msposd_star6e ./release/star6e/msposd
 cp ./msposd_goke ./release/goke/msposd
 cp ./msposd_hisi ./release/hisi/msposd
+
+-- Test different color and size per line
+echo -e "LINE1 Purple font 24 &L52 &F24\nLINE2 Red font size 20 &L32 &F20 \nLine3 bluish size 28 &L42 &F28 " > ./MSPOSD.msg
