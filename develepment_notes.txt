@@ -68,3 +68,4 @@ cp ./msposd_hisi ./release/hisi/msposd
 
 -- Test different color and size per line
 echo -e "LINE1 Purple font 24 &L52 &F24\nLINE2 Red font size 20 &L32 &F20 \nLine3 bluish size 28 &L42 &F28 " > ./MSPOSD.msg
+echo -e "&G8 0 - White   &L02&F28\n 1 - Black   &L12\n 2 - Red     &L22\n 3 - Green   &L32\n 4 - Blue    &L42\n 5 - Yellow  &L52\n 6 - Magenta &L62\n 7 - Cyan  &L72\n 8 - Orchid  &L82\n 9 - DarkRed &L92" > /tmp/MSPOSD.msg

@@ -122,7 +122,8 @@ Extra params withing the message to be shown:
 - &C - CPU Usage percent  
 - &t - Time  
 - &Fxx - Set text font size (10 to 99)  
-- &Lxx - Set text colour (first digit 0- white, 1 - black, 2- blue, 3 - green, 4 - red, 5 - yellow, 6 - magenta, 7 - cyan) and postion on the screen(second digit)  0-TopLeft, 1-TopCenter, 2-TopRight, 3-TopMoving,4-BottomLeft, 5-BottomCenter, 6-BottomRight, 7-BottomMoving   
+- &Lxx - Set text colour (first digit 0- white, 1 - black, 2- red, 3 - green, 4 - blue, 5 - yellow, 6 - magenta, 7 - cyan,  8 - orchid, 9 - dark red)   
+         and postion on the screen( second digit)  0-TopLeft, 1-TopCenter, 2-TopRight, 3-TopMoving,4-BottomLeft, 5-BottomCenter, 6-BottomRight, 7-BottomMoving   
 - &Gx - Set text backGround color (0- white, 1 - black, 2- blue, 3 - green, 4 - red, 5 - yellow, 6 - magenta, 7 - cyan,  8 - semi-transparent, 9 - transparent)
  -&p - Dropped packet injections by wfb-ng (on 8812xx extracted from /sys/class/net/wlan0/statistics/tx_dropped)  
 

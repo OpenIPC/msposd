@@ -1139,18 +1139,48 @@ int parse_LF(const char *input, int *L, int *F, int max_lines) {
         char *l_ptr = strstr(line, "&L");
         char *f_ptr = strstr(line, "&F");
 
-        if (l_ptr && f_ptr) {
-            L[line_count] = atoi(l_ptr + 2);
-            F[line_count] = atoi(f_ptr + 2);
+        if (l_ptr) {
+            L[line_count] = atoi(l_ptr + 2);            
         } else {
-            L[line_count] = -1;
+            L[line_count] = -1;           
+        }
+		if (f_ptr) {            
+            F[line_count] = atoi(f_ptr + 2);
+        } else {            
             F[line_count] = -1;
         }
+
 
         line_count++;
     }
 
     return line_count;
+}
+
+/* We use some predefined color indexes and need to keep them for compatibility
+0- white, 1 - black, 2- blue, 3 - green, 4 - red, 5 - yellow, 6 - magenta, 7 - cyan,  8 - semi-transparent, 9 - transparent
+*/
+int I4ColorIndex(int msg_colour) {
+
+//	if (msg_colour  == 8)//9
+//		return COLOR_SEMI_TRANSPARENT;		
+//	if (msg_colour  == 9)//
+//		return COLOR_TRANSPARENT;		
+
+	if (msg_colour  == 8)//9
+		return 12;	//Orchid	
+	if (msg_colour  == 9)//
+		return 10;	
+	
+	if (msg_colour == 0)
+		msg_colour = COLOR_WHITE;
+	else if (msg_colour == 1)
+		msg_colour = COLOR_BLACK;
+	else
+		//index in palette  1=Red, Green, Blue, Yellow ,Magenta, 6=Cyan, 
+		msg_colour--;	
+
+	return msg_colour;
 }
 
 static int droppedTTL = 0;
@@ -1366,14 +1396,7 @@ void fill(char *str) {
 				int value = atoi(numStr);
 				// Ugly
 				msg_layout = value % 10;
-				msg_colour = value / 10;
-				if (msg_colour == 0)
-					msg_colour = COLOR_WHITE;
-				else if (msg_colour == 1)
-					msg_colour = COLOR_BLACK;
-				else
-					// 1=Red, Green, Blue, Yellow ,Magenta, 6=Cyan
-					msg_colour--;
+				msg_colour=I4ColorIndex(value / 10);				 
 
 				ipos += 3;
 			}
@@ -1585,8 +1608,9 @@ bool DrawTextOnOSDBitmap(char *msg) {
 				osds[FULL_OVERLAY_ID].size = F[i];
 			rect = measure_text(font, osds[FULL_OVERLAY_ID].size, lines[i]);
 			maxwidth = (rect.width > maxwidth) ? rect.width : maxwidth;
-			heighttl += rect.height - 2 - ((i>0)?1:0);
+			heighttl += (int)(rect.height*0.9) /*- ((rect.height>40)?1:0)*/;
 		}
+		heighttl+=2;
 
 		bitmapText.u32Height = heighttl; // line_count * rect.height;
 		bitmapText.u32Width = MIN((maxwidth + 15) & ~15,
@@ -1603,7 +1627,7 @@ bool DrawTextOnOSDBitmap(char *msg) {
 
 			uint16_t color = 0xFFFF;
 			if (L[i] > 0) {
-				msg_colour = L[i] / 10;
+				msg_colour = I4ColorIndex(L[i] / 10);
 				color = GetARGB1555From_RGN_Palette(msg_colour);
 			}
 
@@ -1616,7 +1640,7 @@ bool DrawTextOnOSDBitmap(char *msg) {
 				bitmapText.u32Height, 0, 0, MIN(bitmapTextLine.u32Width, bitmapText.u32Width),
 				MIN(bitmapTextLine.u32Height, bitmapText.u32Height), 0, heighttl);
 
-			heighttl += bitmapTextLine.u32Height - 2;
+			heighttl += (int)(bitmapTextLine.u32Height * 0.9);
 			free(bitmapTextLine.pData); // Free the memory allocated by raster_text !!!
 		}
 
@@ -1628,7 +1652,7 @@ bool DrawTextOnOSDBitmap(char *msg) {
 								  getRowStride(bitmapText.u32Width, PIXEL_FORMAT_BitsPerPixel));
 
 			convertBitmap1555ToI4(bitmapText.pData, bitmapText.u32Width, bitmapText.u32Height,
-				destBitmap, (L[1] > 0) ? -1 : msg_colour,
+				destBitmap, (L[0] > 0) ? -1 : msg_colour,
 				msg_colour_background); // If different color per line is used
 
 			free(bitmapText.pData); // free ARGB1555 bitmap
@@ -2378,8 +2402,8 @@ static void InitMSPHook() {
 	OVERLAY_WIDTH = current_display_info.font_width *
 					(current_display_info.char_width); // must be multiple of 8 !!!
 	OVERLAY_WIDTH = (OVERLAY_WIDTH + 7) & ~7;
-	if (matrix_size > 10 && OVERLAY_WIDTH < (1920 - (53 * 2))) {
-		printf("Matrix size not supported on resolutions smaller than 1920x1080p!\n");
+	if (matrix_size == 11 && OVERLAY_WIDTH < (1920 - (53 * 2))) {
+		printf("Matrix size 11 not supported on resolutions smaller than 1920x1080p!\n");
 		matrix_size = 0;
 	}
 	/*

@@ -709,10 +709,10 @@ MI_RGN_PaletteTable_t g_stPaletteTable = {{// index0 ~ index15
 	{0xFF, 0x00, 0xF8, 0xF8}, // 0x03FF -> Cyan
 	{0xFF, 0xFF, 0xFF, 0xFF}, // 0x7FFF -> White
 	{0xFF, 0x00, 0x00, 0x00}, // 0x0000 -> Black  index 8
-	{0xAF, 0x00, 0x00, 0x00}, // Semi transparent
-	{0xFF, 0x42, 0x08, 0x08}, //
+	{0x6F, 0x00, 0x00, 0x00}, // Semi transparent
+	{0xFF, 0xA2, 0x08, 0x08}, // Dark Red
 	{0xFF, 0x63, 0x18, 0xC6}, //
-	{0xFF, 0xAD, 0x52, 0xD6}, //
+	{0xFF, 0xAD, 0x52, 0xD6}, // Orchid
 	{0xFF, 0xCC, 0xCC, 0xCC}, // 0x739C -> Gray (Light) {0xFF, 0xCC, 0xCC, 0xCC}
 	{0xFF, 0x77, 0x77, 0x77}, // 0x18C6 -> Gray (Dark)
 	{0x00, 0, 0, 0},		  // transparent  index 15, 0x0A
@@ -1028,9 +1028,12 @@ void ConvertI4ToRGBA(uint8_t *bitmapI4, uint8_t *rgbaData, uint32_t width, uint3
 			// Extract the first (high) pixel
 			uint8_t index1 = (byte & 0xF0) >> 4;
 			MI_RGN_PaletteElement_t color1 = palette[index1];
-			rgbaData[pixelIndex * 4 + 0] = color1.u8Red;
+
+     //Cairo expects image surfaces to be in premultiplied ARGB32 format on little-endian systems, 
+	 //which in memory layout becomes: memory layout per pixel:  [Blue, Green, Red, Alpha]  (BGRA)
+			rgbaData[pixelIndex * 4 + 2] = color1.u8Red;
 			rgbaData[pixelIndex * 4 + 1] = color1.u8Green;
-			rgbaData[pixelIndex * 4 + 2] = color1.u8Blue;
+			rgbaData[pixelIndex * 4 + 0] = color1.u8Blue;
 			rgbaData[pixelIndex * 4 + 3] = color1.u8Alpha;
 			pixelIndex++;
 
@@ -1038,9 +1041,9 @@ void ConvertI4ToRGBA(uint8_t *bitmapI4, uint8_t *rgbaData, uint32_t width, uint3
 				// Extract the second (low) pixel
 				uint8_t index2 = byte & 0x0F;
 				MI_RGN_PaletteElement_t color2 = palette[index2];
-				rgbaData[pixelIndex * 4 + 0] = color2.u8Red;
+				rgbaData[pixelIndex * 4 + 2] = color2.u8Red;
 				rgbaData[pixelIndex * 4 + 1] = color2.u8Green;
-				rgbaData[pixelIndex * 4 + 2] = color2.u8Blue;
+				rgbaData[pixelIndex * 4 + 0] = color2.u8Blue;
 				rgbaData[pixelIndex * 4 + 3] = color2.u8Alpha;
 				pixelIndex++;
 			}
