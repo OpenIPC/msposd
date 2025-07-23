@@ -1485,7 +1485,7 @@ void remove_carriage_returns(char *out) {
 	out[j] = '\0'; // Null-terminate the modified string
 }
 
-#define MAX_LINES 100 // Maximum number of lines we expect to handle
+#define MAX_LINES 40 // Maximum number of lines we expect to handle
 void split_lines(char *str, char *lines[MAX_LINES], int *line_count) {
 	*line_count = 0;			  // Initialize the line count
 	lines[(*line_count)++] = str; // Store the pointer to the first line
@@ -1634,6 +1634,12 @@ bool DrawTextOnOSDBitmap(char *msg) {
 			BITMAP bitmapTextLine = raster_text(font, osds[FULL_OVERLAY_ID].size, lines[i],
 				color // Create in the desired color instead of  converting it later!
 			);		  // allocates new bitmap, Bus error on goke ?!
+
+			if (heighttl>0 && heighttl + bitmapTextLine.u32Height >= bitmapText.u32Height){
+				//printf("Adjusting line %d offsetY by :%d \n", i, bitmapText.u32Height - (heighttl + bitmapTextLine.u32Height) -1 );
+				heighttl=bitmapText.u32Height - bitmapTextLine.u32Height -1;
+			}
+
 			// raster_text always return argb1555
 			copyRectARGB1555(bitmapTextLine.pData, bitmapTextLine.u32Width,
 				bitmapTextLine.u32Height, bitmapText.pData, bitmapText.u32Width,
@@ -2613,17 +2619,17 @@ static void CloseMSP() {
 	int s32Ret = 0;
 #ifdef __SIGMASTAR__
 	// s32Ret = MI_RGN_Destroy(&osds[FULL_OVERLAY_ID].hand);
-	s32Ret = unload_region(&osds[FULL_OVERLAY_ID].hand);
+	if (DrawOSD){
+		s32Ret = unload_region(&osds[FULL_OVERLAY_ID].hand);
 
-	deinit = MI_RGN_DeInit(DEV2);
-	if (deinit)
-		printf("[%s:%d]RGN_DeInit failed with %#x!\n", __func__, __LINE__, s32Ret);
+		deinit = MI_RGN_DeInit(DEV2);
+		if (deinit)
+			printf("[%s:%d]RGN_DeInit failed with %#x!\n", __func__, __LINE__, s32Ret);
+	}
 #endif
 #if defined(_x86) || defined(__ROCKCHIP__)
 	Close();
-#endif
-
-	munmap(osds, sizeof(*osds) * MAX_OSD);
+#endif	
 
 	if (bitmapFnt.pData != NULL)
 		free(bitmapFnt.pData);
@@ -2634,5 +2640,5 @@ static void CloseMSP() {
 
 	int res_mun = munmap(osds, sizeof(*osds) * MAX_OSD);
 
-	printf("RGN_Destroy: %X, RGN_DeInit: %X\n", s32Ret, deinit);
+	printf("RGN_Destroy: %X, RGN_DeInit: %X, unmap: %d\n", s32Ret, deinit, res_mun);
 }

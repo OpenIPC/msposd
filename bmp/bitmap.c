@@ -805,35 +805,6 @@ void Convert1555ToRGBA(
 	}
 }
 
-/*
-void copyRectARGB1555Slow(
-	uint16_t* srcBitmap, uint32_t srcWidth, uint32_t srcHeight,
-	uint16_t* destBitmap, uint32_t destWidth, uint32_t destHeight,
-	uint32_t srcX, uint32_t srcY, uint32_t width, uint32_t height,
-	uint32_t destX, uint32_t destY)
-{
-	// Bounds checking
-	if (srcX + width > srcWidth || srcY + height > srcHeight ||
-		destX + width > destWidth || destY + height > destHeight){
-		// Handle error: the rectangle is out of bounds
-		printf("Error copyRectARGB1555 to %d : %d\r\n", destX, destY);
-		return;
-	}
-
-	for (uint32_t y = 0; y < height; ++y) {
-		for (uint32_t x = 0; x < width; ++x) {
-			// Calculate the source and destination indices
-			uint32_t srcIndex = (srcY + y) * srcWidth + (srcX + x);
-			uint32_t destIndex = (destY + y) * destWidth + (destX + x);
-
-			//if (srcBitmap[srcIndex]==TRANSPARENT_COLOR)
-			 //   srcBitmap[srcIndex]=0x7FFF;
-			// Copy the pixel
-			destBitmap[destIndex] = srcBitmap[srcIndex];
-		}
-	}
-}
-*/
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h> // for memcpy
@@ -844,8 +815,12 @@ void copyRectARGB1555(uint16_t *srcBitmap, uint32_t srcWidth, uint32_t srcHeight
 	// Bounds checking
 	if (srcX + width > srcWidth || srcY + height > srcHeight || destX + width > destWidth ||
 		destY + height > destHeight) {
-		// Handle error: the rectangle is out of bounds
-		printf("Error copyRectARGB1555 to %d : %d\r\n", destX, destY);
+		// Handle error: the rectangle is out of bounds		
+		printf("Error in copyRectARGB1555: Out of bounds\n"
+       "srcX=%d, srcY=%d, width=%d, height=%d, srcWidth=%d, srcHeight=%d\n"
+       "destX=%d, destY=%d, destWidth=%d, destHeight=%d\n",
+       srcX, srcY, width, height, srcWidth, srcHeight,
+       destX, destY, destWidth, destHeight);
 		return;
 	}
 
@@ -889,35 +864,6 @@ void copyRectRGBA8888(uint32_t *srcBitmap, uint32_t srcWidth, uint32_t srcHeight
 	}
 }
 
-/*
-void copyRectI8Slow(
-	uint8_t* srcBitmap, uint32_t srcWidth, uint32_t srcHeight,
-	uint8_t* destBitmap, uint32_t destWidth, uint32_t destHeight,
-	uint32_t srcX, uint32_t srcY, uint32_t width, uint32_t height,
-	uint32_t destX, uint32_t destY)
-{
-	// Bounds checking
-	if (srcX + width > srcWidth || srcY + height > srcHeight ||
-		destX + width > destWidth || destY + height > destHeight){
-		// Handle error: the rectangle is out of bounds
-		printf("Error copyRectARGB1555 to %d : %d\r\n", destX, destY);
-		return;
-	}
-
-	for (uint32_t y = 0; y < height; ++y) {
-		for (uint32_t x = 0; x < width; ++x) {
-			// Calculate the source and destination indices
-			uint32_t srcIndex = (srcY + y) * srcWidth + (srcX + x);
-			uint32_t destIndex = (destY + y) * destWidth + (destX + x);
-
-			//if (srcBitmap[srcIndex]==TRANSPARENT_COLOR)
-			 //   srcBitmap[srcIndex]=0x7FFF;
-			// Copy the pixel
-			destBitmap[destIndex] = srcBitmap[srcIndex];
-		}
-	}
-}
-*/
 
 void copyRectI8(uint8_t *srcBitmap, uint32_t srcWidth, uint32_t srcHeight, uint8_t *destBitmap,
 	uint32_t destWidth, uint32_t destHeight, uint32_t srcX, uint32_t srcY, uint32_t width,
