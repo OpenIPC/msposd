@@ -2369,13 +2369,13 @@ static void InitMSPHook() {
 	PIXEL_FORMAT_BitsPerPixel = 4;
 #endif
 #if defined(_x86) || defined(__ROCKCHIP__)
-	// enable this to simulate I4 Bitmap Processing of SigmaStar ON THE DESKOP !
-	 PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_I4;//I4 format, 4 bits per pixel
-	 PIXEL_FORMAT_BitsPerPixel = 4;
+	// Enable this to simulate I4 Bitmap Processing of SigmaStar ON THE DESKOP !
+	// PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_I4;//I4 format, 4 bits per pixel
+	// PIXEL_FORMAT_BitsPerPixel = 4;
 
 	// Default 32 bit rendering on the ground
-	//PIXEL_FORMAT_DEFAULT = PIXEL_FORMAT_8888; // ARGB format, 32 bits per pixel
-	//PIXEL_FORMAT_BitsPerPixel = 32;
+	PIXEL_FORMAT_DEFAULT = PIXEL_FORMAT_8888; // ARGB format, 32 bits per pixel
+	PIXEL_FORMAT_BitsPerPixel = 32;
 #endif
 
 	if (!majestic_width && !majestic_height) {

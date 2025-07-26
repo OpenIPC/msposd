@@ -104,7 +104,7 @@
             "program": "${workspaceFolder}/msposd",
             "args": [                
                 "--master",
-                "/dev/ttyUSB0",
+                "/dev/ttyUSB1",
                 "--baudrate",
                 "115200",
                 "--osd",                
@@ -113,7 +113,7 @@
                 "-c",
                 "9",
                 "-r",
-                "50",                
+                "20",                
                 "--ahi",
                 "3",  
                 "--matrix",
