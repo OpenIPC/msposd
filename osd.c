@@ -310,11 +310,13 @@ static const display_info_t fhd_display_info = {
 // keep CPU load low overlays 1 to 8 are taken by OSD tool, but they are limited
 // to 8 in some systems like Goke
 #ifdef __SIGMASTAR__
-#define FULL_OVERLAY_ID 9
-#define FAST_OVERLAY_ID 8
+	#ifdef __INFINITY6C__
+		#define FULL_OVERLAY_ID 0 // No idea why on 6C it works only on channel 0 
+	#else
+		#define FULL_OVERLAY_ID 9
+	#endif
 #else
 #define FULL_OVERLAY_ID 6
-#define FAST_OVERLAY_ID 7
 #endif
 
 char font_2_name[256];
@@ -1864,6 +1866,7 @@ static void draw_screenBMP() {
 											// current_display_info.char_height;
 		// bmpBuff.pData = malloc( bmpBuff.u32Height * bmpBuff.u32Width / 8);
 		if (useDirectBMPBuffer) {
+			//We need to get pointer to the canvas mem every iteration
 			bmpBuff.pData = get_directBMP(osds[FULL_OVERLAY_ID].hand);
 			// clear the image, since it contains the last one
 			memset(bmpBuff.pData, PIXEL_FORMAT_DEFAULT == PIXEL_FORMAT_I4 ? 0xFF : 0x00,
@@ -2367,6 +2370,15 @@ static void InitMSPHook() {
 #ifdef __SIGMASTAR__
 	PIXEL_FORMAT_DEFAULT = PIXEL_FORMAT_I4; // I4 format, 4 bits per pixel
 	PIXEL_FORMAT_BitsPerPixel = 4;
+#ifdef __INFINITY6C__
+	//if I4 is not supported, uncomment these
+	//PIXEL_FORMAT_DEFAULT = PIXEL_FORMAT_1555; // ARGB1555 format, 16 bits per pixel
+	//PIXEL_FORMAT_BitsPerPixel = 16;
+
+	PIXEL_FORMAT_DEFAULT = 3; // ARGB1555 format, 16 bits per pixel
+	PIXEL_FORMAT_BitsPerPixel = 4;
+#endif	
+
 #endif
 #if defined(_x86) || defined(__ROCKCHIP__)
 	// Enable this to simulate I4 Bitmap Processing of SigmaStar ON THE DESKOP !
@@ -2447,16 +2459,22 @@ static void InitMSPHook() {
 	}
 
 #ifdef __SIGMASTAR__
-#if __INFINITY6C__
-	if (MI_SYS_Init(0))
+#if __INFINITY6C__		
+	if (i6c_hal_init())
 		fprintf(stderr, "[%s:%d]MI_SYS_Init failed with!\n", __func__, __LINE__);
-#endif
-
-	int s32Ret = MI_RGN_Init(DEV &g_stPaletteTable);
+	int s32Ret = i6c_region_init(&g_stPaletteTable);	
+	if (verbose)
+		printf("MI_RGN_Init_6c results: %d   \n", s32Ret);
+	if (s32Ret)
+		fprintf(stderr, "[%s:%d]RGN_Init_6c failed with %#x!\n", __func__, __LINE__, s32Ret);
+	
+#else	
+	int s32Ret = MI_RGN_Init(DEV &g_stPaletteTable);	
 	if (verbose)
 		printf("MI_RGN_Init results: %d\n", s32Ret);
 	if (s32Ret)
 		fprintf(stderr, "[%s:%d]RGN_Init failed with %#x!\n", __func__, __LINE__, s32Ret);
+#endif	
 #endif
 
 	int XOffs = (majestic_width - OVERLAY_WIDTH) / 2;
@@ -2471,7 +2489,7 @@ static void InitMSPHook() {
 	if (matrix_size == 9)
 		YOffs = (majestic_height - OVERLAY_HEIGHT); // vertical bottom
 
-	// THIS IS NEEDED, the main region to draw inside
+	// THIS IS NEEDED, the main region to draw inside	
 	if (DrawOSD)
 		rgn =
 			create_region(&osds[FULL_OVERLAY_ID].hand, XOffs, YOffs, OVERLAY_WIDTH, OVERLAY_HEIGHT);
@@ -2489,12 +2507,12 @@ static void InitMSPHook() {
 #endif
 		BITMAP bitmap;
 		int prepared = 0;
-
+		
 		// LOAD PNG TEST, if there is font file loaded, preview it
 		if (/*true*/ bitmapFnt.pData != NULL) { // Split and show a review of the
-												// selected font for several seconds
+												// selected font for several seconds			
 			prepared = 1;
-
+			
 			bitmap.enPixelFormat = PIXEL_FORMAT_DEFAULT;
 			int preview_height =
 				current_display_info.font_height * current_display_info.char_height;
@@ -2504,7 +2522,7 @@ static void InitMSPHook() {
 			int fontPageHeight = rows * current_display_info.font_height; // OVERLAY_HEIGHT;;
 			bitmap.u32Height = OVERLAY_HEIGHT;							  // preview_height;//rows *
 											   // current_display_info.font_height;//OVERLAY_HEIGHT;
-			bitmap.u32Width = OVERLAY_WIDTH; // bitmapFnt.u32Width * cols;
+			bitmap.u32Width = OVERLAY_WIDTH; // bitmapFnt.u32Width * cols;			
 			bitmap.pData = (unsigned char *)malloc(
 				bitmap.u32Height * getRowStride(bitmap.u32Width, PIXEL_FORMAT_BitsPerPixel));
 			memset(bitmap.pData, 0,
@@ -2535,9 +2553,9 @@ static void InitMSPHook() {
 					bitmap.enPixelFormat-PIXEL_FORMAT_DEFAULT;
 					*/
 
-#ifdef __SIGMASTAR__
+#ifdef __SIGMASTAR__	
 			if (verbose)
-				printf("Set SS Font Review %d:%d", bitmap.u32Width, bitmap.u32Height);
+				printf("Set SS Font Review %d:%d\n", bitmap.u32Width, bitmap.u32Height);
 			// For some reason this fails...?!
 			// set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);//bitmap must
 			// match region dimensions!
@@ -2549,7 +2567,7 @@ static void InitMSPHook() {
 			// This is how direct image memory works in sigmastar
 			void *bmp = get_directBMP(osds[FULL_OVERLAY_ID].hand);
 			memcpy(bmp, bitmap.pData,
-				bitmap.u32Height * getRowStride(bitmap.u32Width, PIXEL_FORMAT_BitsPerPixel));
+				bitmap.u32Height * getRowStride(bitmap.u32Width, PIXEL_FORMAT_BitsPerPixel));			
 			MI_RGN_UpdateCanvas(DEV osds[FULL_OVERLAY_ID].hand);
 
 			if (true) {
@@ -2587,14 +2605,14 @@ static void InitMSPHook() {
 
 #endif
 			// free(bitmap.pData);
-		} else { // no font file still, show message on screen
+		} else { // no font file still, show message on screen			
 			cntr = 0;
 			char msgbuff[120];
 			sprintf(msgbuff, "&F48 &L23 Waiting for data on %s ...", _port_name);
 			SetOSDMsg(msgbuff);
 			draw_screenBMP();
 		}
-
+			
 		if (prepared) {
 			if (verbose)
 				printf("set_LOGO with u32Height:%d enPixelFormat %d\n", bitmap.u32Height,
