@@ -344,9 +344,11 @@ void *get_directBMP(int handle) {
 	MI_RGN_CanvasInfo_t stCanvasInfo;
 	memset(&stCanvasInfo, 0, sizeof(stCanvasInfo));
 	int s32Ret = GetCanvas(handle, &stCanvasInfo);
-	// printf("OSD Handle:%d  CanvasStride: %d , Canvas size : %d:%d\r\n",
-	// handle, stCanvasInfo.u32Stride, stCanvasInfo.stSize.u32Width,
-	// stCanvasInfo.stSize.u32Height);
+
+	if (s32Ret)
+		printf("GetCanvas Res: 0x%X, OSD Handle: %d CanvasStride: %d, Canvas size: %d:%d\r\n",
+			s32Ret, handle, stCanvasInfo.u32Stride,
+			stCanvasInfo.stSize.u32Width, stCanvasInfo.stSize.u32Height);
 	return (void *)(stCanvasInfo.virtAddr);
 #endif
 	return NULL;

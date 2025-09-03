@@ -310,11 +310,13 @@ static const display_info_t fhd_display_info = {
 // keep CPU load low overlays 1 to 8 are taken by OSD tool, but they are limited
 // to 8 in some systems like Goke
 #ifdef __SIGMASTAR__
-#define FULL_OVERLAY_ID 9
-#define FAST_OVERLAY_ID 8
+	#ifdef __INFINITY6C__
+		#define FULL_OVERLAY_ID 0 // No idea why on 6C it works only on channel 0 
+	#else
+		#define FULL_OVERLAY_ID 9
+	#endif
 #else
 #define FULL_OVERLAY_ID 6
-#define FAST_OVERLAY_ID 7
 #endif
 
 char font_2_name[256];
@@ -1864,6 +1866,7 @@ static void draw_screenBMP() {
 											// current_display_info.char_height;
 		// bmpBuff.pData = malloc( bmpBuff.u32Height * bmpBuff.u32Width / 8);
 		if (useDirectBMPBuffer) {
+			//We need to get pointer to the canvas mem every iteration
 			bmpBuff.pData = get_directBMP(osds[FULL_OVERLAY_ID].hand);
 			// clear the image, since it contains the last one
 			memset(bmpBuff.pData, PIXEL_FORMAT_DEFAULT == PIXEL_FORMAT_I4 ? 0xFF : 0x00,
@@ -2367,6 +2370,15 @@ static void InitMSPHook() {
 #ifdef __SIGMASTAR__
 	PIXEL_FORMAT_DEFAULT = PIXEL_FORMAT_I4; // I4 format, 4 bits per pixel
 	PIXEL_FORMAT_BitsPerPixel = 4;
+#ifdef __INFINITY6C__
+	//if I4 is not supported, uncomment these
+	//PIXEL_FORMAT_DEFAULT = PIXEL_FORMAT_1555; // ARGB1555 format, 16 bits per pixel
+	//PIXEL_FORMAT_BitsPerPixel = 16;
+
+	PIXEL_FORMAT_DEFAULT = 3; // ARGB1555 format, 16 bits per pixel
+	PIXEL_FORMAT_BitsPerPixel = 4;
+#endif	
+
 #endif
 #if defined(_x86) || defined(__ROCKCHIP__)
 	// Enable this to simulate I4 Bitmap Processing of SigmaStar ON THE DESKOP !
@@ -2537,7 +2549,7 @@ static void InitMSPHook() {
 
 #ifdef __SIGMASTAR__
 			if (verbose)
-				printf("Set SS Font Review %d:%d", bitmap.u32Width, bitmap.u32Height);
+				printf("Set SS Font Review %d:%d\n", bitmap.u32Width, bitmap.u32Height);
 			// For some reason this fails...?!
 			// set_bitmap(osds[FULL_OVERLAY_ID].hand, &bitmap);//bitmap must
 			// match region dimensions!
