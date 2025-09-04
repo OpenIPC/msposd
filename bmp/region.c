@@ -1,9 +1,5 @@
 #include "region.h"
 
-#if defined(__INFINITY6C__)
-#include "bmp/star/i6c_hal.c"
-#endif
-
 // https://wx.comake.online/doc/ds82ff82j7jsd9-SSD220/customer/development/mi/en/exclude/mi_rgn.html
 
 #ifdef __SIGMASTAR__
@@ -29,9 +25,7 @@ int create_region(int *handle, int x, int y, int width, int height) {
 	MI_RGN_ChnPortParam_t stChnAttrCurrent;
 
 #if __INFINITY6C__
-	hal_rect rect = { .height = height, .width = width,
-                        .x = x, .y = y };
-	return i6c_region_create(0,rect,255);
+	stChn.eModId = E_MI_MODULE_ID_VENC;
 #else
 	stChn.eModId = E_MI_RGN_MODID_VPE;
 #endif
@@ -352,9 +346,9 @@ void *get_directBMP(int handle) {
 	int s32Ret = GetCanvas(handle, &stCanvasInfo);
 
 	if (s32Ret)
-	   printf("GetCanvas Res: %X OSD Handle:%d  CanvasStride: %d , Canvas size : %d:%d\r\n",
-	   s32Ret, handle, stCanvasInfo.u32Stride, stCanvasInfo.stSize.u32Width,
-	 stCanvasInfo.stSize.u32Height);
+		printf("GetCanvas Res: 0x%X, OSD Handle: %d CanvasStride: %d, Canvas size: %d:%d\r\n",
+			s32Ret, handle, stCanvasInfo.u32Stride,
+			stCanvasInfo.stSize.u32Width, stCanvasInfo.stSize.u32Height);
 	return (void *)(stCanvasInfo.virtAddr);
 #endif
 	return NULL;
@@ -430,8 +424,8 @@ int unload_region(int *handle) {
 }
 #ifdef __SIGMASTAR__
 
-int GetCanvas(int handle, MI_RGN_CanvasInfo_t *stCanvasInfo) {	
-	int s32Result = MI_RGN_GetCanvasInfo(DEV handle, stCanvasInfo);	
+int GetCanvas(int handle, MI_RGN_CanvasInfo_t *stCanvasInfo) {
+	int s32Result = MI_RGN_GetCanvasInfo(DEV handle, stCanvasInfo);
 	if (s32Result != MI_RGN_OK)
 		return s32Result;
 
