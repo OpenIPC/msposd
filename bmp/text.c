@@ -107,8 +107,34 @@ static inline void calcdim(double *margin, double *height, double *width, const 
 	*width = MAX(*width, lwidth) + 2 * *margin;
 }
 
+SFT *GetCachedFont(const char *font, double size) {        	
+    if (sft.font == NULL || strcmp(last_font_name, font) != 0 || size!=last_font_size) {		
+        if (sft.font) {
+            sft_freefont(sft.font);
+        }
+        loadfont(&sft, font, size, &lmtx);
+        strncpy(last_font_name, font, sizeof(last_font_name) - 1);
+        last_font_name[sizeof(last_font_name) - 1] = '\0';
+		last_font_size=size;	
+		//printf("TrueType Font %s size:%f loaded.\n",last_font_name,last_font_size);	
+    }
+	
+    return &sft;
+}
+
+int FreeCachedFont() {
+	if (sft.font) {		
+		//printf("Unload TrueType font %s sft.font = %p\n",last_font_name, sft.font);
+		sft_freefont(sft.font);
+		return 1;
+	}
+
+	return 0;
+}
+
 RECT measure_text(const char *font, double size, const char *text) {
-	loadfont(&sft, font, size, &lmtx);
+	//loadfont(&sft, font, size, &lmtx);
+	GetCachedFont(font, size);//We will usually have only one font file. lets make it faster
 
 	double margin, height, width;
 	calcdim(&margin, &height, &width, text);
@@ -118,12 +144,13 @@ RECT measure_text(const char *font, double size, const char *text) {
 	rect.height += rect.height & 1;
 	rect.width += rect.width & 1;
 
-	sft_freefont(sft.font);
+	//sft_freefont(sft.font);
 	return rect;
 }
 
 BITMAP raster_text(const char *font, double size, const char *text, uint16_t color) {
-	loadfont(&sft, font, size, &lmtx);
+	//loadfont(&sft, font, size, &lmtx);
+	GetCachedFont(font, size);//We will usually have only one font file. lets make it faster
 
 	double margin, height, width;
 
@@ -175,6 +202,6 @@ BITMAP raster_text(const char *font, double size, const char *text, uint16_t col
 	bitmap.pData = canvas.pixels;
 	bitmap.enPixelFormat = PIXEL_FORMAT_1555;
 
-	sft_freefont(sft.font);
+	//sft_freefont(sft.font);
 	return bitmap;
 }
