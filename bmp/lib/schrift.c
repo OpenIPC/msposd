@@ -238,13 +238,14 @@ SFT_Font *sft_loadfile(char const *filename) {
 	return font;
 }
 
-void sft_freefont(SFT_Font *font) {
+int sft_freefont(SFT_Font *font) {	
 	if (!font)
-		return;
+		return 0;
 	/* Only unmap if we mapped it ourselves. */
 	if (font->source == SrcMapping)
 		unmap_file(font);
-	free(font);
+	free(font);	
+	return 1;
 }
 
 int sft_lmetrics(const SFT *sft, SFT_LMetrics *metrics) {
@@ -481,29 +482,53 @@ static void unmap_file(SFT_Font *font) {
 #else
 
 static int map_file(SFT_Font *font, const char *filename) {
-	struct stat info;
-	int fd;
-	font->memory = MAP_FAILED;
-	font->size = 0;
-	font->source = SrcMapping;
-	if ((fd = open(filename, O_RDONLY)) < 0) {
-		return -1;
-	}
-	if (fstat(fd, &info) < 0) {
-		close(fd);
-		return -1;
-	}
-	/* FIXME do some basic validation on info.st_size maybe - it is signed for
-	 * example, so it *could* be negative .. */
-	font->memory = mmap(NULL, (size_t)info.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-	font->size = (uint_fast32_t)info.st_size;
-	close(fd);
-	return font->memory == MAP_FAILED ? -1 : 0;
+    FILE *fp;
+    size_t n;
+    long size;
+
+    font->memory = NULL;
+    font->size = 0;
+    font->source = SrcMapping;  /* still mark it so unmap_file knows it should free */
+
+    fp = fopen(filename, "rb");
+    if (!fp)
+        return -1;
+
+    if (fseek(fp, 0, SEEK_END) < 0) {
+        fclose(fp);
+        return -1;
+    }
+    size = ftell(fp);
+    if (size < 0) {
+        fclose(fp);
+        return -1;
+    }
+    rewind(fp);
+
+    font->memory = malloc((size_t)size);
+    if (!font->memory) {
+        fclose(fp);
+        return -1;
+    }
+
+    n = fread((void *)font->memory, 1, (size_t)size, fp);
+    fclose(fp);
+
+    if (n != (size_t)size) {
+        free((void *)font->memory);
+        font->memory = NULL;
+        return -1;
+    }
+
+    font->size = (uint_fast32_t)size;
+    return 0;
 }
 
 static void unmap_file(SFT_Font *font) {
-	assert(font->memory != MAP_FAILED);
-	munmap((void *)font->memory, font->size);
+    if (font->memory) {
+        free((void *)font->memory);
+        font->memory = NULL;
+    }
 }
 
 #endif

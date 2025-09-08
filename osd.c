@@ -2445,8 +2445,10 @@ static void InitMSPHook() {
 
 	int rgn = 0;
 
-	osds = mmap(
-		NULL, sizeof(*osds) * MAX_OSD, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
+//	osds = mmap(NULL, sizeof(*osds) * MAX_OSD, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
+	osds = malloc(sizeof(*osds) * MAX_OSD);
+
+
 
 	for (int id = 0; id < MAX_OSD; id++) {
 		osds[id].hand = id;
@@ -2459,22 +2461,7 @@ static void InitMSPHook() {
 	}
 
 #ifdef __SIGMASTAR__
-#if __INFINITY6C__		
-	if (i6c_hal_init())
-		fprintf(stderr, "[%s:%d]MI_SYS_Init failed with!\n", __func__, __LINE__);
-	int s32Ret = i6c_region_init(&g_stPaletteTable);	
-	if (verbose)
-		printf("MI_RGN_Init_6c results: %d   \n", s32Ret);
-	if (s32Ret)
-		fprintf(stderr, "[%s:%d]RGN_Init_6c failed with %#x!\n", __func__, __LINE__, s32Ret);
-	
-#else	
-	int s32Ret = MI_RGN_Init(DEV &g_stPaletteTable);	
-	if (verbose)
-		printf("MI_RGN_Init results: %d\n", s32Ret);
-	if (s32Ret)
-		fprintf(stderr, "[%s:%d]RGN_Init failed with %#x!\n", __func__, __LINE__, s32Ret);
-#endif	
+	InitRGN_SigmaStar();
 #endif
 
 	int XOffs = (majestic_width - OVERLAY_WIDTH) / 2;
@@ -2605,7 +2592,9 @@ static void InitMSPHook() {
 
 #endif
 			// free(bitmap.pData);
-		} else { // no font file still, show message on screen			
+		} else { // no font file still, show message on screen		
+			useDirectBMPBuffer = true;
+			printf("Use Direct Video Memory MODE!\n");	
 			cntr = 0;
 			char msgbuff[120];
 			sprintf(msgbuff, "&F48 &L23 Waiting for data on %s ...", _port_name);
@@ -2633,6 +2622,8 @@ static void InitMSPHook() {
 }
 
 static void CloseMSP() {
+
+
 	int deinit = 0;
 	int s32Ret = 0;
 #ifdef __SIGMASTAR__
@@ -2655,8 +2646,11 @@ static void CloseMSP() {
 		free(bmpBuff.pData);
 	if (bmpFntSmall.pData != NULL)
 		free(bmpFntSmall.pData);
-
-	int res_mun = munmap(osds, sizeof(*osds) * MAX_OSD);
-
-	printf("RGN_Destroy: %X, RGN_DeInit: %X, unmap: %d\n", s32Ret, deinit, res_mun);
+	
+	printf("TrueType Font released: %d\n",FreeCachedFont(sft.font) );
+ 
+	//int res_mun = munmap(osds, sizeof(*osds) * MAX_OSD);
+	if (osds!=NULL)
+		free(osds);
+	printf("RGN_Destroy: %X, RGN_DeInit: %X\n", s32Ret, deinit);
 }
