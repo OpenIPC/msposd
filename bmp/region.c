@@ -21,7 +21,8 @@ const double inv16 = 1.0 / 16.0;
 
 
 
-int InitRGN_SigmaStar(){	
+int InitRGN_SigmaStar(){
+#if __SIGMASTAR__		
 #if __INFINITY6C__		
 	if (i6c_hal_init())
 		fprintf(stderr, "[%s:%d]MI_SYS_Init failed with!\n", __func__, __LINE__);
@@ -38,6 +39,7 @@ int InitRGN_SigmaStar(){
 		printf("MI_RGN_Init results: %d\n", s32Ret);
 	if (s32Ret)
 		fprintf(stderr, "[%s:%d]RGN_Init failed with %#x!\n", __func__, __LINE__, s32Ret);
+#endif	
 #endif	
 }
 
