@@ -117,7 +117,7 @@ void i6c_region_destroy(char handle)
     i6c_rgn.fnDestroyRegion(0, handle);
 }
 
-void i6c_region_init(i6c_rgn_pal *palette)
+int i6c_region_init(i6c_rgn_pal *palette)
 {
     //i6c_rgn_pal palette = {{{0, 0, 0, 0}}};
     i6c_rgn.fnInit(0, palette);

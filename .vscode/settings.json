@@ -80,7 +80,23 @@
       "interface.h": "c",
       "valarray": "c",
       "complex": "c",
-      "source_location": "c"
+      "source_location": "c",
+      "atomic": "c",
+      "bit": "c",
+      "deque": "c",
+      "forward_list": "c",
+      "list": "c",
+      "unordered_map": "c",
+      "unordered_set": "c",
+      "vector": "c",
+      "algorithm": "c",
+      "memory_resource": "c",
+      "memory": "c",
+      "sstream": "c",
+      "stdexcept": "c",
+      "types.h": "c",
+      "i6c_hal.h": "c",
+      "select.h": "c"
     }
   }
   
