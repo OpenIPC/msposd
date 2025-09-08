@@ -6,7 +6,7 @@
             "name": "UDP_OSD",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/msposd",
+            "program": "${workspaceFolder}/msposd",            
             "args": [                
                 "--master",
                 "127.0.0.1:14550",
