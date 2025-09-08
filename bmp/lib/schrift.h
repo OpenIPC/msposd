@@ -73,7 +73,7 @@ const char *sft_version(void);
 
 SFT_Font *sft_loadmem(const void *mem, size_t size);
 SFT_Font *sft_loadfile(const char *filename);
-void sft_freefont(SFT_Font *font);
+int sft_freefont(SFT_Font *font);
 
 int sft_lmetrics(const SFT *sft, SFT_LMetrics *metrics);
 int sft_lookup(const SFT *sft, SFT_UChar codepoint, SFT_Glyph *glyph);

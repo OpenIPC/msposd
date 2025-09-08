@@ -1,5 +1,12 @@
 #include "region.h"
 
+
+#if defined(__INFINITY6C__)
+#include "bmp/star/i6c_hal.h"   // always include prototypes
+#include "bmp/star/i6c_hal.c"
+#endif
+
+
 // https://wx.comake.online/doc/ds82ff82j7jsd9-SSD220/customer/development/mi/en/exclude/mi_rgn.html
 
 #ifdef __SIGMASTAR__
@@ -11,6 +18,28 @@ int PIXEL_FORMAT_DEFAULT = 3; // 0 for PIXEL_FORMAT_1555 , 4 for E_MI_RGN_PIXEL_
 
 extern bool verbose;
 const double inv16 = 1.0 / 16.0;
+
+
+
+int InitRGN_SigmaStar(){	
+#if __INFINITY6C__		
+	if (i6c_hal_init())
+		fprintf(stderr, "[%s:%d]MI_SYS_Init failed with!\n", __func__, __LINE__);
+	//int s32Ret = i6c_region_init(&g_stPaletteTable);	
+	int s32Ret = i6c_region_init((i6c_rgn_pal *)&g_stPaletteTable); //We are sure the structure is the same
+	if (verbose)
+		printf("MI_RGN_Init_6c results: %d   \n", s32Ret);
+	if (s32Ret)
+		fprintf(stderr, "[%s:%d]RGN_Init_6c failed with %#x!\n", __func__, __LINE__, s32Ret);
+	
+#else	
+	int s32Ret = MI_RGN_Init(DEV &g_stPaletteTable);	
+	if (verbose)
+		printf("MI_RGN_Init results: %d\n", s32Ret);
+	if (s32Ret)
+		fprintf(stderr, "[%s:%d]RGN_Init failed with %#x!\n", __func__, __LINE__, s32Ret);
+#endif	
+}
 
 int create_region(int *handle, int x, int y, int width, int height) {
 	int s32Ret = -1;
@@ -25,7 +54,9 @@ int create_region(int *handle, int x, int y, int width, int height) {
 	MI_RGN_ChnPortParam_t stChnAttrCurrent;
 
 #if __INFINITY6C__
-	stChn.eModId = E_MI_MODULE_ID_VENC;
+	hal_rect rect = { .height = height, .width = width,
+                        .x = x, .y = y };
+	return i6c_region_create(0,rect,255);
 #else
 	stChn.eModId = E_MI_RGN_MODID_VPE;
 #endif
@@ -346,9 +377,9 @@ void *get_directBMP(int handle) {
 	int s32Ret = GetCanvas(handle, &stCanvasInfo);
 
 	if (s32Ret)
-		printf("GetCanvas Res: 0x%X, OSD Handle: %d CanvasStride: %d, Canvas size: %d:%d\r\n",
-			s32Ret, handle, stCanvasInfo.u32Stride,
-			stCanvasInfo.stSize.u32Width, stCanvasInfo.stSize.u32Height);
+	   printf("GetCanvas Res: %X OSD Handle:%d  CanvasStride: %d , Canvas size : %d:%d\r\n",
+	   s32Ret, handle, stCanvasInfo.u32Stride, stCanvasInfo.stSize.u32Width,
+	 stCanvasInfo.stSize.u32Height);
 	return (void *)(stCanvasInfo.virtAddr);
 #endif
 	return NULL;
@@ -424,8 +455,8 @@ int unload_region(int *handle) {
 }
 #ifdef __SIGMASTAR__
 
-int GetCanvas(int handle, MI_RGN_CanvasInfo_t *stCanvasInfo) {
-	int s32Result = MI_RGN_GetCanvasInfo(DEV handle, stCanvasInfo);
+int GetCanvas(int handle, MI_RGN_CanvasInfo_t *stCanvasInfo) {	
+	int s32Result = MI_RGN_GetCanvasInfo(DEV handle, stCanvasInfo);	
 	if (s32Result != MI_RGN_OK)
 		return s32Result;
 

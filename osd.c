@@ -2445,8 +2445,10 @@ static void InitMSPHook() {
 
 	int rgn = 0;
 
-	osds = mmap(
-		NULL, sizeof(*osds) * MAX_OSD, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
+//	osds = mmap(NULL, sizeof(*osds) * MAX_OSD, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
+	osds = malloc(sizeof(*osds) * MAX_OSD);
+
+
 
 	for (int id = 0; id < MAX_OSD; id++) {
 		osds[id].hand = id;
@@ -2459,16 +2461,7 @@ static void InitMSPHook() {
 	}
 
 #ifdef __SIGMASTAR__
-#if __INFINITY6C__
-	if (MI_SYS_Init(0))
-		fprintf(stderr, "[%s:%d]MI_SYS_Init failed with!\n", __func__, __LINE__);
-#endif
-
-	int s32Ret = MI_RGN_Init(DEV &g_stPaletteTable);
-	if (verbose)
-		printf("MI_RGN_Init results: %d\n", s32Ret);
-	if (s32Ret)
-		fprintf(stderr, "[%s:%d]RGN_Init failed with %#x!\n", __func__, __LINE__, s32Ret);
+	InitRGN_SigmaStar();
 #endif
 
 	int XOffs = (majestic_width - OVERLAY_WIDTH) / 2;
@@ -2483,7 +2476,7 @@ static void InitMSPHook() {
 	if (matrix_size == 9)
 		YOffs = (majestic_height - OVERLAY_HEIGHT); // vertical bottom
 
-	// THIS IS NEEDED, the main region to draw inside
+	// THIS IS NEEDED, the main region to draw inside	
 	if (DrawOSD)
 		rgn =
 			create_region(&osds[FULL_OVERLAY_ID].hand, XOffs, YOffs, OVERLAY_WIDTH, OVERLAY_HEIGHT);
@@ -2501,12 +2494,12 @@ static void InitMSPHook() {
 #endif
 		BITMAP bitmap;
 		int prepared = 0;
-
+		
 		// LOAD PNG TEST, if there is font file loaded, preview it
 		if (/*true*/ bitmapFnt.pData != NULL) { // Split and show a review of the
-												// selected font for several seconds
+												// selected font for several seconds			
 			prepared = 1;
-
+			
 			bitmap.enPixelFormat = PIXEL_FORMAT_DEFAULT;
 			int preview_height =
 				current_display_info.font_height * current_display_info.char_height;
@@ -2516,7 +2509,7 @@ static void InitMSPHook() {
 			int fontPageHeight = rows * current_display_info.font_height; // OVERLAY_HEIGHT;;
 			bitmap.u32Height = OVERLAY_HEIGHT;							  // preview_height;//rows *
 											   // current_display_info.font_height;//OVERLAY_HEIGHT;
-			bitmap.u32Width = OVERLAY_WIDTH; // bitmapFnt.u32Width * cols;
+			bitmap.u32Width = OVERLAY_WIDTH; // bitmapFnt.u32Width * cols;			
 			bitmap.pData = (unsigned char *)malloc(
 				bitmap.u32Height * getRowStride(bitmap.u32Width, PIXEL_FORMAT_BitsPerPixel));
 			memset(bitmap.pData, 0,
@@ -2547,7 +2540,7 @@ static void InitMSPHook() {
 					bitmap.enPixelFormat-PIXEL_FORMAT_DEFAULT;
 					*/
 
-#ifdef __SIGMASTAR__
+#ifdef __SIGMASTAR__	
 			if (verbose)
 				printf("Set SS Font Review %d:%d\n", bitmap.u32Width, bitmap.u32Height);
 			// For some reason this fails...?!
@@ -2561,7 +2554,7 @@ static void InitMSPHook() {
 			// This is how direct image memory works in sigmastar
 			void *bmp = get_directBMP(osds[FULL_OVERLAY_ID].hand);
 			memcpy(bmp, bitmap.pData,
-				bitmap.u32Height * getRowStride(bitmap.u32Width, PIXEL_FORMAT_BitsPerPixel));
+				bitmap.u32Height * getRowStride(bitmap.u32Width, PIXEL_FORMAT_BitsPerPixel));			
 			MI_RGN_UpdateCanvas(DEV osds[FULL_OVERLAY_ID].hand);
 
 			if (true) {
@@ -2599,14 +2592,16 @@ static void InitMSPHook() {
 
 #endif
 			// free(bitmap.pData);
-		} else { // no font file still, show message on screen
+		} else { // no font file still, show message on screen		
+			useDirectBMPBuffer = true;
+			printf("Use Direct Video Memory MODE!\n");	
 			cntr = 0;
 			char msgbuff[120];
 			sprintf(msgbuff, "&F48 &L23 Waiting for data on %s ...", _port_name);
 			SetOSDMsg(msgbuff);
 			draw_screenBMP();
 		}
-
+			
 		if (prepared) {
 			if (verbose)
 				printf("set_LOGO with u32Height:%d enPixelFormat %d\n", bitmap.u32Height,
@@ -2627,6 +2622,8 @@ static void InitMSPHook() {
 }
 
 static void CloseMSP() {
+
+
 	int deinit = 0;
 	int s32Ret = 0;
 #ifdef __SIGMASTAR__
@@ -2649,8 +2646,11 @@ static void CloseMSP() {
 		free(bmpBuff.pData);
 	if (bmpFntSmall.pData != NULL)
 		free(bmpFntSmall.pData);
-
-	int res_mun = munmap(osds, sizeof(*osds) * MAX_OSD);
-
-	printf("RGN_Destroy: %X, RGN_DeInit: %X, unmap: %d\n", s32Ret, deinit, res_mun);
+	
+	printf("TrueType Font released: %d\n",FreeCachedFont(sft.font) );
+ 
+	//int res_mun = munmap(osds, sizeof(*osds) * MAX_OSD);
+	if (osds!=NULL)
+		free(osds);
+	printf("RGN_Destroy: %X, RGN_DeInit: %X\n", s32Ret, deinit);
 }
