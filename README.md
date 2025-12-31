@@ -142,7 +142,7 @@ This keywords can be added using the PilotName/CraftName fields(INAV/BF/Ardu), o
 ### Usage Example:
 
 ```
-msposd  --master /dev/ttyS2 --baudrate 115200 -c 7 -c 9 --out 127.0.0.1:14555 -osd -r 20 --ahi 1 -v
+msposd  --master /dev/ttyS2 --baudrate 115200 -c 7 -c 9 -osd -r 20 --ahi 1 -v
 ```
 Read on  UART2 with baudrade 115200 and listen for value changes of RC channel 7 and channel 9 that come from the Remote Control via Flight Controller.
 Every time the value is changed with more than 5% the bash script ```channels.sh {Channel} {Value}``` will be started with the provided parameters.  

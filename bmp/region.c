@@ -2,8 +2,8 @@
 
 
 #if defined(__INFINITY6C__)
-#include "bmp/star/i6c_hal.h"   // always include prototypes
-#include "bmp/star/i6c_hal.c"
+#include "star/i6c_hal.h"   // always include prototypes
+#include "star/i6c_hal.c"
 #endif
 
 

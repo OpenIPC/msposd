@@ -17,7 +17,7 @@ msposd --channels 7 --master /dev/ttyUSB0 --baudrate 115200 --out 127.0.0.1:1455
 make osd-x86 VERBOSE=1
 
 ./build.sh star6e
-./build.sh x86
+./build.sh native 
 
 cc msposd.c -I ./include -L/usr/lib/x86_64-linux-gnu/  -lcsfml-graphics -lcsfml-window -lcsfml-system -O1 -g -fsanitize=address -fno-omit-frame-pointer -Wall -Wextra -D_x86 -g -fsanitize=address -levent_core -o msposd
 
