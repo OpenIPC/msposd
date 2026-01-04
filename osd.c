@@ -2370,24 +2370,27 @@ static void InitMSPHook() {
 #ifdef __SIGMASTAR__
 	PIXEL_FORMAT_DEFAULT = PIXEL_FORMAT_I4; // I4 format, 4 bits per pixel
 	PIXEL_FORMAT_BitsPerPixel = 4;
+
 #ifdef __INFINITY6C__
-	//if I4 is not supported, uncomment these
+	//if I4 is not supported ?? uncomment these for slower rendering
 	//PIXEL_FORMAT_DEFAULT = PIXEL_FORMAT_1555; // ARGB1555 format, 16 bits per pixel
 	//PIXEL_FORMAT_BitsPerPixel = 16;
 
-	PIXEL_FORMAT_DEFAULT = 3; // ARGB1555 format, 16 bits per pixel
-	PIXEL_FORMAT_BitsPerPixel = 4;
+	//PIXEL_FORMAT_DEFAULT = PIXEL_FORMAT_I4; // PIXEL_FORMAT_I4 format, 4 bits per pixel
+	//PIXEL_FORMAT_BitsPerPixel = 4;
 #endif	
 
 #endif
 #if defined(_x86) || defined(__ROCKCHIP__)
 	// Enable this to simulate I4 Bitmap Processing of SigmaStar ON THE DESKOP !
-	// PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_I4;//I4 format, 4 bits per pixel
-	// PIXEL_FORMAT_BitsPerPixel = 4;
-
+	if (false){
+	 	PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_I4;//I4 format, 4 bits per pixel
+	 	PIXEL_FORMAT_BitsPerPixel = 4;
+	}else{
 	// Default 32 bit rendering on the ground
-	PIXEL_FORMAT_DEFAULT = PIXEL_FORMAT_8888; // ARGB format, 32 bits per pixel
-	PIXEL_FORMAT_BitsPerPixel = 32;
+		PIXEL_FORMAT_DEFAULT = PIXEL_FORMAT_8888; // ARGB format, 32 bits per pixel
+		PIXEL_FORMAT_BitsPerPixel = 32;
+	}
 #endif
 
 	if (!majestic_width && !majestic_height) {
@@ -2592,9 +2595,14 @@ static void InitMSPHook() {
 
 #endif
 			// free(bitmap.pData);
-		} else { // no font file still, show message on screen		
+		} else { // no font file still, show message on screen
+#ifdef __SIGMASTAR__
 			useDirectBMPBuffer = true;
-			printf("Use Direct Video Memory MODE!\n");	
+#else
+			useDirectBMPBuffer = false;
+#endif							
+			if (useDirectBMPBuffer)
+				printf("Use Direct Video Memory MODE!\n");	
 			cntr = 0;
 			char msgbuff[120];
 			sprintf(msgbuff, "&F48 &L23 Waiting for data on %s ...", _port_name);

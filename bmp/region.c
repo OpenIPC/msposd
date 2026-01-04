@@ -2,8 +2,8 @@
 
 
 #if defined(__INFINITY6C__)
-#include "star/i6c_hal.h"   // always include prototypes
-#include "star/i6c_hal.c"
+//#include "star/i6c_hal.h"   // always include prototypes
+//#include "star/i6c_hal.c"
 #endif
 
 
@@ -24,10 +24,16 @@ const double inv16 = 1.0 / 16.0;
 int InitRGN_SigmaStar(){
 #if __SIGMASTAR__		
 #if __INFINITY6C__		
-	if (i6c_hal_init())
-		fprintf(stderr, "[%s:%d]MI_SYS_Init failed with!\n", __func__, __LINE__);
-	//int s32Ret = i6c_region_init(&g_stPaletteTable);	
-	int s32Ret = i6c_region_init((i6c_rgn_pal *)&g_stPaletteTable); //We are sure the structure is the same
+
+	MI_SYS_Init(0);
+	//int s32Ret = i6c_region_init(&g_stPaletteTable);//Old way using Hardware Abstraction, not needed	
+	
+	MI_RGN_InitParam_t p = {0};//Needed for MI_RGN_InitDev some day
+    p.pstPaletteTable = &g_stPaletteTable ;//
+
+	//int s32Ret = MI_RGN_InitDev( 0, &p);//New version, needs to be added in header files
+	int s32Ret = MI_RGN_Init(DEV &g_stPaletteTable);
+	
 	if (verbose)
 		printf("MI_RGN_Init_6c results: %d   \n", s32Ret);
 	if (s32Ret)
@@ -55,13 +61,18 @@ int create_region(int *handle, int x, int y, int width, int height) {
 	MI_RGN_ChnPortParam_t stChnAttr;
 	MI_RGN_ChnPortParam_t stChnAttrCurrent;
 
-#if __INFINITY6C__
-	hal_rect rect = { .height = height, .width = width,
-                        .x = x, .y = y };
-	return i6c_region_create(0,rect,255);
+#if __INFINITY6C__	
+	stChn.s32DevId = 0;
+	stChn.s32ChnId = 0;
+	//Need to test which one performs best!
+	//stChn.eModId = E_MI_RGN_MODID_VPE ;   
+	//stChn.eModId =  2;//I6C_SYS_MOD_VENC =2  
+	stChn.eModId =  34;//I6C_SYS_MOD_SCL =34   
+	//stChn.eModId =  36;//I6C_SYS_MOD_DSP = 36
+	
 #else
 	stChn.eModId = E_MI_RGN_MODID_VPE;
-#endif
+#endif	
 	stChn.s32DevId = 0;
 	stChn.s32ChnId = 0;
 	stChn.s32OutputPortId = 0;
@@ -191,12 +202,14 @@ int create_region(int *handle, int x, int y, int width, int height) {
 
 #if __INFINITY6C__
 	stChn.s32ChnId = 0;
+	stChn.s32OutputPortId = 0;
 #else
 	stChn.s32OutputPortId = 0;
 #endif
 	s32Ret = MI_RGN_AttachToChn(DEV *handle, &stChn, &stChnAttr);
 #if __INFINITY6C__
 	stChn.s32ChnId = 1;
+	stChn.s32OutputPortId = 1;
 #else
 	stChn.s32OutputPortId = 1;
 #endif
