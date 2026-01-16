@@ -11,6 +11,7 @@
 
 #include <X11/keysym.h>
 #include <event2/event.h>
+#include "simple_ini.h"
 
 #if defined(_x86)
 Display *display = NULL;
@@ -20,8 +21,13 @@ bool forcefullscreen = true;
 extern struct event_base *base;
 struct event *x11_event = NULL;
 extern int AHI_TiltY;
+extern int AHI_HorizonSpacing;
 Window RootWindow;
 #endif
+
+extern char current_fc_uid[12] = { 0 };
+extern char current_fc_uid_end_of_string = 0x00;
+extern char current_fc_uid_str[12 * 2 + 1] = { 0 };
 
 #if defined(__ROCKCHIP__)
 #define SHM_NAME "msposd"
@@ -56,13 +62,29 @@ void handle_key_press(XEvent *event) {
 	if ((event->xkey.state & Mod1Mask) && (keysym == XK_Up)) {
 		if (AHI_TiltY < 300)
 			AHI_TiltY += 30;
+		WriteIniInt(current_fc_uid_str,"AHI_TiltY",AHI_TiltY);
 		return;
 	}
 	if ((event->xkey.state & Mod1Mask) && (keysym == XK_Down)) {
 		if (AHI_TiltY > -300)
 			AHI_TiltY -= 30;
+		WriteIniInt(current_fc_uid_str,"AHI_TiltY",AHI_TiltY);
 		return;
 	}
+
+	if ((event->xkey.state & Mod1Mask) && (keysym == XK_Right)) {
+		if (AHI_HorizonSpacing < 32)
+			AHI_HorizonSpacing += 1;
+		WriteIniInt(current_fc_uid_str,"AHI_HorizonSpacing",AHI_HorizonSpacing);
+		return;
+	}
+	if ((event->xkey.state & Mod1Mask) && (keysym == XK_Left)) {
+		if (AHI_HorizonSpacing > 5)
+			AHI_HorizonSpacing -= 1;
+		WriteIniInt(current_fc_uid_str,"AHI_HorizonSpacing",AHI_HorizonSpacing);
+		return;
+	}
+
 }
 
 void event_callback(evutil_socket_t fd, short event, void *arg) {
@@ -390,6 +412,7 @@ void Close() {
 
 extern uint16_t Transform_OVERLAY_WIDTH;
 extern uint16_t Transform_OVERLAY_HEIGHT;
+extern uint16_t Transform_OVERLAY_CENTER;
 extern float Transform_Roll;
 extern float Transform_Pitch;
 bool outlined = true;
@@ -401,9 +424,10 @@ void drawLineGS(int x0, int y0, int x1, int y1, uint32_t color, double thickness
 		uint32_t width = Transform_OVERLAY_WIDTH;
 		uint32_t height = Transform_OVERLAY_HEIGHT;
 		// Apply Transform
-		int OffsY = sin((Transform_Pitch) * (M_PI / 180.0)) * 400;
-		Point img_center = {
-			Transform_OVERLAY_WIDTH / 2, Transform_OVERLAY_HEIGHT / 2}; // Center of the image
+		int OffsY = sin((Transform_Pitch) * (M_PI / 180.0)) * 400;//This is wrong
+		//OffsY = (int)lround(Transform_Pitch);//f * tan(pitch_rad)  This assumes Transform_Pitch is pixels
+
+		Point img_center = {Transform_OVERLAY_WIDTH / 2, Transform_OVERLAY_HEIGHT / 2/*Transform_OVERLAY_CENTER*/}; // Center of the image
 
 		// Define the four corners of the rectangle before rotation
 		Point A = {x0, y0 - OffsY};
@@ -462,6 +486,65 @@ void drawLineGS(int x0, int y0, int x1, int y1, uint32_t color, double thickness
 		cairo_restore(cr);
 	}
 }
+
+
+void drawCircleGS(int cx, int cy, int radius, uint32_t color, double thickness, bool Transpose)
+{
+    if (radius <= 0) return;
+
+    if (Transpose) {
+        // Same transform idea as your line function: pitch-based Y offset + roll rotation around image center.
+        int OffsY = (int)(sin((Transform_Pitch) * (M_PI / 180.0)) * 400); // same as your current logic
+
+        Point img_center = { Transform_OVERLAY_WIDTH / 2, Transform_OVERLAY_HEIGHT / 2 };
+
+        Point C = { cx, cy - OffsY };
+        Point rotated_C;
+        rotate_point(C, img_center, Transform_Roll, &rotated_C);
+
+        cx = rotated_C.x;
+        cy = rotated_C.y;
+
+        // If you want radius to change with pitch/roll, you’d need a more complex projection model.
+    }
+
+    double r = ((color >> 24) & 0xFF) / 255.0;
+    double g = ((color >> 16) & 0xFF) / 255.0;
+    double b = ((color >>  8) & 0xFF) / 255.0;
+    double a = ( color        & 0xFF) / 255.0;
+
+    if (!outlined) {
+        cairo_set_source_rgba(cr, r, g, b, a);
+        cairo_set_line_width(cr, thickness);
+
+        cairo_new_path(cr);
+        cairo_arc(cr, (double)cx, (double)cy, (double)radius, 0.0, 2.0 * M_PI);
+        cairo_stroke(cr);
+    } else {
+        if (thickness > 1) thickness--;
+
+        // Outline/halo pass
+        cairo_save(cr);
+        cairo_set_source_rgba(cr, 0, 0, 0, 0.5);
+        cairo_set_line_width(cr, thickness + 2);
+
+        cairo_new_path(cr);
+        cairo_arc(cr, (double)cx, (double)cy, (double)radius, 0.0, 2.0 * M_PI);
+        cairo_stroke(cr);
+        cairo_restore(cr);
+
+        // Main pass
+        cairo_save(cr);
+        cairo_set_source_rgba(cr, r, g, b, a);
+        cairo_set_line_width(cr, thickness);
+
+        cairo_new_path(cr);
+        cairo_arc(cr, (double)cx, (double)cy, (double)radius, 0.0, 2.0 * M_PI);
+        cairo_stroke(cr);
+        cairo_restore(cr);
+    }
+}
+
 
 // Function to draw rotated text with rotation
 int getTextWidth(const char *text, double size) {

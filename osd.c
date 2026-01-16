@@ -102,9 +102,11 @@ static uint8_t message_buffer[256]; // only needs to be the maximum size of an
 char current_fc_identifier[4];
 static char current_fc_identifier_end_of_string = 0x00;
 
+char current_fc_uid[12];
+char current_fc_uid_end_of_string;
+char current_fc_uid_str[12 * 2 + 1];
+ 
 /* For compressed full-frame transmission */
-static uint16_t msp_character_map_buffer[MAX_DISPLAY_X][MAX_DISPLAY_Y];
-static uint16_t msp_character_map_draw[MAX_DISPLAY_X][MAX_DISPLAY_Y];
 static msp_hd_options_e msp_hd_option = 0;
 static displayport_vtable_t *display_driver = NULL;
 
@@ -134,7 +136,14 @@ static int16_t last_heading = 0;
 
 static int16_t last_directionToHome = 0;
 static int16_t last_distanceToHome = 0;
+
+static int16_t last_groundCourse = 0;
+static int16_t last_altitude = 0;
+static int16_t last_speed = 0;
+static int16_t last_vario = 0; //cm/s
+
 int AHI_TiltY = 50;
+int AHI_HorizonSpacing=15;
 
 // https://github.com/betaflight/betaflight/blob/master/src/main/msp/msp.c#L1949
 typedef struct {
@@ -166,6 +175,8 @@ extern bool DrawOSD;
 
 // SRT/OSD
 extern bool recording_running;
+static void force_draw_ahi();
+
 
 static void send_display_size(int serial_fd) {
 	uint8_t buffer[8];
@@ -237,25 +248,7 @@ uint64_t get_time_ms() {
 	return ts.tv_sec * 1000LL + ts.tv_nsec / 1000000;
 }
 
-/* MSP DisplayPort handlers for compressed mode */
-static void msp_draw_character(uint32_t x, uint32_t y, uint16_t c) {
-	DEBUG_PRINT("drawing char %d at x %d y %d\n", c, x, y);
-	msp_character_map_buffer[x][y] = c;
-}
 
-static void msp_clear_screen() {
-	memset(msp_character_map_buffer, 0, sizeof(msp_character_map_buffer));
-}
-
-static void msp_draw_complete() {
-	memcpy(msp_character_map_draw, msp_character_map_buffer, sizeof(msp_character_map_buffer));
-}
-
-static void msp_set_options(uint8_t font_num, msp_hd_options_e is_hd) {
-	DEBUG_PRINT("Got options!\n");
-	msp_clear_screen();
-	msp_hd_option = is_hd;
-}
 
 /*----------------------------------------------------------------------------------------------------*/
 /*------------CONFIGURE SWITCHES
@@ -423,12 +416,14 @@ static bool InjectChars(char *payload) {
 	} // while
 	return false;
 }
+static int stat_msp_ttl =0;
 
 static void rx_msp_callback(msp_msg_t *msp_message) {
 	// Process a received MSP message from FC and decide whether to send it to
 	// the PTY (DJI) or UDP port (MSP-OSD on Goggles)
 	DEBUG_PRINT("FC->AU MSP msg %d with data len %d\n", msp_message->cmd, msp_message->size);
 	stat_msp_msgs++;
+	stat_msp_ttl++;
 
 	// We will forward ALL MSP traffic, not only DisplayPort
 	if (fb_cursor > sizeof(frame_buffer)) {
@@ -460,16 +455,60 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 		break;
 	}
 
+	case MSP_UID: {
+
+		bool newUID = (memcmp(current_fc_uid, msp_message->payload, 12) != 0);
+		memcpy(current_fc_uid,&msp_message->payload[0], sizeof(current_fc_uid));		 
+		if (newUID){
+			for (int i = 0; i < 12; i++)
+				sprintf(&current_fc_uid_str[i * 2], "%02X", current_fc_uid[i]);   // or %02x
+			current_fc_uid_str[24] = '\0';
+			if (verbose)
+				printf("FC Unique ID: 0x%s\r\n",current_fc_uid_str);		
+			if (DrawOSD){
+			#ifdef _x86				
+				ReadIniInt(current_fc_uid_str,"AHI_TiltY",&AHI_TiltY);
+				ReadIniInt(current_fc_uid_str,"AHI_HorizonSpacing",&AHI_HorizonSpacing);		
+			#endif
+			}
+
+		}
+		break;
+	}
 	case MSP_ATTITUDE: {
 		last_pitch = *(int16_t *)&msp_message->payload[2];
 		last_roll = *(int16_t *)&msp_message->payload[0];
 		last_heading = *(int16_t *)&msp_message->payload[4];
 		stat_msp_msg_attitude++;
-		stat_attitudeDelay = get_time_ms() - last_MSP_ATTITUDE;
+		if (last_MSP_ATTITUDE>0)
+			stat_attitudeDelay = get_time_ms() - last_MSP_ATTITUDE;		
 
 		if (strncmp(current_fc_identifier, "ARDU", 4) == 0)
 			if (abs(last_roll) < 900) // ARDU Pilot needs this fix to revert vertical AHI Direction
 				last_pitch = -last_pitch;
+
+		//trace_fragment(false);
+		if (out_sock > 0 && fb_cursor > 0) { // if there is data to send		
+			//If AHI is enabled, wee need to flush faster to make it responsive. 	
+			// Immediately send AHI message if we draw custom Artificial horizon 
+			if ((AHI_Enabled>0)  // we favour low-latency over efficiency 
+				&& (get_time_ms() - LastPcktSent) > (MinTimeBetweenScreenRefresh/5)) {
+				trace_fragment(false);
+				stat_UDP_MSPframes++;
+				sendto(out_sock, frame_buffer, fb_cursor, 0, (struct sockaddr *)&sin_out,
+					sizeof(sin_out));
+				LastPcktSent = get_time_ms();
+				stat_MSPBytesSent += fb_cursor;
+				fb_cursor = 0;
+				
+			}					
+		}		
+
+		//If AHI is not enabled in the settings, the mspdislpayport refresh rate is rather low and drawscreen is called 5-10 times per second.
+		// This makes the AHI refresh rate low, se we need to redraw it even when there is no complete mspdisplayport frame.
+		if (DrawOSD && (AHI_Enabled>0))
+			force_draw_ahi();//totally wrong approach to call it directly, but nore simple
+
 		// printf("\n Got MSG_ATTITUDE            pitch:%d  roll:%d\n", pitch,
 		// roll);
 		break;
@@ -483,12 +522,23 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 	GPS fix is not dependent of this)
 		*/
 		last_distanceToHome = *(int16_t *)&msp_message->payload[0];
-		last_directionToHome = *(int16_t *)&msp_message->payload[2];
-		// stat_msp_msg_attitude++;
-		// printf("\n Got MSG_ATTITUDE            pitch:%d  roll:%d\n", pitch,
-		// roll);
+		last_directionToHome = *(int16_t *)&msp_message->payload[2];		
+
 		break;
 	}
+
+	case MSP_RAW_GPS: {
+		last_groundCourse = *(int16_t *)&msp_message->payload[14];
+		last_altitude = *(int16_t *)&msp_message->payload[10];
+		last_speed = *(int16_t *)&msp_message->payload[12];
+		//last_groundCourse = last_heading + stat_msp_ttl%90 -45; //Simulate offset 
+		break;
+	}
+	case MSP_ALTITUDE: {
+		last_vario = *(int16_t *)&msp_message->payload[4];
+		break;
+	}
+
 
 	case MSP_RC: {
 		// printf("Got MSP_RC\n");
@@ -525,11 +575,13 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 
 		if (out_sock > 0 && fb_cursor > 0) { // if there is data to send
 			if (msp_message->payload[0] == MSP_DISPLAYPORT_DRAW_SCREEN) {
-				// Try to aggregate several MSP packets into one UDP packets
-				if ((!DrawOSD) && MinTimeBetweenScreenRefresh > 20 &&
-					(get_time_ms() - LastPcktSent) < MinTimeBetweenScreenRefresh) {
+				// Try to aggregate several MSP packets into one UDP packets, but only if we favour efficiency over low-latency
+				//If AHI is enabled, wee need to flush faster to make it responsive. 
+				if ((!DrawOSD) &&  
+					(get_time_ms() - LastPcktSent) < MinTimeBetweenScreenRefresh * ((AHI_Enabled>0)?1:2) ) {// 
 				} // Do not send the frame but keep it in the buffer
 				else {
+					//trace_fragment();
 					stat_UDP_MSPframes++;
 					sendto(out_sock, frame_buffer, fb_cursor, 0, (struct sockaddr *)&sin_out,
 						sizeof(sin_out));
@@ -680,6 +732,7 @@ void draw_character_on_console(int row, int col, char ch) {
 BITMAP bmpFntSmall;
 
 uint16_t character_map[MAX_OSD_WIDTH][MAX_OSD_HEIGHT];
+uint16_t character_map_complete[MAX_OSD_WIDTH][MAX_OSD_HEIGHT];
 
 struct osd *osds; // regions over the overlay
 
@@ -770,41 +823,107 @@ static void draw_AHI() {
 	// drawRectangleI4(bmpBuff.pData, 600 , 400 , 700 , 6, COLOR_GREEN, 1);
 }
 
+typedef struct {
+    double pitch_deg;   // filtered pitch in degrees
+    double roll_deg;    // filtered roll in degrees
+    int initialized;
+} AhiFilterState;
+
+/**
+ * 1st order low-pass filter for AHI pitch/roll.
+ *
+ * @param st        persistent state (keep static)
+ * @param pitch_deg raw pitch in degrees
+ * @param roll_deg  raw roll in degrees
+ * @param dt        seconds per frame (for 20fps use 0.05)
+ * @param tau       time constant in seconds (0.08..0.20 is a good range at 20fps)
+ */
+static void AHI_FilterUpdate(AhiFilterState *st,
+                            double pitch_deg,
+                            double roll_deg,
+                            double dt,
+                            double tau)
+{
+    if (!st) return;
+
+    if (!st->initialized) {
+        st->pitch_deg = pitch_deg;
+        st->roll_deg  = roll_deg;
+        st->initialized = 1;
+        return;
+    }
+
+    if (tau <= 0.0) {
+        // no filtering
+        st->pitch_deg = pitch_deg;
+        st->roll_deg  = roll_deg;
+        return;
+    }
+
+    // alpha computed from dt and tau (stable and framerate-aware)
+    const double alpha = dt / (tau + dt);
+
+    st->pitch_deg += alpha * (pitch_deg - st->pitch_deg);
+    st->roll_deg  += alpha * (roll_deg  - st->roll_deg);
+}
+
+
 /// @brief Ugly implementation. To do : clear from bmp format dependant code
 static void draw_Ladder() {
-	// if (PIXEL_FORMAT_DEFAULT!=PIXEL_FORMAT_I4)
-	//     return;
+
+ 	//trace_fragment(false) ;
+	static AhiFilterState ahiF = {0};
+	double pitch_deg_raw = ((double)last_pitch) / 10.0;
+	double roll_deg_raw  = ((double)last_roll)  / 10.0;
+
+
+	// Deadband (only after init), disabled
+	if (false && ahiF.initialized) {
+		if (fabs(pitch_deg_raw - ahiF.pitch_deg) < 0.28) pitch_deg_raw = ahiF.pitch_deg;
+		if (fabs(roll_deg_raw  - ahiF.roll_deg)  < 0.82) roll_deg_raw  = ahiF.roll_deg;
+	}
+
+	// existing inversion rules operate on pitch_degree/roll_degree later.
+	// So filter FIRST, then invert (keeps filter stable).
+	AHI_FilterUpdate(&ahiF, pitch_deg_raw, roll_deg_raw, 0.05 /*dt*/, 0.03 /*tau*/);
+	double pitch_degree = ahiF.pitch_deg;
+	double roll_degree  = ahiF.roll_deg;
+	 
+
+	if (true){//true  == Do not use filter
+		roll_degree = ((double)last_roll) / 10;
+		pitch_degree = ((double)last_pitch) / 10;
+	}
+
+	Transform_Pitch = pitch_degree;//last_pitch / 10;
+	Transform_Roll = - roll_degree;//last_roll / 10;
 
 	Transform_OVERLAY_WIDTH = OVERLAY_WIDTH;
 	Transform_OVERLAY_HEIGHT = OVERLAY_HEIGHT;
-	Transform_Pitch = last_pitch / 10;
-	Transform_Roll = -last_roll / 10;
+	
+ 
 
 	int TiltY = -AHI_TiltY; // pixels offset on the vertical, negative value means
 							// up, this is camera nose-down angle in pixels
-	// to do, make this in degrees
+	
+	//Transform_OVERLAY_CENTER = (OVERLAY_HEIGHT / 2) + TiltY;
 
 	const bool horizonInvertPitch = false;
 	const bool horizonInvertRoll = false;
 	double horizonWidth = 3;
-	const int horizonSpacing = 150; // This is the zoom level of the vertical axis that AHI will be drawn with, Need to be adjusted for the lens FO
-									// So that the AHI follows the horizon when changing pitch angle
+	
 	const bool horizonShowLadder = true;
-	int horizonRange = 75;					  // total vertical range that the AHI will be drawn over in degrees
+	
 	const int horizonStep = 10;				  //????//degrees per line
-	const bool show_center_indicator = false; ////m_show_center_indicator;
+	const bool show_center_indicator = true; ////
 
 	const double ladder_stroke_faktor = 0.1;
 	const int subline_thickness = 1;
 	double K_AHI_Step = 0.5;
 
 	if (OVERLAY_HEIGHT < 900) { // 720p mode
-		horizonWidth = 2;
-		horizonRange = 50;
+		horizonWidth = 2;		
 	}
-
-	double roll_degree = ((double)last_roll) / 10;
-	double pitch_degree = ((double)last_pitch) / 10;
 
 	if (horizonInvertRoll == true) {
 		roll_degree = roll_degree * -1;
@@ -815,29 +934,64 @@ static void draw_Ladder() {
 
 	const int pos_x = OVERLAY_WIDTH / 2;
 	const int pos_y = (OVERLAY_HEIGHT / 2) + TiltY;
-	const int width_ladder = 80 * horizonWidth;
+	const int width_ladder = 80 * horizonWidth;	
+	int osd_font_size = 18;
+	int ratio = AHI_HorizonSpacing; //In Pixels! This is the zoom level of the vertical axis that AHI will be drawn with, Need to be adjusted for the lens FO. So that the AHI follows the horizon when changing pitch angle; // pixels per degree
+	
+	int step = horizonStep;		// degrees per line
+	
+	const double DEG2RAD = 3.14159265358979323846 / 180.0;
+
+	// spacing knob: pixels per degree near screen center
+	double spacing_px_per_deg = (double)AHI_HorizonSpacing;
+	if (spacing_px_per_deg < 1.0) spacing_px_per_deg = 1.0;
+
+	// focal length in pixels implied by spacing
+	double f = spacing_px_per_deg / DEG2RAD;	
+
+	// Convert pixel TiltY into an equivalent pitch bias in degrees
+	// (sign chosen to match your convention: TiltY<0 moves pivot up)
+	double tilt_deg = atan((double)(-TiltY) / f) / DEG2RAD;
+
+	// Use effective pitch for ladder placement
+	double pitch_eff = pitch_degree + tilt_deg;
+
+	// implied vFOV (only used to choose how many lines to draw)
+	double vFOV_deg = 2.0 * atan((OVERLAY_HEIGHT * 0.5) / f) / DEG2RAD;
+
+	int horizonRange = (int)(vFOV_deg + 10);   // +10° margin
+	if (horizonRange > 180) horizonRange = 180;
+	if (horizonRange < 20)  horizonRange = 20;
+
+	int vrange = horizonRange;
 
 	int px = pos_x - width_ladder / 2;
-
-	if (/*show_center_indicator*/ true) {
-
+	double savedTransformPitch = Transform_Pitch;
+	Transform_Pitch = 0;// f * tan(savedTransformPitch); 
+	
+	if (show_center_indicator) {
 		// Line always drawn in the center to have some orientation where the
 		// center is
 		int line_w = 100 * horizonWidth * 0.2;
-		LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, px - 20, pos_y - 3, px + 20,
-			pos_y - 3, (fabs(roll_degree) > 20) ? COLOR_YELLOW : COLOR_GRAY_Light,
-			(fabs(roll_degree) > 20) ? 3 : 2);
+		float thickness=(fabs(roll_degree) > 20 || (fabs(pitch_degree) > 10) ) ? 3 : 2;
+		int colour=(fabs(roll_degree) > 20) || (fabs(pitch_degree) > 10) ? COLOR_RED : COLOR_GRAY_Light;
+		LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, px - 20, pos_y - 3, px + 20, pos_y - 3, colour, thickness);
+		LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, px - 20, pos_y + 3, px + 20, pos_y + 3, colour, thickness);
+		LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, px + 20, pos_y - 3, px + 28, pos_y + 3, colour, thickness);
+		LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, px + 20, pos_y + 3, px + 28, pos_y + 9, colour, thickness);
+		LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, px + 28, pos_y + 3, px + 28, pos_y + 9, colour, thickness);
+		LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, px - 20, pos_y - 3, px - 20, pos_y + 3, colour, thickness);
 
-		LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, px + width_ladder - 20, pos_y - 3,
-			px + width_ladder + 20, pos_y - 3,
-			(fabs(roll_degree) > 20) ? COLOR_YELLOW : COLOR_GRAY_Light,
-			(fabs(roll_degree) > 20) ? 3 : 2);
+		LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, px + width_ladder - 20, pos_y - 3, px + width_ladder + 20, pos_y - 3, colour, thickness);
+		LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, px + width_ladder - 20, pos_y + 3, px + width_ladder + 20, pos_y + 3, colour, thickness);
+
+		LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, px + width_ladder - 20, pos_y - 3, px + width_ladder - 28,  pos_y + 3, colour, thickness);
+		LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, px + width_ladder - 20, pos_y + 3, px + width_ladder - 28 , pos_y + 9, colour, thickness);
+		LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, px + width_ladder - 28, pos_y + 3, px + width_ladder - 28 , pos_y + 9, colour, thickness);
+
+		LineDirect(bmpBuff.pData, OVERLAY_WIDTH, OVERLAY_HEIGHT, px + width_ladder + 20, pos_y - 3, px + width_ladder + 20 , pos_y + 3, colour, thickness);
 	}
-
-	int osd_font_size = 18;
-	int ratio = horizonSpacing; // pixels per degree
-	int vrange = horizonRange;	// total vertical range in degrees
-	int step = horizonStep;		// degrees per line
+	Transform_Pitch=savedTransformPitch;
 	if (step == 0)
 		step = 10; // avoid div by 0
 	if (ratio == 0)
@@ -852,22 +1006,26 @@ static void draw_Ladder() {
 	int stopH;
 	startH = pitch_degree - vrange / 2;
 	stopH = pitch_degree + vrange / 2;
+
 	if (startH < -90)
 		startH = -90;
 	if (stopH > 90)
 		stopH = 90;
 
+	savedTransformPitch = Transform_Pitch;
+	Transform_Pitch = 0.0; 
+
 	// painter->setPen(m_color);
 	int m_color_def = m_color;
-	for (i = startH / step; i <= stopH / step; i++) {
+	for (i = startH / step; i <= stopH / step; i++) {		
 		m_color = m_color_def;
-		if (i > 0 && i * ratio < 30 && /*showHorizonHeadingLadder*/ true)
-			i = i + 30 / ratio;
 
 		k = i * step;
 		y = pos_y - (i - K_AHI_Step * pitch_degree / step) * ratio;
+		//ChatGPT correct calculations based on tangent
+		double ang_deg = (double)k - pitch_degree; // relative angle between mark and current pitch
+		y = pos_y - (int)lround(f * tan(ang_deg * DEG2RAD));			
 		
-		//sin((Transform_Pitch) * (M_PI / 180.0))
 		if (horizonShowLadder == true) {
 			if (i != 0) {
 				// fix pitch line wrap around at extreme nose up/down
@@ -909,7 +1067,7 @@ static void draw_Ladder() {
 
 #if defined(_x86) || defined(__ROCKCHIP__)
 					char buff_sub_line[6];
-					if (abs(last_pitch) > 150 || abs(last_roll) > 100) {
+					if (abs(last_pitch) > 100 || abs(last_roll) > 100) {
 						sprintf(buff_sub_line, "%d°", n);
 						drawText(buff_sub_line, (px + width_ladder / 2) - 12, y + 8,
 							getcolor(COLOR_WHITE), osd_font_size-2, true, 1);
@@ -964,7 +1122,7 @@ static void draw_Ladder() {
 
 #if defined(_x86) || defined(__ROCKCHIP__)
 					char buff_sub_line[6];
-					if (abs(last_pitch) > 150 || abs(last_roll) > 100) {
+					if (abs(last_pitch) > 100 || abs(last_roll) > 100) {
 						sprintf(buff_sub_line, "%d°", n);
 						drawText(buff_sub_line, (px + width_ladder / 2) - 16, y + 4,
 							getcolor(COLOR_WHITE), osd_font_size-2, true, 1);
@@ -1001,7 +1159,7 @@ static void draw_Ladder() {
 					if ((i == 2 || i == 3)) {
 						if (abs(last_pitch) < 20)
 							ahi_colour = COLOR_GREEN;
-						else if (abs(last_pitch) < 50)
+						else if (abs(last_pitch) <= 100)
 							ahi_colour = COLOR_YELLOW;
 						else if (abs(last_pitch) > 100) {
 							ahi_colour = COLOR_RED;
@@ -1033,7 +1191,7 @@ static void draw_Ladder() {
 					y + osd_font_size / 2 - 4, getcolor(/*ahi_colour*/COLOR_WHITE), osd_font_size, true, 1);
 #endif
 
-				if (AHI_Enabled == 3) { // Draw home
+				if (AHI_Enabled >= 3) { // Draw home
 					uint32_t xHome, yHome;
 					int home_offset = last_directionToHome - last_heading;
 
@@ -1111,9 +1269,66 @@ static void draw_Ladder() {
 						s_width, s_height);
 #endif
 				}
+
+				//DRAW Real Course Vector on the OSD as affected by Wind
+				if (AHI_Enabled >= 3) { // Real path vector
+					uint32_t xHome, yHome;
+					int direction_offset = last_groundCourse - last_heading;
+
+					// Normalize to range [-180, 180]
+					if (direction_offset > 180) {
+						direction_offset -= 360;
+					} else if (direction_offset < -180) {
+						direction_offset += 360;
+					}
+
+					double HFOV_deg   = vFOV_deg * 4 / 3 ; //I use 4:3 sensor that is scewed to 16:9 video !
+					double ahi_width  = width_ladder * 2.5;        // drawable AHI width in px
+					double margin_px  = 20.0;         // if you need to avoid pitch digits (optional)
+
+					double usable_w   = ahi_width - margin_px;
+					double px_per_deg = usable_w / HFOV_deg;     // ~6.222 if margin=40, else 6.667
+
+					double center_x   = start_x + usable_w * 0.5;
+
+					// direction_offset in DEGREES (see note below about /10)
+					double off = direction_offset;
+
+					// project linear
+					//double x = center_x + off * px_per_deg;
+					// project tangent mapping
+					double f = (ahi_width * 0.5) / tan(HFOV_deg * 0.5 * M_PI/180.0);
+					double x = center_x + f * tan(off * M_PI/180.0);
+
+
+					// clamp so it stays within the AHI band
+					double x_min = start_x;
+					double x_max = start_x + usable_w;
+					if (x < x_min) x = x_min;
+					if (x > x_max) x = x_max;
+
+					xHome = (uint32_t)(x + 0.5);
+ 
+					uint32_t xR=xHome, yR=y;
+
+					int climbrate=last_vario/10;// decimeters/second
+					if (climbrate>15)
+						climbrate=15;
+					if (climbrate<-15)
+						climbrate=-15;						
+
+					//xR = (xR + 3) & ~3; // Round up to 4, otherwise I4 bitmap										
+
+#if defined(_x86) || defined(__ROCKCHIP__)
+					if (xR > 0 && xR < OVERLAY_WIDTH && yR > 0 && yR < OVERLAY_HEIGHT  ) 
+						drawCircleGS(xR,yR+climbrate,/*CircleRadius*/ 12 ,getcolor(COLOR_WHITE),2,true);
+#endif
+				}
+
 			}
 		}
 	} // draw ladder
+	Transform_Pitch = savedTransformPitch;
 }
 
 
@@ -1833,7 +2048,8 @@ static bool ReplaceWidgets_Slow(int *x, int *y) {
 	return false;
 }
 
-static void draw_screenBMP() {
+
+static void draw_screenBMP2(bool OnlyAHI) {
 	uint64_t step2 = 0;
 	if (cntr++ < 0) // skip in the beginning to show to font preview
 		return;
@@ -1894,7 +2110,7 @@ static void draw_screenBMP() {
 					return;
 				}
 
-				uint16_t c = character_map[x][y];
+				uint16_t c = OnlyAHI? character_map_complete[x][y] : character_map[x][y];//If this was requeted because of AHI, take last valid map
 
 				// if (ReplaceWidgets_Slow(&x,&y)) // Logic moved to InjectChars
 				//     continue;
@@ -2024,7 +2240,7 @@ static void draw_screenBMP() {
 										 : (bmpBuff.u32Height) - 6; // Uppper or lower line
 
 			drawText(air_unit_info_msg, posX, posY, getcolor(msg_colour),
-				/*font_size*/ osd_font_size, false, 0);
+				/*font_size*/ osd_font_size, false, 1);
 		}
 
 		FlushDrawing();
@@ -2063,6 +2279,9 @@ static void draw_screenBMP() {
 	// free(bitmap.pData);
 }
 
+static void draw_screenBMP(){
+	draw_screenBMP2(false);
+}
 // ---------------------------------------------------
 // ---- Functions to process MSP messages
 //  ---------------------------------------------------
@@ -2077,6 +2296,7 @@ static void draw_character(uint32_t x, uint32_t y, uint16_t c) {
 }
 
 static void clear_screen() {
+	
 	if (cntr++ < 0)
 		return;
 	// ClearScreen();
@@ -2101,9 +2321,19 @@ static void clear_screen() {
 
 static int draws = 0;
 
-static void draw_complete() {
+
+static void force_draw_ahi() {
 	stat_MSP_draw_complete_count++;
 	draws++;
+	draw_screenBMP2(true);
+}
+
+
+static void draw_complete() {
+	
+	stat_MSP_draw_complete_count++;
+	draws++;
+	memcpy(character_map_complete, character_map, sizeof(character_map));
 	draw_screenBMP();
 
 	if (draws < 2 && bitmapFnt.pData == NULL) {

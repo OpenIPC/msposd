@@ -17,6 +17,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/inotify.h>
+#include <stdint.h>
 
 #include <event2/buffer.h>
 #include <event2/bufferevent.h>
@@ -152,6 +153,70 @@ uint64_t get_current_time_ms() // in milliseconds
 	//		return get_current_time_ms_Old();
 	return ts.tv_sec * 1000LL + ts.tv_nsec / 1000000;
 }
+
+
+/* Call this inside the code fragment you want to track */
+
+static void trace_print_window(const unsigned char *hit, int buckets)
+{
+    for (int i = 0; i < buckets; i++) {
+        putchar(hit[i] ? '|' : '.');
+    }
+    putchar('\n');
+    fflush(stdout);
+}
+
+void trace_fragment(bool reset)
+{
+
+	#ifndef DEBUG_
+	return;
+	#endif
+    enum { WINDOW_MS = 1000, BUCKET_MS = 10, BUCKETS = WINDOW_MS / BUCKET_MS };
+
+    static uint64_t start_ms = 0;
+    static unsigned char hit[BUCKETS]; // 0/1 per 10ms bucket
+
+    uint64_t t = get_current_time_ms();
+
+    // First-ever call: just start the window; nothing meaningful to flush yet.
+    if (start_ms == 0) {
+        start_ms = t;
+        memset(hit, 0, sizeof(hit));
+        if (reset) return; // don't print an empty line on first reset
+    }
+
+    uint64_t elapsed = t - start_ms;
+
+    // If asked to reset: flush what we have (if anything), then clear and restart.
+    if (reset) {
+        bool any = false;
+        for (int i = 0; i < BUCKETS; i++) {
+            if (hit[i]) { any = true; break; }
+        }
+        if (any) {
+            trace_print_window(hit, BUCKETS);
+        }
+        start_ms = t;
+        memset(hit, 0, sizeof(hit));
+        return; // reset does not count as a hit (remove if you want it to)
+    }
+
+    // Normal rollover at 1 second: print and reset.
+    if (elapsed >= WINDOW_MS) {
+        trace_print_window(hit, BUCKETS);
+        start_ms = t;
+        memset(hit, 0, sizeof(hit));
+        elapsed = 0;
+    }
+
+    // Mark the bucket for this call
+    int idx = (int)(elapsed / BUCKET_MS);
+    if (idx >= 0 && idx < BUCKETS) {
+        hit[idx] = 1;
+    }
+}
+
 
 static bool parse_host_port(const char *s, struct in_addr *out_addr, in_port_t *out_port) {
 	char host_and_port[32] = {0};
@@ -753,7 +818,7 @@ static void serial_read_cb(struct bufferevent *bev, void *arg) {
 				stat_screen_refresh_count++;
 			if (verbose) {
 				if (DrawOSD)
-					printf("UART Events:%lu MessagesTTL:%u AttitMSGs:%u(%dms) "
+					printf("\rUART Events:%lu MessagesTTL:%u AttitMSGs:%u(%dms) "
 						   "Bytes/S:%lu "
 						   "FPS:%u of %u (skipped:%d), AvgFrameLoad ms:%d | %d "
 						   "| %d | \r\n",
@@ -764,7 +829,7 @@ static void serial_read_cb(struct bufferevent *bev, void *arg) {
 						stat_draw_overlay_2 / stat_screen_refresh_count,
 						stat_draw_overlay_3 / stat_screen_refresh_count);
 				else
-					printf("UART Events:%lu MessagesTTL:%u AttitMSGs:%u(%dms) "
+					printf("\rUART Events:%lu MessagesTTL:%u AttitMSGs:%u(%dms) "
 						   "Bytes/S "
 						   "Recvd:%lu Sent:%u, Screen FPS:%u  MSP_FPS:%u  "
 						   "MSP_UDP_Pckts:%u, AvgFrameLoad ms:%d | %d | \r\n",
@@ -959,7 +1024,7 @@ static bool ReadSerialSimple(int showstat) {
 			stat_screen_refresh_count++;
 		if (verbose) {
 			if (DrawOSD)
-				printf("UART Events:%lu MessagesTTL:%u AttitMSGs:%u(%dms) "
+				printf("\rUART Events:%lu MessagesTTL:%u AttitMSGs:%u(%dms) "
 					   "Bytes/S:%lu "
 					   "FPS:%u of %u (skipped:%d), AvgFrameLoad ms:%d | %d | "
 					   "%d | \r\n",
@@ -970,7 +1035,7 @@ static bool ReadSerialSimple(int showstat) {
 					stat_draw_overlay_2 / stat_screen_refresh_count,
 					stat_draw_overlay_3 / stat_screen_refresh_count);
 			else
-				printf("UART Events:%lu MessagesTTL:%u AttitMSGs:%u(%dms) Bytes/S "
+				printf("\rUART Events:%lu MessagesTTL:%u AttitMSGs:%u(%dms) Bytes/S "
 					   "Recvd:%lu Sent:%u, Screen FPS:%u  MSP_FPS:%u  "
 					   "MSP_UDP_Pckts:%u, "
 					   "AvgFrameLoad ms:%d | %d | \r\n",
@@ -1023,6 +1088,7 @@ static bool ReadSerialSimple(int showstat) {
 static void send_variant_request2(int serial_fd) {
 	uint8_t buffer[6];
 	int res = 0;
+	int cmdlen=6;
 
 	if (AbortNow)
 		return;
@@ -1036,44 +1102,67 @@ static void send_variant_request2(int serial_fd) {
 			ReadSerialSimple(VariantCounter == 0);
 	}
 
-	if (rc_channel_mon_enabled &&
-		VariantCounter % 5 == 1) { // once every 5 cycles, 4 times per second
-		construct_msp_command(buffer, MSP_RC, NULL, 0, MSP_OUTBOUND);
-		res = write(serial_fd, &buffer, sizeof(buffer));
-	} else if (AHI_Enabled) {
-		if (AHI_Enabled == 3 && VariantCounter % 13 == 1) {
-			construct_msp_command(buffer, MSP_COMP_GPS, NULL, 0, MSP_OUTBOUND);
-			res = write(serial_fd, &buffer, sizeof(buffer));
-		} else { // this is called at every POLL, skipping every 5th and every
-				 // 13th, that is 15 times per second
-			construct_msp_command(buffer, MSP_ATTITUDE, NULL, 0, MSP_OUTBOUND);
-			res = write(serial_fd, &buffer, sizeof(buffer));
-			last_MSP_ATTITUDE = get_time_ms();
-		}
-	}
-
-	if (MSP_PollRate <= ++VariantCounter) { // poll every one second
+	// Sending several request right one after another does not work well on INAV ...
+	if (VariantCounter == 0 ) { // poll every one second, at frame 0 
 		construct_msp_command(buffer, MSP_CMD_FC_VARIANT, NULL, 0, MSP_OUTBOUND);
-		res = write(serial_fd, &buffer, sizeof(buffer));
-
-		// Sending several request right one after another does not work well on INAV ...
+		res = write(serial_fd, buffer, cmdlen);	
+	}
+	
+	// Sending several request right one after another does not work well on INAV ...
 		// no need to poll when no fonts are still loaded
-		if (bitmapFnt.pData != NULL && mspVTXenabled) {
-			// Poll for mspVTX
-			construct_msp_command(buffer, MSP_GET_VTX_CONFIG, NULL, 0, MSP_OUTBOUND);
-			res = write(serial_fd, &buffer, sizeof(buffer));
-		}
-		// usleep(20*1000);
-		VariantCounter = 0;
+	if (VariantCounter == 1 && bitmapFnt.pData != NULL && mspVTXenabled) {						
+		construct_msp_command(buffer, MSP_GET_VTX_CONFIG, NULL, 0, MSP_OUTBOUND);
+		res = write(serial_fd, buffer, cmdlen);
 	}
 
 	// Sending several request right one after another does not work well on INAV
 	// ...
-	if (MSP_PollRate - 2 == VariantCounter) { // poll every one second, but one by one!
+	if (VariantCounter==2) { // poll every one second,
 		// poll for FC_STATUS
 		construct_msp_command(buffer, MSP_CMD_STATUS, NULL, 0, MSP_OUTBOUND);
-		res = write(serial_fd, &buffer, sizeof(buffer));
+		res = write(serial_fd, buffer, cmdlen);
 	}
+
+	if (rc_channel_mon_enabled &&
+		VariantCounter % 5 == 3) { // once every 5 cycles, about 4 times per second at 20 cycles per second, that is 3, 8, 13, 18
+		construct_msp_command(buffer, MSP_RC, NULL, 0, MSP_OUTBOUND);
+		res = write(serial_fd, buffer, cmdlen);
+	}
+	
+	if (AHI_Enabled) {
+		if (AHI_Enabled >= 3 && (VariantCounter == 4 || VariantCounter == 14 )) {//twice per second home vector
+			construct_msp_command(buffer, MSP_COMP_GPS, NULL, 0, MSP_OUTBOUND);
+			res = write(serial_fd, buffer, cmdlen);			 
+		}
+		if (AHI_Enabled >= 3 && (VariantCounter == 5 || VariantCounter == 15 )) {//twice per second home vector
+			construct_msp_command(buffer, MSP_RAW_GPS, NULL, 0, MSP_OUTBOUND);
+			res = write(serial_fd, buffer, cmdlen);			 
+		}		
+		if (VariantCounter==5 && (strlen(current_fc_uid)==0 || (get_current_time_ms()/1000)%5==0) ) {//every 5 seconds refresh it
+			construct_msp_command(buffer, MSP_UID, NULL, 0, MSP_OUTBOUND);
+			res = write(serial_fd, buffer, cmdlen);
+		}
+
+		if (AHI_Enabled>=3 && VariantCounter%2==1 ) {//every odd frame
+			construct_msp_command(buffer, MSP_ALTITUDE, NULL, 0, MSP_OUTBOUND);
+			res = write(serial_fd, buffer, cmdlen);
+		}
+		
+
+		// usleep(20000); //never sleep, this hangs the whole app
+		if ( VariantCounter >-1 /*VariantCounter%2==1*/ ){//Every frame
+			construct_msp_command(buffer, MSP_ATTITUDE, NULL, 0, MSP_OUTBOUND);
+			res = write(serial_fd, buffer, cmdlen);
+			last_MSP_ATTITUDE = get_time_ms();
+		}		
+	}
+		
+	VariantCounter++;
+	if (VariantCounter >= MSP_PollRate ){ 
+		trace_fragment(true);
+	 	VariantCounter=0;
+	}
+
 
 	// construct_msp_command(buffer, MSP_CMD_BATTERY_STATE, NULL, 0,
 	// MSP_OUTBOUND);
@@ -1408,7 +1497,13 @@ int main(int argc, char **argv) {
 			if (r > 1000) {
 				enable_simple_uart = true;
 				r = r % 1000;
-				printf("Simple UART Reading mode! %d\n", r);
+				if (r>50)//faster polling rate can fool the FC
+					r=50; 
+				if (r>20)
+					 MSP_PollRate = r;
+				
+				if (verbose)
+					printf("Simple UART Reading mode! FC poll rate: %d\n", r);
 			}
 			MinTimeBetweenScreenRefresh = 1000 / r;
 			resetLastStartValues();

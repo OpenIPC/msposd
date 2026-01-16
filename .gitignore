@@ -17,3 +17,5 @@ msposd
 msposd_rockchip
 version.h
 serial_monitor.c
+*.ini
+
