@@ -142,6 +142,8 @@ static int16_t last_altitude = 0;
 static int16_t last_speed = 0;
 static int16_t last_vario = 0; //cm/s
 
+static msp_state_t *msp_state;
+
 int AHI_TiltY = 50;
 int AHI_HorizonSpacing=15;
 
@@ -772,6 +774,7 @@ uint32_t getcolor(uint8_t index) {
 	MI_RGN_PaletteElement_t element = g_stPaletteTable.astElement[index];
 	uint32_t rgba =
 		(element.u8Red << 24) | (element.u8Green << 16) | (element.u8Blue << 8) | element.u8Alpha;
+	return rgba;
 }
 
 void LineDirect(uint8_t *bmpData, uint32_t width, uint32_t height, int x0, int y0, int x1, int y1,
@@ -1070,7 +1073,7 @@ static void draw_Ladder() {
 					if (abs(last_pitch) > 100 || abs(last_roll) > 100) {
 						sprintf(buff_sub_line, "%d°", n);
 						drawText(buff_sub_line, (px + width_ladder / 2) - 12, y + 8,
-							getcolor(COLOR_WHITE), osd_font_size-2, true, 1);
+							getcolor(COLOR_WHITE), osd_font_size-2, true, 1, 0);
 					}
 #endif
 
@@ -1125,7 +1128,7 @@ static void draw_Ladder() {
 					if (abs(last_pitch) > 100 || abs(last_roll) > 100) {
 						sprintf(buff_sub_line, "%d°", n);
 						drawText(buff_sub_line, (px + width_ladder / 2) - 16, y + 4,
-							getcolor(COLOR_WHITE), osd_font_size-2, true, 1);
+							getcolor(COLOR_WHITE), osd_font_size-2, true, 1, 0);
 					}
 #endif
 				}
@@ -1188,7 +1191,7 @@ static void draw_Ladder() {
 				 
 #if defined(_x86) || defined(__ROCKCHIP__)
 				drawText(buffer, start_x + width_ladder * 2.5 - spacing / 3,
-					y + osd_font_size / 2 - 4, getcolor(/*ahi_colour*/COLOR_WHITE), osd_font_size, true, 1);
+					y + osd_font_size / 2 - 4, getcolor(/*ahi_colour*/COLOR_WHITE), osd_font_size, true, 1, 0);
 #endif
 
 				if (AHI_Enabled >= 3) { // Draw home
@@ -1495,14 +1498,20 @@ void fill(char *str) {
 			float fps;
 			char c[25];
 #ifdef __SIGMASTAR__
+
+	#ifdef __INFINITY6C__
+			FILE *stat = popen("cat /proc/mi_modules/mi_venc/mi_venc0 | grep Fps_1s "
+							   "-A 1 | awk 'NR==2 {print $7, $8}'", "r");			
+	#else
 			FILE *stat = popen("cat /proc/mi_modules/mi_venc/mi_venc0 | grep Fps10s "
 							   "-A 1 | awk 'NR==2 {print $9, $10}'", "r");
+	#endif
 			// Sample result : 34.91 14836
 			if (stat == NULL) {
 				sscanf("34.91 14836", "%f %u", &fps, &bitrate);
 			} else {
-				fscanf(stat, "%f %u", &fps, &bitrate);
-				fclose(stat);
+				fscanf(stat, "%f %u", &fps, &bitrate);				
+				pclose(stat);
 			}
 #else
 			sscanf("34.91 14836", "%f %u", &fps, &bitrate);
@@ -1722,11 +1731,20 @@ char osdmsg[MAX_STATUS_MSG_LEN];
 char ready_osdmsg[MAX_STATUS_MSG_LEN+1];
 
 bool DrawTextOnOSDBitmap(char *msg) {
-	char *font;
+/*	
+char *font;
 #ifdef _x86
 	asprintf(&font, "fonts/%s.ttf", osds[FULL_OVERLAY_ID].font);
 #else
 	asprintf(&font, "/usr/share/fonts/truetype/%s.ttf", osds[FULL_OVERLAY_ID].font);
+#endif
+*/
+
+static char font[256];
+#ifdef _x86
+    snprintf(font, sizeof(font), "fonts/%s.ttf", osds[FULL_OVERLAY_ID].font);
+#else
+    snprintf(font, sizeof(font), "/usr/share/fonts/truetype/%s.ttf", osds[FULL_OVERLAY_ID].font);
 #endif
 
 	if (!osd_msg_enabled) {
@@ -2222,8 +2240,7 @@ static void draw_screenBMP2(bool OnlyAHI) {
 		// strcpy(air_unit_info_msg,"30fps/MCS1 7Mb reset test message that can
 		// be 80 characters long that are enough");
 		if (strlen(air_unit_info_msg) > 1) {
-			int osd_font_size = osds[FULL_OVERLAY_ID].size -
-								6; // Some offset needed to keep the same with air rendering
+			int osd_font_size = osds[FULL_OVERLAY_ID].size - 6; // Some offset needed to keep the same with air rendering
 			uint64_t timems = get_time_ms();
 			int width = getTextWidth(air_unit_info_msg, osd_font_size);
 
@@ -2240,7 +2257,7 @@ static void draw_screenBMP2(bool OnlyAHI) {
 										 : (bmpBuff.u32Height) - 6; // Uppper or lower line
 
 			drawText(air_unit_info_msg, posX, posY, getcolor(msg_colour),
-				/*font_size*/ osd_font_size, false, 1);
+				 osd_font_size, false, 1, 0.2);
 		}
 
 		FlushDrawing();
@@ -2855,7 +2872,7 @@ static void InitMSPHook() {
 	display_driver->draw_complete = &draw_complete;
 	display_driver->set_options = &set_options;
 
-	msp_state_t *msp_state = calloc(1, sizeof(msp_state_t));
+	msp_state = calloc(1, sizeof(msp_state_t));
 	msp_state->cb = &msp_callback;
 }
 
@@ -2890,5 +2907,12 @@ static void CloseMSP() {
 	//int res_mun = munmap(osds, sizeof(*osds) * MAX_OSD);
 	if (osds!=NULL)
 		free(osds);
+
 	printf("RGN_Destroy: %X, RGN_DeInit: %X\n", s32Ret, deinit);
+	free(msp_state); msp_state = NULL;
+    free(display_driver); display_driver = NULL;	
+
+	if (bitmapText.pData) { free(bitmapText.pData); bitmapText.pData = NULL; }
+	if (bmp_x86 && bmp_x86 != bmpBuff.pData) free(bmp_x86);
+
 }

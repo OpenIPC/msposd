@@ -17,7 +17,7 @@ Usage: msposd [OPTIONS]
  -t --temp        Read SoC temperature
  -d --wfb         Monitors wfb.log file and reports errors via HUD messages
  -s --osd         Parse MSP and draw OSD over the video
- -a --ahi         Draw graphic AHI, mode [0-No, 2-Simple 1-Ladder, 3-LadderEx (home indicator on ladder)]
+ -a --ahi         Draw graphic AHI, mode [0-No, 2-Simple 1-Ladder, 3-LadderEx (home indicator on ladder), 4 - Ladder with Fast refresh]
  -x --matrix      OSD matrix [0- 53:20 , 1- 50:18 chars, 11- Variable font size, 9-bottom align 720p mode, 8-center align 720p mode]
     --mspvtx      Enable alpha mspvtx functionality
     --subtitle <path>  Enable OSD/SRT recording

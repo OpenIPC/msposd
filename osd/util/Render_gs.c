@@ -556,95 +556,97 @@ int getTextWidth(const char *text, double size) {
 	return (int)extents.width;
 }
 
-// Function to draw rotated text with rotation
-void drawText(
-	const char *text, int x, int y, uint32_t color, double size, bool Transpose, int Outline) {
-	// Extract the RGBA components from the color
-	double r = ((color >> 24) & 0xFF) / 255.0;
-	double g = ((color >> 16) & 0xFF) / 255.0;
-	double b = ((color >> 8) & 0xFF) / 255.0;
-	double a = (color & 0xFF) / 255.0;
+void drawText(const char *text, int x, int y, uint32_t color, double size, bool Transpose, int Outline, float BackgroundTransparency) {
+    double r = ((color >> 24) & 0xFF) / 255.0;
+    double g = ((color >> 16) & 0xFF) / 255.0;
+    double b = ((color >> 8) & 0xFF) / 255.0;
+    double a = (color & 0xFF) / 255.0;
 
-	// Set the color using RGBA values (each between 0.0 and 1.0)
-	cairo_set_source_rgba(cr, r, g, b, a);
+    cairo_save(cr);
+    
+    // 1. Transformations
+    if (Transpose) {
+        int OffsY = sin((Transform_Pitch) * (M_PI / 180.0)) * 400;
+        Point img_center = {Transform_OVERLAY_WIDTH / 2, Transform_OVERLAY_HEIGHT / 2};
+        Point original_pos = {x, y - OffsY};
+        Point rotated_pos;
+        rotate_point(original_pos, img_center, Transform_Roll, &rotated_pos);
+        x = rotated_pos.x;
+        y = rotated_pos.y;
+    }
 
-	if (Transpose) {
-		uint32_t width = Transform_OVERLAY_WIDTH;
-		uint32_t height = Transform_OVERLAY_HEIGHT;
+    cairo_translate(cr, x, y);
+    if (Transpose) cairo_rotate(cr, Transform_Roll * (M_PI / 180.0));
+    cairo_set_font_size(cr, size);
 
-		// Apply Transform
-		int OffsY = sin((Transform_Pitch) * (M_PI / 180.0)) * 400;
-		Point img_center = {width / 2, height / 2}; // Center of the image
+    // 2. Measure text for the background rectangle
+    double max_w = 0;
+    int line_count = 0;
+    char *text_copy = strdup(text);
+    char *line = strtok(text_copy, "\n");
+    while (line) {
+        cairo_text_extents_t extents;
+        cairo_text_extents(cr, line, &extents);
+        if (extents.width > max_w) max_w = extents.width;
+        line_count++;
+        line = strtok(NULL, "\n");
+    }
+    free(text_copy);
 
-		Point original_pos = {x, y - OffsY};
-		Point rotated_pos;
+    double line_height = size * 1.2;
+    double total_h = line_count * line_height;
 
-		// Rotate the position around the center
-		rotate_point(original_pos, img_center, Transform_Roll, &rotated_pos);
-
-		// Update the transformed position
-		x = rotated_pos.x;
-		y = rotated_pos.y;
+    // 3. Draw Semi-Transparent Background Rectangle
+    // We add a little padding (e.g., 5 pixels) around the text
+	if (BackgroundTransparency>0){
+		double padding = 5.0;
+		cairo_set_source_rgba(cr, 0, 0, 0, BackgroundTransparency); // Black with 40% opacity
+		// Note: y is usually the baseline, so we offset the rectangle slightly up
+		cairo_rectangle(cr, -padding, -size, max_w + (padding * 2), total_h + padding);
+		cairo_fill(cr);
 	}
 
-	cairo_set_font_size(cr, size);
+    // 4. Helper for multi-line path
+    void create_text_path_multiline(cairo_t *cr, const char *txt, double sz) {
+        char *copy = strdup(txt);
+        char *l = strtok(copy, "\n");
+        double y_off = 0;
+        while (l) {
+            cairo_move_to(cr, 0, y_off);
+            cairo_text_path(cr, l);
+            y_off += sz * 1.2;
+            l = strtok(NULL, "\n");
+        }
+        free(copy);
+    }
 
-	// Function to handle multi-line text rendering
-	void draw_text_with_newlines(cairo_t *cr, const char *text) {
-		char *text_copy = strdup(text); // Duplicate the text for modification
-		char *line = strtok(text_copy, "\n"); // Split text by newline
-		double line_spacing = size * 1.2; // Adjust line height
-
-		// printf("draw_text_with_newlines:%s\n", text);
-
-		int y_offset = 0; // Offset for line placement
-		while (line) {
-			// printf("draw_text_line:%s\n", line);
-			cairo_move_to(cr, 0, y_offset);
-			cairo_show_text(cr, line);
-			y_offset += line_spacing; // Move down for the next line
-			line = strtok(NULL, "\n");
-		}
-		free(text_copy);
-	}
-
-	if (false) {
-		cairo_move_to(cr, x, y);
-		cairo_show_text(cr, text);
-	} else {
-		// Save the current state of the Cairo context
+    // 3. Draw Shadow (Optional but highly recommended for readability)
+	if (false){
 		cairo_save(cr);
-		cairo_translate(cr, x, y);
-
-		if (Transpose)
-			cairo_rotate(cr, Transform_Roll * (M_PI / 180.0));
-
-		if (Outline) {
-			// Draw the outline (stroke) first with a larger line width
-			cairo_set_line_width(cr, Outline); // Adjust the width as needed for the outline
-			cairo_set_source_rgba(cr, 0, 0, 0,
-				1.0); // Set color for the outline (black)
-			cairo_move_to(cr, 0, 0);
-			cairo_text_path(cr, text); // Create a path for the text
-			cairo_stroke(cr);		   // Stroke the path (outline)
-		}
-		// Draw the text itself (fill) on top of the outline
-		cairo_set_line_width(cr, 1.0); // Reset line width to normal
-		cairo_set_source_rgba(cr, r, g, b,
-			a); // Set the original color for the text
-		// Fill the text path with the text color
-		cairo_move_to(cr, 0, 0);
-		draw_text_with_newlines(cr, text);
-		cairo_fill(cr);			   // Fill the path with the text color
-
-		// cairo_move_to(cr, 0, 0);
-		// cairo_set_font_size(cr, size);
-		// cairo_show_text(cr, text);
-
+		cairo_translate(cr, 2, 2); // Shift shadow slightly
+		create_text_path_multiline(cr, text, size);
+		cairo_set_source_rgba(cr, 0, 0, 0, 0.5); // Semi-transparent black
+		cairo_fill(cr);
 		cairo_restore(cr);
 	}
-}
 
+    // 5. Draw Outline (Optional)
+    if (Outline > 0 && (r+g+b)>1.5 ) {//outline only if bright colour
+        create_text_path_multiline(cr, text, size);		
+        cairo_set_source_rgba(cr, 0, 0, 0, 1.0); //black outline
+        cairo_set_line_width(cr, Outline);
+        cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+        cairo_stroke(cr);
+    }
+
+    // 6. Draw Main Text
+    create_text_path_multiline(cr, text, size);
+    cairo_set_source_rgba(cr, r, g, b, a);
+    cairo_fill(cr);
+
+    cairo_restore(cr);
+}
+ 
 void draw_rounded_rectangle(
 	cairo_t *cr, double x, double y, double width, double height, double radius) {
 	cairo_move_to(cr, x + radius, y);
