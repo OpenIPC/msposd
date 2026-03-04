@@ -217,7 +217,9 @@ On the cam msposd can be started like this to forward via port 14550 (default ma
 ```msposd --channels 7 --master /dev/ttyS2 --baudrate 115200 --out 127.0.0.1:14550 --matrix 11 --ahi 3 -r 30```   
 On the ground:  
 ```msposd --master 127.0.0.1:14550  --osd -r 50 --ahi 3 --matrix 11 -v```  
-Use ALT+Up/Down Arrow to center the AHI over horizon.
+Alt + Up/Down: increases/decreases AHI_TiltY so that the AHI can be aligned to real horizon
+Alt + Right/Left: increases/decreas AHI_HorizonSpacing that controls the ladder steps at 10 degree (camera Zoom/focal length)
+Current settings are stored locally per FC Id
 
 ### Diagnosing
 Q: _I see a static map of all characters on the screen but no realtime OSD_.  

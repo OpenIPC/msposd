@@ -60,13 +60,13 @@ star6e: version.h
 native: version.h
 	$(eval SDK = ./sdk/gk7205v300)
 	$(eval CFLAGS += -D_x86)
-	$(eval LIB = -lcsfml-graphics -lcsfml-window -lcsfml-system `pkg-config --libs cairo x11` -lm)
+	$(eval LIB = -lcsfml-graphics -lcsfml-window -lcsfml-system `pkg-config --libs cairo x11 xext` -lXext -lm)
 	$(eval BUILD = $(CC) $(SRCS) -I $(SDK)/include -L $(DRV) $(CFLAGS) $(LIB) -levent_core -O0 -g -o $(OUTPUT))
 	$(BUILD)
 
 rockchip: version.h
 	$(eval SDK = ./sdk/gk7205v300)
 	$(eval CFLAGS += -D__ROCKCHIP__)
-	$(eval LIB = `pkg-config --libs cairo x11` -lm -lrt)
+	$(eval LIB = `pkg-config --libs cairo x11 xext` -lXext -lm -lrt)
 	$(eval BUILD = $(CC) $(SRCS) -I $(SDK)/include -L $(DRV) $(CFLAGS) $(LIB) -levent_core -O0 -g -o $(OUTPUT))
 	$(BUILD)

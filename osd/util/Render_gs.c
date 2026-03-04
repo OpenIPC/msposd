@@ -2,12 +2,20 @@
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <X11/extensions/XShm.h>
 #include <cairo/cairo-xlib.h>
 #include <cairo/cairo.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#include <stdint.h>
+#include <stdbool.h>
+
+#include <errno.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
 
 #include <X11/keysym.h>
 #include <event2/event.h>
@@ -16,13 +24,41 @@
 #if defined(_x86)
 Display *display = NULL;
 Window window;
-Pixmap backbuffer_pixmap;
 bool forcefullscreen = true;
 extern struct event_base *base;
 struct event *x11_event = NULL;
 extern int AHI_TiltY;
 extern int AHI_HorizonSpacing;
 Window RootWindow;
+
+// ---------------------------------------------------------------------------
+// SHM double-buffer renderer (low-latency XShm pipeline)
+// ---------------------------------------------------------------------------
+typedef struct {
+    uint32_t width;
+    uint32_t height;
+
+    volatile uint32_t frame_ready;
+    volatile uint32_t current_frame;
+
+    uint8_t padding[56];
+
+    uint8_t data[];
+} OSDShmControl;
+
+#define OSD_SHM_FRAMES 2
+
+static XShmSegmentInfo shm_seg;
+static XImage *shm_image = NULL;
+static OSDShmControl *osd_ctrl = NULL;
+static size_t frame_size = 0;
+static uint8_t *shm_frames[OSD_SHM_FRAMES] = {0};
+static GC shm_gc = 0;
+static int shm_sysv_id = -1;
+static uint32_t shm_pending_frame = 0;
+
+static cairo_surface_t *shm_cairo_surfaces[OSD_SHM_FRAMES] = {0};
+static cairo_t *shm_cairo_ctx[OSD_SHM_FRAMES] = {0};
 #endif
 
 extern char current_fc_uid[12] = { 0 };
@@ -168,10 +204,94 @@ int Init(uint16_t *width, uint16_t *height) {
 			(unsigned char *)&windowTypeDock, 1);
 	}
 	// Create a Cairo surface for drawing on the X11 window
-	surface_back = cairo_xlib_surface_create(display, window, vinfo.visual, *width, *height);
-	surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, *width, *height);
-	cr = cairo_create(surface);
-	cr_back = cairo_create(surface_back);
+
+	// ---------------- XShm triple-buffer init ----------------
+	if (!XShmQueryExtension(display)) {
+		fprintf(stderr, "XShm extension not available; falling back to non-SHM path\n");
+		surface_back = cairo_xlib_surface_create(display, window, vinfo.visual, *width, *height);
+		surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, *width, *height);
+		cr = cairo_create(surface);
+		cr_back = cairo_create(surface_back);
+		return 0;
+	}
+
+	frame_size = (size_t)(*width) * (size_t)(*height) * 4;
+	size_t total_size = sizeof(OSDShmControl) + (OSD_SHM_FRAMES * frame_size);
+
+	shm_sysv_id = shmget(IPC_PRIVATE, total_size, IPC_CREAT | 0600);
+	if (shm_sysv_id < 0) {
+		perror("shmget");
+		return 1;
+	}
+
+	shm_seg.shmid = shm_sysv_id;
+	shm_seg.shmaddr = shmat(shm_sysv_id, 0, 0);
+	shm_seg.readOnly = False;
+	if (shm_seg.shmaddr == (char *)-1) {
+		perror("shmat");
+		return 1;
+	}
+
+	osd_ctrl = (OSDShmControl *)shm_seg.shmaddr;
+	osd_ctrl->width = (uint32_t)(*width);
+	osd_ctrl->height = (uint32_t)(*height);
+	osd_ctrl->frame_ready = 0;
+	osd_ctrl->current_frame = 0;
+
+	uint8_t *data_base = osd_ctrl->data;
+	for (int i = 0; i < OSD_SHM_FRAMES; i++) {
+		shm_frames[i] = data_base + ((size_t)i * frame_size);
+		memset(shm_frames[i], 0x00, frame_size);
+	}
+
+	// Create the XImage; we will point its data at each frame buffer before present.
+	shm_image = XShmCreateImage(
+		display,
+		vinfo.visual,
+		(unsigned)vinfo.depth,
+		ZPixmap,
+		(char *)shm_frames[0],
+		&shm_seg,
+		(unsigned)*width,
+		(unsigned)*height);
+	if (!shm_image) {
+		fprintf(stderr, "XShmCreateImage failed\n");
+		return 1;
+	}
+
+	if (!XShmAttach(display, &shm_seg)) {
+		fprintf(stderr, "XShmAttach failed\n");
+		return 1;
+	}
+	XSync(display, False);
+
+	shm_gc = XCreateGC(display, window, 0, NULL);
+	if (!shm_gc) {
+		fprintf(stderr, "XCreateGC failed\n");
+		return 1;
+	}
+
+	// Create Cairo surfaces/contexts directly over each SHM frame.
+	// NOTE: CAIRO_FORMAT_ARGB32 expects premultiplied alpha. If your source
+	// buffer isn't premultiplied, call premultiplyAlpha() before Render().
+	for (int i = 0; i < OSD_SHM_FRAMES; i++) {
+		shm_cairo_surfaces[i] = cairo_image_surface_create_for_data(
+			shm_frames[i], CAIRO_FORMAT_ARGB32, *width, *height, shm_image->bytes_per_line);
+		if (cairo_surface_status(shm_cairo_surfaces[i]) != CAIRO_STATUS_SUCCESS) {
+			fprintf(stderr, "Failed to create SHM cairo surface %d\n", i);
+			return 1;
+		}
+		shm_cairo_ctx[i] = cairo_create(shm_cairo_surfaces[i]);
+	}
+
+	// Keep legacy globals pointing at the current frame so helpers like ClearScreen() work.
+	surface = shm_cairo_surfaces[0];
+	cr = shm_cairo_ctx[0];
+	// surface_back/cr_back are unused in SHM path
+	surface_back = NULL;
+	cr_back = NULL;
+
+	return 0;
 }
 #endif
 
@@ -259,15 +379,15 @@ int Init(uint16_t *width, uint16_t *height) {
 #endif
 
 void premultiplyAlpha(uint32_t *rgbaData, uint32_t width, uint32_t height) {
-	for (uint32_t i = 0; i < width * height; ++i) {
-		uint8_t *pixel = (uint8_t *)&rgbaData[i];
-		uint8_t a = pixel[3]; // Alpha channel
+    for (uint32_t i = 0; i < width * height; ++i) {
+        uint8_t *pixel = (uint8_t *)&rgbaData[i];
+        uint8_t a = pixel[3]; // Alpha channel
 
-		// Premultiply RGB by alpha
-		pixel[0] = (pixel[0] * a) / 255; // Blue channel
-		pixel[1] = (pixel[1] * a) / 255; // Green channel
-		pixel[2] = (pixel[2] * a) / 255; // Red channel
-	}
+        // Premultiply RGB by alpha
+        pixel[0] = (pixel[0] * a) / 255; // Blue channel
+        pixel[1] = (pixel[1] * a) / 255; // Green channel
+        pixel[2] = (pixel[2] * a) / 255; // Red channel
+    }
 }
 
 void ClearScreen() {
@@ -278,11 +398,56 @@ void ClearScreen() {
 
 void Render(unsigned char *rgbaData, int u32Width, int u32Height) {
 
+
+#if defined(_x86)
+	// Fast SHM triple-buffer path: prepare frame, present later in FlushDrawing()
+	if (shm_image && osd_ctrl && shm_gc) {
+		const uint32_t dst_w = osd_ctrl->width;
+		const uint32_t dst_h = osd_ctrl->height;
+		const int stride = shm_image->bytes_per_line;
+
+		uint32_t next = (osd_ctrl->current_frame + 1U) % OSD_SHM_FRAMES;
+		uint8_t *dst = shm_frames[next];
+
+		// Copy row-by-row to respect XImage stride.
+		const int copy_w = (u32Width < (int)dst_w) ? u32Width : (int)dst_w;
+		const int copy_h = (u32Height < (int)dst_h) ? u32Height : (int)dst_h;
+		const size_t row_bytes = (size_t)copy_w * 4;
+		for (int y = 0; y < copy_h; y++) {
+			memcpy(dst + (size_t)y * (size_t)stride,
+				   rgbaData + (size_t)y * (size_t)u32Width * 4,
+				   row_bytes);
+		}
+		// Clear any uncovered area if source smaller than destination
+		if (copy_h < (int)dst_h) {
+			for (uint32_t y = (uint32_t)copy_h; y < dst_h; y++) {
+				memset(dst + (size_t)y * (size_t)stride, 0x00, (size_t)stride);
+			}
+		}
+		if (copy_w < (int)dst_w) {
+			for (int y = 0; y < copy_h; y++) {
+				memset(dst + (size_t)y * (size_t)stride + row_bytes, 0x00,
+					   (size_t)stride - row_bytes);
+			}
+		}
+
+		// Update legacy cairo globals so drawing calls render into this frame.
+		surface = shm_cairo_surfaces[next];
+		cr = shm_cairo_ctx[next];
+		cairo_surface_mark_dirty(surface);
+
+		shm_pending_frame = next;
+		return;
+	}
+#endif
+
+	// -----------------------------------------------------------------------
+	// Legacy (non-SHM) render path (kept for Rockchip / fallback)
+	// -----------------------------------------------------------------------
 	cairo_set_source_rgba(cr, 0, 0, 0, 0); // Transparent background for buffer
-	cairo_set_operator(cr,
-		CAIRO_OPERATOR_SOURCE); // Clear everything on the buffer
+	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
 	cairo_paint(cr);
-	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE); // Restore default operator
+	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
 
 	// bitmap has been changed
 	if (image_surface != NULL && cairo_image_surface_get_data(image_surface) != rgbaData) {
@@ -297,16 +462,13 @@ void Render(unsigned char *rgbaData, int u32Width, int u32Height) {
 		cairo_surface_mark_dirty(image_surface);
 	}
 	cairo_set_source_surface(cr, image_surface, 1, 1);
-
-	// cairo_set_operator(cr, CAIRO_OPERATOR_OVER);//Handles transparency and
-	// blends with the existing background, producing smooth visual results.
-	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE); // Faster, clears all below
+	cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
 	cairo_paint(cr);
 	// XSync(display, False);//seems not needed?
 
 #if defined(_x86)
-	if (forcefullscreen)
-		XRaiseWindow(display, window); // Raise the window to the top
+	//if (forcefullscreen)
+	//	XRaiseWindow(display, window); // Raise the window to the top
 #endif
 }
 
@@ -346,51 +508,59 @@ void Render_rect(unsigned char *rgbaData, int u32Width, int u32Height, int src_x
 }
 
 void FlushDrawing() {
+
 #if defined(_x86)
-	// Hook keyboard- can't be in init procs since there the libevent is not
-	// still created.
-	//  base = event_base_new();
-	if (x11_event == NULL && base != NULL) {
-		// Attach X11 display's file descriptor to the existing msposd
-		// event_base
-		struct event *x11_event =
-			event_new(base, ConnectionNumber(display), EV_READ | EV_PERSIST, event_callback, NULL);
-		event_add(x11_event, NULL);
+    // Hook keyboard- can't be in init procs since there the libevent is not
+    // still created.
+    //  base = event_base_new();
+    if (x11_event == NULL && base != NULL) {
+        // Attach X11 display's file descriptor to the existing msposd
+        // event_base
+        struct event *x11_event =
+            event_new(base, ConnectionNumber(display), EV_READ | EV_PERSIST, event_callback, NULL);
+        event_add(x11_event, NULL);
 
-		// if (XGrabKeyboard(display, window, True, GrabModeAsync,
-		// GrabModeAsync, CurrentTime) != GrabSuccess)
-		//    fprintf(stderr, "Failed to grab keyboard\n");
-		// Grab only the specific key combinations
-		// XGrabKey(display, XKeysymToKeycode(display, XK_Up), Mod1Mask, window,
-		// True,
-		//      GrabModeAsync, GrabModeAsync); // Alt + Up Arrow
-		// XGrabKey(display, XKeysymToKeycode(display, XK_Down), Mod1Mask,
-		// window, True,
-		//      GrabModeAsync, GrabModeAsync); // Alt + Up Arrow
-		// XGrabKey(display, XKeysymToKeycode(display, XK_Left), ShiftMask,
-		// window, True,
-		//      GrabModeAsync, GrabModeAsync); // Shift + Left Arrow
+        XGrabKey(display, XKeysymToKeycode(display, XK_Up), Mod1Mask, RootWindow, True,
+            GrabModeAsync,
+            GrabModeAsync); // Alt + Up Arrow
+        XGrabKey(display, XKeysymToKeycode(display, XK_Down), Mod1Mask, RootWindow, True,
+            GrabModeAsync,
+            GrabModeAsync); // Alt + Down Arrow
+    }
+	if (shm_image && osd_ctrl && shm_gc) {
+		// SHM path: present the frame prepared in Render()
+		const uint32_t dst_w = osd_ctrl->width;
+		const uint32_t dst_h = osd_ctrl->height;
+		shm_image->data = (char *)shm_frames[shm_pending_frame];
+		XShmPutImage(display, window, shm_gc, shm_image,
+			0, 0, 0, 0, (unsigned)dst_w, (unsigned)dst_h, False);
+		XSync(display, False);
 
-		XGrabKey(display, XKeysymToKeycode(display, XK_Up), Mod1Mask, RootWindow, True,
-			GrabModeAsync,
-			GrabModeAsync); // Alt + Up Arrow
-		XGrabKey(display, XKeysymToKeycode(display, XK_Down), Mod1Mask, RootWindow, True,
-			GrabModeAsync,
-			GrabModeAsync); // Alt + Down Arrow
+		osd_ctrl->current_frame = shm_pending_frame;
+		osd_ctrl->frame_ready++;
+
+		if (forcefullscreen)
+			XRaiseWindow(display, window);
+	} else if (cr_back) {
+		// Legacy non-SHM path
+		cairo_set_operator(cr_back, CAIRO_OPERATOR_SOURCE);
+		cairo_set_source_surface(cr_back, surface, 0, 0);
+		cairo_paint(cr_back);
+		cairo_surface_flush(surface_back);
+		XFlush(display);
 	}
 #endif
 
-	// Copy work buffer to the display surface do avoid flickering
-	cairo_set_operator(cr_back, CAIRO_OPERATOR_SOURCE);
-	// Copy buffer to the display surface
-	cairo_set_source_surface(cr_back, surface, 0, 0);
-	cairo_paint(cr_back);
-
-	cairo_surface_flush(surface_back);
-#if defined(_x86)
-	XFlush(display);
+#if !defined(_x86)
+	// Non-x86 path (Rockchip/etc.): copy work buffer to shared display surface
+	if (cr_back) {
+		cairo_set_operator(cr_back, CAIRO_OPERATOR_SOURCE);
+		cairo_set_source_surface(cr_back, surface, 0, 0);
+		cairo_paint(cr_back);
+		cairo_surface_flush(surface_back);
+	}
 #endif
-	// XSync(display, False);//seems not needed?
+    // XSync(display, False);//seems not needed?
 }
 
 void Close() {
@@ -401,6 +571,39 @@ void Close() {
 	cairo_surface_destroy(surface);
 	cairo_surface_destroy(surface_back);
 #if defined(_x86)
+	// Clean up XShm triple-buffer resources
+	if (shm_image) {
+		XShmDetach(display, &shm_seg);
+		XDestroyImage(shm_image);
+		shm_image = NULL;
+	}
+	
+	for (int i = 0; i < OSD_SHM_FRAMES; i++) {
+		if (shm_cairo_ctx[i]) {
+			cairo_destroy(shm_cairo_ctx[i]);
+			shm_cairo_ctx[i] = NULL;
+		}
+		if (shm_cairo_surfaces[i]) {
+			cairo_surface_destroy(shm_cairo_surfaces[i]);
+			shm_cairo_surfaces[i] = NULL;
+		}
+	}
+	
+	if (shm_gc) {
+		XFreeGC(display, shm_gc);
+		shm_gc = 0;
+	}
+	
+	if (osd_ctrl) {
+		shmdt(shm_seg.shmaddr);
+		osd_ctrl = NULL;
+	}
+	
+	if (shm_sysv_id >= 0) {
+		shmctl(shm_sysv_id, IPC_RMID, NULL);
+		shm_sysv_id = -1;
+	}
+	
 	XDestroyWindow(display, window);
 	XCloseDisplay(display);
 
@@ -448,6 +651,13 @@ void drawLineGS(int x0, int y0, int x1, int y1, uint32_t color, double thickness
 	double g = ((color >> 16) & 0xFF) / 255.0;
 	double b = ((color >> 8) & 0xFF) / 255.0;
 	double a = (color & 0xFF) / 255.0; // 128
+
+	// smoother appearance: high-quality antialiasing and round caps/joins
+	if (false){
+		cairo_set_antialias(cr, CAIRO_ANTIALIAS_BEST);
+		cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+		cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+	}
 
 	if (!outlined) {
 		cairo_set_source_rgba(cr, r, g, b, a);
