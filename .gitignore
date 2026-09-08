@@ -14,8 +14,15 @@ msposd_star6b0
 msposd_star6e
 msposd_star6c
 msposd
+msposd_x
 msposd_rockchip
 version.h
 serial_monitor.c
 *.ini
+# PyInstaller output (gs/pack standalone build)
+/build/
+/dist/
+*.spec.bak
 
+
+.claude/

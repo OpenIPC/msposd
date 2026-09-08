@@ -31,6 +31,43 @@ extern int AHI_TiltY;
 extern int AHI_HorizonSpacing;
 Window RootWindow;
 
+static bool osd_raise_enabled(void) {
+	return getenv("MSPOSD_NO_RAISE") == NULL && access("/tmp/msposd-no-raise", F_OK) != 0;
+}
+
+/*
+ * Keep the OSD on top, but THROTTLED. Re-raising every frame forces a compositor
+ * (render_direct.py runs Xfwm) to recomposite the whole screen every frame, which
+ * is a large, launcher-dependent CPU cost and a restack tug-of-war. ~400 ms keeps
+ * the OSD on top with negligible lag, and caches the /tmp/msposd-no-raise access()
+ * check to the same cadence instead of hitting the filesystem every frame.
+ */
+static void osd_maybe_raise(void) {
+	static uint64_t last_ms = 0;
+	uint64_t now = get_time_ms();
+	if (now - last_ms < 400) return;
+	last_ms = now;
+	if (osd_raise_enabled())
+		XRaiseWindow(display, window);
+}
+
+/*
+ * Passively grab a hotkey on the root window for every combination of the lock
+ * modifiers. A plain XGrabKey with modifiers=0 stops matching the moment NumLock
+ * (Mod2) or CapsLock (Lock) is on, which makes the map/POI keys feel dead
+ * "sometimes" — this registers all four lock states so they fire regardless.
+ * `base` is any real modifier the binding needs (e.g. Mod1Mask for Alt combos,
+ * ShiftMask for '+').
+ */
+static void grab_hotkey(KeySym ks, unsigned int base) {
+	KeyCode kc = XKeysymToKeycode(display, ks);
+	if (!kc) return;
+	const unsigned int locks[] = { 0, LockMask, Mod2Mask, LockMask | Mod2Mask };
+	for (int i = 0; i < 4; i++)
+		XGrabKey(display, kc, base | locks[i], RootWindow, True,
+		         GrabModeAsync, GrabModeAsync);
+}
+
 // ---------------------------------------------------------------------------
 // SHM double-buffer renderer (low-latency XShm pipeline)
 // ---------------------------------------------------------------------------
@@ -87,13 +124,69 @@ extern bool verbose;
 #if defined(_x86)
 void rotate_point(Point original, Point img_center, double angle_degrees, Point *rotated);
 
+/*
+ * Suppress X key autorepeat for single-action hotkeys. A held key emits repeated
+ * KeyPress events (~30/s after a ~250 ms delay), which would toggle the map on/off
+ * several times per press. Ignore a repeat of the same key within a window, and
+ * extend the window on each suppressed repeat so the hold duration doesn't matter.
+ * Distinct keys don't suppress each other; a deliberate re-tap after the window
+ * still registers.
+ */
+static bool key_autorepeat(KeySym ks) {
+	static KeySym   last = 0;
+	static uint64_t last_ms = 0;
+	uint64_t now = get_time_ms();
+	if (ks == last && now - last_ms < 400) { last_ms = now; return true; }
+	last = ks;
+	last_ms = now;
+	return false;
+}
+
 void handle_key_press(XEvent *event) {
+	//if (!osd_raise_enabled())
+	//	return;
+
 	KeySym keysym = XLookupKeysym(&event->xkey, 0); // Map keycode to keysym
 
 	// Print the key that was pressed
 	if (keysym == XK_Escape) {
 		printf("Escape key pressed, exiting...\n");
 		// exit(0);  // Exit the program on Escape key
+	}
+
+	// Single-action hotkeys (POI/map toggle, follow, zoom): drop autorepeat so one
+	// physical press = one action. (Alt+arrow AHI keys are left to repeat.)
+	if (keysym == XK_p || keysym == XK_P || keysym == XK_g || keysym == XK_G ||
+	    keysym == XK_f || keysym == XK_F || keysym == XK_h || keysym == XK_H ||
+	    keysym == XK_plus || keysym == XK_equal ||
+	    keysym == XK_KP_Add || keysym == XK_minus || keysym == XK_KP_Subtract) {
+		if (key_autorepeat(keysym))
+			return;
+	}
+
+	if (keysym == XK_p || keysym == XK_P) {
+		poi_toggle_enabled();
+		return;
+	}
+	if (keysym == XK_g || keysym == XK_G) {
+		map_toggle_enabled();   // show/hide map (no-op unless [map] enabled=1)
+		return;
+	}
+	if (keysym == XK_plus || keysym == XK_equal || keysym == XK_KP_Add) {
+		map_zoom_step(+1);      // map zoom in  (no-op unless [map] enabled=1)
+		return;
+	}
+	if (keysym == XK_minus || keysym == XK_KP_Subtract) {
+		map_zoom_step(-1);      // map zoom out (no-op unless [map] enabled=1)
+		return;
+	}
+	if (keysym == XK_f || keysym == XK_F) {
+		map_follow_cycle();     // cycle plane/north/fit (no-op unless [map] enabled=1)
+		return;
+	}
+	if (keysym == XK_h || keysym == XK_H) {
+		map_switch_file();      // load next .mbtiles in the map folder, keeping zoom
+		return;
 	}
 	if ((event->xkey.state & Mod1Mask) && (keysym == XK_Up)) {
 		if (AHI_TiltY < 300)
@@ -123,16 +216,26 @@ void handle_key_press(XEvent *event) {
 
 }
 
-void event_callback(evutil_socket_t fd, short event, void *arg) {
+/*
+ * Drain everything Xlib has queued and dispatch KeyPresses. This must also be
+ * called from the render path: the per-frame XSync() reads pending X input off
+ * the socket into Xlib's INTERNAL queue, after which the libevent fd (which is
+ * level-triggered on the socket) never re-signals for those already-read events —
+ * so relying on event_callback alone silently loses keystrokes. Draining each
+ * frame guarantees they are processed.
+ */
+static void drain_x_events(void) {
 	XEvent xevent;
-	while (XPending(display)) { // Process all queued X events
+	while (XPending(display)) {
 		XNextEvent(display, &xevent);
-		if (xevent.type == Expose) {
-			// Do something here
-		} else if (xevent.type == KeyPress) {
+		if (xevent.type == KeyPress)
 			handle_key_press(&xevent);
-		}
 	}
+}
+
+void event_callback(evutil_socket_t fd, short event, void *arg) {
+	(void)fd; (void)event; (void)arg;
+	drain_x_events();
 }
 
 int Init(uint16_t *width, uint16_t *height) {
@@ -180,6 +283,12 @@ int Init(uint16_t *width, uint16_t *height) {
 	// Select input events: expose, key press, key release
 	XSelectInput(display, window, ExposureMask | KeyPressMask | KeyReleaseMask);
 
+	// NOTE: the OSD stays mouse-opaque by default. While the map's move/resize
+	// mode is active ('m' in gs/mapwin), mapwin temporarily empties this window's
+	// Shape *input* region (X Shape extension) so mouse events pass through to
+	// the map below, and restores it when move mode ends. Keeping the OSD opaque
+	// otherwise preserves the active-fullscreen video covering the taskbar.
+
 	char buffer[50]; // tried to set env var to read it from python, didn't work
 					 // ....
 	snprintf(buffer, sizeof(buffer), "%lu", window);
@@ -191,18 +300,12 @@ int Init(uint16_t *width, uint16_t *height) {
 
 	// Raise the window to the top, may slow down and interfere with the UI,
 	// disable for debugging
-	XRaiseWindow(display, window);
+	if (osd_raise_enabled())
+		XRaiseWindow(display, window);
 
 	// Set input focus to the window
 	// XSetInputFocus(display, window, RevertToParent, CurrentTime);
 
-	// Set window properties to make it transparent
-	if (false) { // seems not needed
-		Atom windowType = XInternAtom(display, "_NET_WM_WINDOW_TYPE", False);
-		Atom windowTypeDock = XInternAtom(display, "_NET_WM_WINDOW_TYPE_DOCK", False);
-		XChangeProperty(display, window, windowType, XA_ATOM, 32, PropModeReplace,
-			(unsigned char *)&windowTypeDock, 1);
-	}
 	// Create a Cairo surface for drawing on the X11 window
 
 	// ---------------- XShm triple-buffer init ----------------
@@ -521,12 +624,23 @@ void FlushDrawing() {
         if (x11_event)
             event_add(x11_event, NULL);
 
-        XGrabKey(display, XKeysymToKeycode(display, XK_Up), Mod1Mask, RootWindow, True,
-            GrabModeAsync,
-            GrabModeAsync); // Alt + Up Arrow
-        XGrabKey(display, XKeysymToKeycode(display, XK_Down), Mod1Mask, RootWindow, True,
-            GrabModeAsync,
-            GrabModeAsync); // Alt + Down Arrow
+        grab_hotkey(XK_Up,   Mod1Mask);   // Alt + Up   (AHI tilt)
+        grab_hotkey(XK_Down, Mod1Mask);   // Alt + Down (AHI tilt)
+        grab_hotkey(XK_p,    0);          // P — toggle POI
+
+        // Map keys (show/hide, zoom, follow) are grabbed ONLY when the map feature
+        // is enabled in config; with [map] enabled=0 msposd grabs nothing new and
+        // these keys pass through to the system exactly as before.
+        if (map_config_enabled()) {
+            grab_hotkey(XK_g,           0);          // show/hide
+            grab_hotkey(XK_f,           0);          // cycle follow mode
+            grab_hotkey(XK_h,           0);          // cycle .mbtiles pack
+            grab_hotkey(XK_equal,       0);          // '=' zoom in
+            grab_hotkey(XK_plus,        ShiftMask);  // '+' (Shift+'=') zoom in
+            grab_hotkey(XK_KP_Add,      0);          // keypad + zoom in
+            grab_hotkey(XK_minus,       0);          // '-' zoom out
+            grab_hotkey(XK_KP_Subtract, 0);          // keypad - zoom out
+        }
     }
 	if (shm_image && osd_ctrl && shm_gc) {
 		// SHM path: present the frame prepared in Render()
@@ -541,7 +655,12 @@ void FlushDrawing() {
 		osd_ctrl->frame_ready++;
 
 		if (forcefullscreen)
-			XRaiseWindow(display, window);
+			osd_maybe_raise();          // throttled: not every frame (see osd_maybe_raise)
+
+		// The XSync above may have pulled KeyPress events off the socket into
+		// Xlib's queue; libevent won't re-signal for those, so dispatch them here
+		// or hotkeys get silently dropped.
+		drain_x_events();
 	} else if (cr_back) {
 		// Legacy non-SHM path
 		cairo_set_operator(cr_back, CAIRO_OPERATOR_SOURCE);
@@ -882,8 +1001,11 @@ void drawText(const char *text, int x, int y, uint32_t color, double size, bool 
 	}
 
     // 5. Draw Outline (Optional)
-    if (Outline > 0 && (r+g+b)>1.5 ) {//outline only if bright colour
-        create_text_path_multiline(cr, text, size);		
+    // Gate on the brightest channel, not the sum, so saturated primaries like
+    // pure red (sum 1.0 but max 1.0) still get a halo; only near-black is skipped.
+    double bright = fmax(r, fmax(g, b));
+    if (Outline > 0 && bright > 0.5 ) {//outline unless the colour is dark
+        create_text_path_multiline(cr, text, size);
         cairo_set_source_rgba(cr, 0, 0, 0, 1.0); //black outline
         cairo_set_line_width(cr, Outline);
         cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);

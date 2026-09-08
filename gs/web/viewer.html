@@ -1,0 +1,1713 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GS Map</title>
+<link rel="stylesheet" href="leaflet.css" />
+<script src="leaflet.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; }
+  #map { position: absolute; inset: 0; }
+  /* In center follow-mode the map container is expanded 2× so rotating it never
+     reveals unloaded tile corners. overflow:hidden on body clips the excess. */
+  body.center-mode { overflow: hidden; }
+  /* In center mode #map is sized & positioned by JS (setupCenterMap) as a large
+     square centred on the plane so CSS rotation never reveals unloaded tiles. */
+  body.center-mode #map { inset: auto; right: auto; bottom: auto; }
+  .plane-icon svg, .home-icon svg { display: block; }
+  .plane-icon svg { transition: transform 0.1s linear; }
+  /* Scale bar: readable on dark/satellite tiles. */
+  .leaflet-control-scale-line { background: rgba(0,0,0,0.55); color: #fff;
+    border-color: rgba(255,255,255,0.8); font-size: 11px; padding: 1px 6px; }
+  /* current zoom, sits under the top-left zoom buttons */
+  .zoombadge { background: rgba(0,0,0,0.65); color: #fff; border: 1px solid #555;
+    border-radius: 4px; font: bold 12px/1 sans-serif; padding: 5px 0; width: 30px;
+    text-align: center; box-shadow: none; }
+  /* terrain height under the pointer (preflight, only when a DEM is stored) */
+  .elevbox { background: rgba(0,0,0,0.65); color: #fff; border: 1px solid #555;
+    border-radius: 4px; font: 12px/1.35 sans-serif; padding: 4px 8px;
+    text-align: right; box-shadow: none; white-space: nowrap; }
+  .elevbox b { font-size: 14px; }
+  .elevbox .sub { color: #aaa; font-size: 10px; }
+  .elevbox.nodata b { color: #888; font-weight: normal; }
+  /* In overlay modes the plane can be anywhere on screen — pulse it so it's easy to spot. */
+  @keyframes planeBlink { 0% { fill: #ffec3d; } 50% { fill: #ff3b30; } 100% { fill: #ffec3d; } }
+  body.overlay .plane-icon path { animation: planeBlink 1s ease-in-out infinite; }
+  @keyframes headingBlink { 0% { stroke: #ffec3d; } 50% { stroke: #ff3b30; } 100% { stroke: #ffec3d; } }
+  body.overlay .heading-line {
+    animation: headingBlink 1s ease-in-out infinite;
+    stroke-linecap: round;
+  }
+  #toolbox {
+    position: absolute; top: 8px; right: 8px; z-index: 1000;
+    display: flex; flex-direction: column; gap: 8px; align-items: stretch;
+  }
+  body.overlay #toolbox { display: none; }       /* preview / full: no toolbox */
+  #panel {
+    font: 12px/1.35 sans-serif; color: #fff;
+    background: rgba(0,0,0,0.6); padding: 10px; border-radius: 6px; width: 230px;
+  }
+  #panel input { width: 70px; }
+  #panel .row { display: flex; justify-content: space-between; align-items: center; margin: 3px 0; }
+  #panel .checkrow { justify-content: flex-start; }
+  #panel .checkrow label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+  #panel .checkrow input[type="checkbox"] { width: auto; margin: 0; }
+  /* Target slots (preflight only) — same collapsing idiom as the POI panel */
+  #tgtpanel {
+    font: 12px/1.3 sans-serif; color: #fff;
+    background: rgba(0,0,0,0.6); padding: 8px; border-radius: 6px; width: 240px;
+  }
+  #tgtpanel .tgthdr { display: flex; align-items: center; gap: 6px; cursor: pointer;
+    font-weight: bold; user-select: none; }
+  #tgtpanel .tgthdr .caret { display: inline-block; width: 12px; color: #9cf; text-align: center; }
+  #tgtbody { margin-top: 6px; }
+  /* Link horizon (preflight only) — same collapsing idiom again */
+  #lospanel {
+    font: 12px/1.3 sans-serif; color: #fff;
+    background: rgba(0,0,0,0.6); padding: 8px; border-radius: 6px; width: 240px;
+  }
+  #lospanel .loshdr { display: flex; align-items: center; gap: 6px; cursor: pointer;
+    font-weight: bold; user-select: none; }
+  #lospanel .loshdr .caret { display: inline-block; width: 12px; color: #9cf; text-align: center; }
+  #losbody { margin-top: 6px; }
+  #losbody .row { display: flex; justify-content: space-between; align-items: center;
+    margin-top: 4px; }
+  #losbody input[type="number"] { width: 56px; box-sizing: border-box; text-align: right;
+    background: rgba(0,0,0,0.45); color: #fff; border: 1px solid #555; border-radius: 3px;
+    font: 11px sans-serif; padding: 2px 4px; }
+  #losbody .hint { color: #bbb; }
+  /* clarifies what the altitude is measured from — it is a fixed altitude, not AGL */
+  #losbody .sublabel { font-size: 10px; color: #999; margin-top: 1px; line-height: 1.2; }
+  #losbody .checkrow input[type="checkbox"] { width: auto; margin: 0; }
+  #losbody .checkrow label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  /* armed: the next map click sets the horizon centre */
+  #lospanel.armed { outline: 1px solid #00e5ff; }
+  .tgtslot { padding: 4px; margin-top: 4px; border: 1px solid transparent; border-radius: 4px; }
+  /* the armed slot: the next map click writes here */
+  .tgtslot.armed { border-color: #ff4d4f; background: rgba(255,77,79,0.12); }
+  .tgtslot input { box-sizing: border-box; background: rgba(0,0,0,0.45); color: #fff;
+    border: 1px solid #555; border-radius: 3px; font: 11px sans-serif; padding: 2px 4px; }
+  .tgtslot .tgtname { width: 100%; }
+  .tgtcoords { display: flex; gap: 4px; margin-top: 3px; }
+  .tgtcoords input { flex: 1; min-width: 0; }
+  .tgtslot .tgtclr { flex: 0 0 auto; width: 20px; background: transparent; border: 0;
+    color: #ff9a9a; cursor: pointer; font-size: 13px; line-height: 1; padding: 0; }
+  /* target name drawn beside its marker, same red as the marker itself */
+  .tgtlabel { color: #ff4d4f; font: bold 11px/1 sans-serif; white-space: nowrap;
+    text-shadow: 0 0 3px #000, 0 0 3px #000; }
+  /* POI type selection tree (preflight only) */
+  #poipanel {
+    font: 12px/1.3 sans-serif; color: #fff;
+    background: rgba(0,0,0,0.6); padding: 8px; border-radius: 6px;
+    width: 240px; max-height: 400px; display: flex; flex-direction: column;
+  }
+  #poipanel .poihdr {
+    flex: 0 0 auto;
+    display: flex; align-items: center; gap: 6px; cursor: pointer;
+    font-weight: bold; margin-bottom: 0; user-select: none;
+  }
+  #poipanel .poihdr .caret {
+    display: inline-block; width: 12px; color: #9cf; text-align: center;
+  }
+  #poibody { margin-top: 6px; min-height: 0; overflow: hidden; }
+  #poitree { max-height: 350px; overflow-y: auto; overflow-x: hidden; padding-right: 4px; }
+  #poitree input { width: auto; margin: 0 3px 0 0; vertical-align: middle; }
+  .poikind { cursor: pointer; user-select: none; padding: 1px 0; white-space: nowrap; }
+  .poikind .caret { display: inline-block; width: 10px; color: #9cf; }
+  .poikids { margin-left: 16px; }
+  .poirow { display: block; cursor: pointer; padding: 1px 0; white-space: nowrap; }
+  /* flashed POI markers: pulse so they're easy to spot for the 5 s preview */
+  @keyframes poiFlashPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  .poi-flash-dot {
+    display: block; width: 18px; height: 18px; box-sizing: border-box;
+    border: 2px solid #fff; border-radius: 50%; background: #ff2d2d;
+    box-shadow: 0 0 0 2px #000; animation: poiFlashPulse 0.8s ease-in-out infinite;
+  }
+  .poi-flash-icon { background: transparent; border: 0; }
+  #poimsg {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    z-index: 1100; background: rgba(0,0,0,0.78); color: #fff;
+    font: 13px sans-serif; padding: 6px 12px; border-radius: 6px; display: none;
+  }
+  #dlBtn { width: 100%; margin-top: 6px; padding: 7px; cursor: pointer;
+           font-weight: bold; border: 0; border-radius: 4px; }
+  #dlBtn:disabled { opacity: 0.5; cursor: default; }
+  #dlBtn.downloading { opacity: 1; cursor: progress; }
+  /* Over the tile limit: looks and acts disabled, but stays enabled so the
+     browser still shows its title tooltip on hover (disabled buttons don't). */
+  #dlBtn.overbudget { background: #c0392b; color: #fff; opacity: 1;
+                      cursor: not-allowed; }
+  /* determinate progress bar with an animated barber-pole so it's clearly "live" */
+  #dlbar { display: none; height: 8px; margin-top: 5px; border-radius: 4px;
+           background: rgba(0,0,0,0.45); overflow: hidden; }
+  #dlbar.on { display: block; }
+  #dlbarfill { height: 100%; width: 0%; background-color: #2ecc71;
+    background-image: repeating-linear-gradient(45deg,
+      rgba(255,255,255,0.30) 0 8px, rgba(255,255,255,0) 8px 16px);
+    background-size: 22px 22px; animation: dlStripes 0.7s linear infinite;
+    transition: width 0.3s ease; }
+  @keyframes dlStripes { from { background-position: 0 0; } to { background-position: 22px 0; } }
+  #dlstatus { margin-top: 4px; min-height: 14px; opacity: 0.85; }
+  #exportBtn { width: 100%; margin-top: 6px; padding: 6px; cursor: pointer;
+    font-weight: bold; border: 0; border-radius: 4px; background: #2f6fb0; color: #fff; }
+  #exportBtn:disabled { opacity: 0.4; cursor: default; }
+  /* empty-state caption inside the POI tree */
+  .poi-empty { opacity: 0.85; font-size: 12px; line-height: 1.4; padding: 4px 2px; }
+  .poi-empty b { color: #ffd24d; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
+  .on { background: #52c41a; } .off { background: #ff4d4f; }
+  hr { border: 0; border-top: 1px solid #444; margin: 8px 0; }
+  #status { margin-top: 6px; opacity: 0.8; }
+  .hint { opacity: 0.7; font-size: 11px; }
+  #cacheinfo div { margin-top: 1px; }
+  #cacheinfo .cachehdr { opacity: 0.95; }
+  /* downloaded-pack inventory and viewing selection (preflight only) */
+  #packpanel { margin-top: 7px; border-top: 1px solid #444; padding-top: 6px; }
+  #packhdr { display: flex; align-items: center; gap: 6px; cursor: pointer;
+    font-weight: bold; user-select: none; }
+  #packhdr .caret { display: inline-block; width: 12px; color: #9cf; text-align: center; }
+  #packbody { margin-top: 5px; max-height: 260px; overflow-y: auto; padding-right: 2px; }
+  .packitem { display: block; padding: 5px; margin-top: 4px; cursor: pointer;
+    border: 1px solid #555; border-radius: 4px; background: rgba(0,0,0,0.25); }
+  .packitem.selected { border-color: #52c41a; background: rgba(82,196,26,0.10); }
+  .packitem.invalid { opacity: 0.65; cursor: default; }
+  .packtitle { display: flex; align-items: center; gap: 4px; }
+  .packtitle input { width: auto !important; margin: 0; }
+  .packtitle b { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .packdelete { flex: 0 0 auto; border: 0; background: transparent; color: #ff9a9a;
+    cursor: pointer; font: bold 12px/1 sans-serif; padding: 2px 3px; }
+  .packdelete:hover { color: #fff; background: rgba(255,77,79,0.45); border-radius: 3px; }
+  .packline { margin-left: 18px; color: #bbb; font-size: 10px; line-height: 1.3; }
+  .packempty { color: #bbb; font-size: 11px; padding: 4px 1px; }
+  /* advanced download options — same disclosure idiom as the POI panel */
+  #srcpanel { margin-top: 4px; }
+  #srcpanel .srchdr { display: flex; align-items: center; gap: 6px;
+    cursor: pointer; user-select: none; font-size: 11px; opacity: 0.8; }
+  #srcpanel .srchdr .caret { display: inline-block; width: 12px; color: #9cf; text-align: center; }
+  #srcbody { margin-top: 3px; }
+  #srcbody .row span { opacity: 0.75; }
+  #packname { box-sizing: border-box; width: 110px !important; background: rgba(0,0,0,0.45);
+    color: #fff; border: 1px solid #555; border-radius: 3px; font: 11px sans-serif;
+    padding: 2px 4px; }
+  #srcbody .hint { margin: 2px 0 4px; color: #aaa; font-size: 10px; }
+#zoombtns { display: none; position: absolute; bottom: 10px; right: 10px; z-index: 1000; }
+  #zoombtns button { display: block; width: 30px; height: 30px; margin-top: 5px;
+    background: rgba(0,0,0,0.65); color: #fff; border: 1px solid #555;
+    border-radius: 5px; font-size: 20px; line-height: 1; cursor: pointer; padding: 0; }
+  #zoombtns button:disabled { opacity: 0.25; cursor: default; }
+  #onlinectl {
+    display: none; position: absolute; right: 48px; bottom: 10px; z-index: 1000;
+    font: 11px/1.2 sans-serif; color: #ff4d4f; background: transparent;
+    padding: 2px 4px; border-radius: 0; user-select: none;
+  }
+  #onlinectl input { margin: 0 4px 0 0; vertical-align: middle; }
+  #followbtn {
+    display: none; position: absolute; right: 110px; bottom: 10px; z-index: 1000;
+    min-width: 54px; background: rgba(0,0,0,0.65); color: #fff; border: 1px solid #555;
+    border-radius: 5px; font: 11px/1.2 sans-serif; padding: 4px 6px; cursor: pointer;
+  }
+  body.center-mode #onlinectl { right: 48px; padding: 2px 0; }
+  body.center-mode #onlinectl input { margin: 0; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<label id="onlinectl"><input type="checkbox" id="onlineChk"><span>online</span></label>
+<button id="followbtn" type="button"><span>plane</span></button>
+<div id="zoombtns">
+  <button id="zinBtn" title="Zoom in">+</button>
+  <button id="zoutBtn" title="Zoom out">−</button>
+</div>
+<div id="toolbox">
+  <div id="panel">
+    <div class="row"><span><span id="netdot" class="dot off"></span><span id="nettext">checking…</span></span></div>
+    <div class="row"><span>Basemap</span><select id="basemap" style="width:110px"></select></div>
+    <div class="row"><span>Detail</span><select id="detailzoom" style="width:110px"></select></div>
+    <div id="srcpanel">
+      <div class="srchdr" id="srchdr"><span class="caret" id="srccaret">▸</span><span id="srcsummary">Advanced</span></div>
+      <div id="srcbody" style="display:none">
+        <div class="row"><span>Map name</span><input id="packname" maxlength="80" placeholder="automatic"></div>
+        <div class="hint">Optional name for the next download</div>
+        <div id="srcrows"></div>
+      </div>
+    </div>
+    <div class="row checkrow"><label title="Also store terrain height for the same area (maps/elevation.db, ~28 m grid)"><input type="checkbox" id="demChk" checked> Download elevation data</label></div>
+    <div class="hint">Scroll &amp; drag to your area (<b id="zlevel">z–</b>), then:</div>
+    <button id="dlBtn">⬇ Download visible area</button>
+    <div id="dlbar"><div id="dlbarfill"></div></div>
+    <div id="dlstatus"></div>
+    <div id="cacheinfo" class="hint"></div>
+    <button id="exportBtn" title="Save the selected downloaded map + POIs to copy to the OSD station" disabled>⭱ Export selected map…</button>
+    <div id="packpanel">
+      <div id="packhdr"><span class="caret" id="packcaret">▸</span><span id="packsummary">Downloaded maps</span></div>
+      <div id="packbody" style="display:none"><div id="packlist" class="packempty">loading…</div></div>
+    </div>
+    <div class="row checkrow" style="margin-top:4px"><label><input type="checkbox" id="covChk" disabled> Show downloaded</label></div>
+    <div class="row checkrow"><label><input type="checkbox" id="offChk" disabled> Offline mode</label></div>
+    <div id="covstatus" class="hint"></div>
+    <hr>
+    <div id="status">no fix</div>
+  </div>
+  <div id="tgtpanel">
+    <div class="tgthdr" id="tgthdr"><span class="caret" id="tgtcaret">▸</span><span id="tgtsummary">Waypoints</span></div>
+    <div id="tgtbody" style="display:none">
+      <div class="hint" id="tgthint">Select a field, then click the map to place it</div>
+      <div id="tgtrows"></div>
+    </div>
+  </div>
+  <div id="lospanel">
+    <div class="loshdr" id="loshdr"><span class="caret" id="loscaret">▸</span><span id="lossummary">Link horizon</span></div>
+    <div id="losbody" style="display:none">
+      <div class="hint">Terrain alone won't block you closer than this.</div>
+      <div class="row"><span>Antenna height</span><span><input type="number" id="losAnt" value="5" min="0" max="500" step="1"> m</span></div>
+      <div class="row"><span title="A fixed altitude used everywhere on the map — metres above the ground at the centre point, not above the ground under the aircraft">Aircraft altitude</span><span><input type="number" id="losAlt" value="100" min="1" max="10000" step="10"> m</span></div>
+      <div class="sublabel">above the ground at the centre point</div>
+      <div class="row"><span>Max range</span><span><input type="number" id="losRange" value="30" min="1" max="100" step="5"> km</span></div>
+      <div class="row checkrow" style="margin-top:6px"><label><input type="checkbox" id="losArm"> Click map to set centre</label></div>
+      <div id="losinfo" class="hint"></div>
+    </div>
+  </div>
+  <div id="poipanel">
+    <div class="poihdr" id="poihdr"><span class="caret" id="poicaret">▸</span><span>POI types on OSD</span></div>
+    <div id="poibody" style="display:none">
+      <div class="hint" style="margin-bottom:4px">counts are totals; OSD draws English-named, in-range</div>
+      <div id="poitree">loading…</div>
+    </div>
+  </div>
+</div>
+<div id="poimsg"></div>
+<script>
+const params = new URLSearchParams(location.search);
+const MODE = params.get("mode") || "preflight";     // preflight | preview | full
+const FOLLOW_MODES = ["plane", "center", "fit"];
+let FOLLOW = params.get("follow") || "plane";       // plane | fit | center
+const PREFLIGHT = MODE === "preflight";
+if (!PREFLIGHT) document.body.classList.add("overlay");
+
+// Offline zoom set = [detail-4, detail-2, detail]; the detail zoom is chosen in the
+// panel and comes from the server (/status). Values here are only the pre-status
+// fallback. The label figure is the ground resolution one screen pixel covers at
+// that zoom (156543 * cos(lat) / 2^z, quoted at ~43 deg): the practical accuracy
+// limit of the imagery, not the size of the downloadable area.
+let DETAIL_ZOOM = 15, DETAIL_MIN = 12, DETAIL_MAX = 18;
+const DETAIL_ACCURACY_M = { 12: 29, 13: 14, 14: 7.2, 15: 3.6, 16: 1.8, 17: 0.9, 18: 0.45 };
+// Per-zoom sources and their legacy configured pack id. New downloads receive
+// a collision-free file id from the server. These declarations must remain
+// above tileUrl(): reading a later `let` would abort the script.
+let SOURCES = [], PACK = "", BASEMAP_OPTS = [], BASEMAP_DISABLED = {};
+let VIEW_PACK = "", VIEW_ZOOMS = [], DOWNLOADED_PACKS = [], showDownloaded = false;
+let ZOOMS = [11, 13, 15];
+let HIGHEST_ZOOM = Math.max(...ZOOMS);
+function setZooms(list) {
+  ZOOMS = list.slice().sort((a, b) => a - b);
+  HIGHEST_ZOOM = Math.max(...ZOOMS);
+}
+const HEADING_VECTOR_PX = 52;
+const EARTH_M_PER_DEG = 111320;
+const OVERLAY_KEEP_BUFFER = 16;
+const VIEW_UPDATE_MS = 250;
+const VIEW_UPDATE_PX = 48;
+const FIT_UPDATE_PX = 32;
+const TILE_REFRESH_MS = 350;
+let MAX_TILES = 8000;
+let FIXED_ZOOM = HIGHEST_ZOOM;        // overlay modes always start at the highest stored zoom
+let targets = [], home = null, haveFix = false;   // targets: TARGET_SLOTS entries, each null or {name,lat,lon}
+let TARGET_SLOTS = 5, armedSlot = -1;             // armedSlot: the slot a map click fills
+let lastViewMs = 0;
+let lastTileRefreshMs = 0;
+let lastHere = null;
+let lastCourse = 0;
+let lastFitCenterPx = null;
+
+const map = L.map("map", {
+  zoomControl: PREFLIGHT, attributionControl: false,
+  dragging: PREFLIGHT, scrollWheelZoom: PREFLIGHT,
+  doubleClickZoom: PREFLIGHT, boxZoom: PREFLIGHT, keyboard: PREFLIGHT,
+  minZoom: 2, maxZoom: 18,
+}).setView([42.2, 27.8], 13);
+
+// Distance ruler / scale bar (metric). In center mode #map rotates and is offset,
+// so the scale would tilt and slide off-screen — move its element to the body so it
+// stays upright and pinned to the window corner. Leaflet keeps updating it via the
+// map 'move'/'zoom' events regardless of where its element lives in the DOM.
+// Current zoom, shown directly under Leaflet's own zoom buttons (top-left). Added
+// as a control rather than an absolutely-positioned div so Leaflet stacks it below
+// the +/- buttons automatically, whatever their size.
+let zoomBadgeEl = null;
+if (PREFLIGHT) {
+  const zoomBadge = L.control({ position: "topleft" });
+  zoomBadge.onAdd = function () {
+    zoomBadgeEl = L.DomUtil.create("div", "zoombadge");
+    zoomBadgeEl.textContent = "z–";
+    return zoomBadgeEl;
+  };
+  zoomBadge.addTo(map);
+}
+// Terrain height under the pointer. Hidden until a DEM is actually stored, so it
+// never advertises a reading the pack cannot give. Bottom-right is free (the
+// attribution control is off and the scale bar is bottom-left).
+let elevBoxEl = null, elevHave = false;
+if (PREFLIGHT) {
+  const elevCtl = L.control({ position: "bottomright" });
+  elevCtl.onAdd = function () {
+    elevBoxEl = L.DomUtil.create("div", "elevbox");
+    elevBoxEl.style.display = "none";
+    return elevBoxEl;
+  };
+  elevCtl.addTo(map);
+}
+// mousemove fires far faster than a DB lookup is worth, so the pointer position is
+// only sampled here; ELEV_MS below does the fetching.
+const ELEV_MS = 150;
+let elevWant = null, elevBusy = false, elevShown = null;
+function elevRender(latlng, m) {
+  if (!elevBoxEl) return;
+  const known = typeof m === "number";
+  elevBoxEl.className = "elevbox" + (known ? "" : " nodata");
+  elevBoxEl.innerHTML =
+    `<b>${known ? Math.round(m) + " m" : "no data"}</b>` +
+    `<div class="sub">${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}</div>`;
+}
+function elevPoll() {
+  if (!elevBoxEl || !elevHave || elevBusy || !elevWant) return;
+  const want = elevWant;
+  // don't re-query for movements under ~11 m — finer than the 28 m DEM grid, so
+  // the interpolated value cannot have moved meaningfully
+  if (elevShown && Math.abs(elevShown.lat - want.lat) < 1e-4
+      && Math.abs(elevShown.lng - want.lng) < 1.4e-4) return;
+  elevBusy = true;
+  fetch(`elevation?lat=${want.lat.toFixed(6)}&lon=${want.lng.toFixed(6)}`)
+    .then(r => r.json())
+    .then(d => { elevShown = want; elevRender(want, d.elev_m); })
+    .catch(() => {})
+    .finally(() => { elevBusy = false; });
+}
+if (PREFLIGHT) {
+  setInterval(elevPoll, ELEV_MS);
+  map.on("mousemove", e => {
+    elevWant = e.latlng;
+    if (elevHave && elevBoxEl && elevBoxEl.style.display === "none")
+      elevBoxEl.style.display = "";
+  });
+  map.on("mouseout", () => {
+    elevWant = null;
+    if (elevBoxEl) elevBoxEl.style.display = "none";
+  });
+}
+// --- link horizon (preflight) ----------------------------------------------
+// Draws where terrain stops blocking the line of sight from the map centre. It is
+// an upper bound only: the DEM is bare earth, so trees, buildings and masts near
+// the antenna — which usually decide a real link — are simply not in the data.
+const losLayer = L.layerGroup();
+const LOS_COLOR = "#1f5fa8";
+let losPoint = null, losBusy = false;
+const losArmEl = PREFLIGHT ? document.getElementById("losArm") : null;
+function losArmed() { return !!(losArmEl && losArmEl.checked); }
+function losClear() {
+  losLayer.clearLayers();
+  map.removeLayer(losLayer);
+  losPoint = null;
+  const info = document.getElementById("losinfo");
+  if (info) info.textContent = "";
+}
+function losRun(latlng) {
+  const info = document.getElementById("losinfo");
+  if (!info) return;
+  if (!elevHave) { info.textContent = "no elevation data downloaded yet"; return; }
+  if (losBusy) return;
+  const ant = parseFloat(document.getElementById("losAnt").value) || 0;
+  const alt = parseFloat(document.getElementById("losAlt").value) || 100;
+  const rng = parseFloat(document.getElementById("losRange").value) || 30;
+  losBusy = true;
+  info.textContent = "computing…";
+  fetch(`viewshed?lat=${latlng.lat.toFixed(6)}&lon=${latlng.lng.toFixed(6)}`
+        + `&ant=${ant}&alt=${alt}&max_km=${rng}`)
+    .then(r => r.json())
+    .then(d => {
+      losLayer.clearLayers();
+      if (d.error) { info.textContent = d.error; return; }
+      losPoint = latlng;
+      L.polygon(d.ring, { color: LOS_COLOR, weight: 2, fillColor: LOS_COLOR,
+                          fillOpacity: 0.08 })
+        .bindTooltip(`LOS horizon — antenna ${d.antenna_m} m, aircraft ${d.altitude_m} m`)
+        .addTo(losLayer);
+      L.circleMarker([d.center.lat, d.center.lon],
+        { radius: 4, color: LOS_COLOR, fillColor: LOS_COLOR, fillOpacity: 1 }).addTo(losLayer);
+      losLayer.addTo(map);
+      const cov = d.coverage_limited
+        ? `<br><span style="color:#ffb020">${d.coverage_limited}/${d.azimuths} directions stop at the edge of the downloaded area — download a wider area for a true horizon</span>`
+        : "";
+      info.innerHTML =
+        `centre ground <b>${d.center.ground_m} m</b> · horizon `
+        + `min <b>${d.min_km}</b> / median <b>${d.median_km}</b> / max <b>${d.max_km}</b> km${cov}`;
+    })
+    .catch(() => { info.textContent = "viewshed failed"; })
+    .finally(() => { losBusy = false; });
+}
+// Arming is exclusive with waypoint placement — one map click must do one thing.
+function losSetArmed(on) {
+  if (!losArmEl) return;
+  losArmEl.checked = on;
+  const panel = document.getElementById("lospanel");
+  if (panel) panel.classList.toggle("armed", on);
+  map.getContainer().style.cursor = on ? "crosshair" : "";
+  const info = document.getElementById("losinfo");
+  if (on) {
+    if (typeof setArmed === "function") setArmed(-1);   // drop any armed waypoint slot
+    if (info && !losPoint) info.textContent = elevHave
+      ? "click the map to place the antenna"
+      : "no elevation data downloaded yet";
+  } else {
+    losClear();                                        // disabling clears the last horizon
+  }
+}
+if (PREFLIGHT) {
+  const losHdr = document.getElementById("loshdr");
+  const losBody = document.getElementById("losbody");
+  const losCaret = document.getElementById("loscaret");
+  if (losHdr) losHdr.onclick = () => {
+    const open = losBody.style.display !== "none";
+    losBody.style.display = open ? "none" : "block";
+    losCaret.textContent = open ? "▸" : "▾";
+  };
+  if (losArmEl) losArmEl.onchange = () => losSetArmed(losArmEl.checked);
+  map.on("click", (e) => { if (losArmed()) losRun(e.latlng); });
+  // changing a parameter re-runs at the same point rather than leaving a stale ring
+  ["losAnt", "losAlt", "losRange"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.onchange = () => { if (losArmed() && losPoint) losRun(losPoint); };
+  });
+}
+const scaleCtl = L.control.scale({ position: "bottomleft", imperial: false, maxWidth: 120 }).addTo(map);
+const scaleEl = scaleCtl.getContainer();
+const scaleHome = scaleEl.parentNode;
+
+// ?src=<basemap> gives each basemap its own browser-cache key (forces fresh fetch on switch).
+let basemap = "Satellite";
+let offlineTest = !PREFLIGHT;     // overlay defaults to cache-only; preflight keeps online-friendly default
+/** Return whether preflight tiles should use the selected downloaded pack.
+ * @returns {boolean} True while a selected pack viewing mode is active.
+ */
+function viewingPackActive() {
+  return PREFLIGHT && !!VIEW_PACK && (offlineTest || showDownloaded);
+}
+/** Return whether tile requests must avoid network fallback.
+ * @returns {boolean} True in Offline or Show downloaded mode.
+ */
+function cacheOnlyMode() {
+  return offlineTest || (PREFLIGHT && showDownloaded);
+}
+/** Resolve the pack currently used for tile and coverage reads.
+ * @returns {string} Selected viewing pack or configured download pack id.
+ */
+function activePack() {
+  return viewingPackActive() ? VIEW_PACK : (PACK || basemap);
+}
+/** Resolve the stored zooms belonging to the currently viewed pack.
+ * @returns {number[]} Available zoom levels in ascending order.
+ */
+function activeZooms() {
+  return viewingPackActive() && VIEW_ZOOMS.length ? VIEW_ZOOMS : ZOOMS;
+}
+/** Build the Leaflet URL for the currently active pack.
+ * @returns {string} Tile URL template including pack and offline mode.
+ */
+function tileUrl() {
+  return "tiles/{z}/{x}/{y}?src=" + encodeURIComponent(activePack()) +
+    (cacheOnlyMode() ? "&offline=1" : "");
+}
+const tileLayer = L.tileLayer(tileUrl(), {
+  minZoom: 2, maxZoom: 18,
+  keepBuffer: PREFLIGHT ? 4 : OVERLAY_KEEP_BUFFER,
+  updateWhenIdle: PREFLIGHT,
+  updateInterval: PREFLIGHT ? 200 : 80,
+}).addTo(map);
+// Center (track-up) mode: size #map as a square centred on the plane's on-screen
+// position, with half-side reaching the farthest window corner from that pivot.
+// Because the square is centred on the pivot, rotating it about its centre always
+// covers the whole window in every direction — no unloaded gaps "in front" of the
+// plane. (A symmetric viewport expansion can't do this: the pivot is off-centre.)
+const PLANE_Y_FRAC = 0.8;   // plane sits 80% down the window in center mode
+function setupCenterMap() {
+  const el = map.getContainer();
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const px = vw * 0.5, py = vh * PLANE_Y_FRAC;            // plane pivot, window coords
+  let D = 0;
+  for (const [cx, cy] of [[0, 0], [vw, 0], [0, vh], [vw, vh]])
+    D = Math.max(D, Math.hypot(cx - px, cy - py));         // farthest window corner
+  const side = Math.ceil(2 * D) + 4;                       // square covering a disk of radius D
+  el.style.width  = side + "px";
+  el.style.height = side + "px";
+  el.style.left = (px - side / 2) + "px";
+  el.style.top  = (py - side / 2) + "px";
+  el.style.transformOrigin = "50% 50%";                    // rotate about plane (= element centre)
+  map.invalidateSize();
+}
+function enableCenterMode() {
+  document.body.classList.add("center-mode");
+  scaleEl.style.position = "fixed";
+  scaleEl.style.left = "8px";
+  scaleEl.style.bottom = "8px";
+  scaleEl.style.zIndex = 1000;
+  if (scaleEl.parentNode !== document.body) document.body.appendChild(scaleEl);
+  setupCenterMap();
+}
+function disableCenterMode() {
+  document.body.classList.remove("center-mode");
+  scaleEl.style.position = "";
+  scaleEl.style.left = "";
+  scaleEl.style.bottom = "";
+  scaleEl.style.zIndex = "";
+  if (scaleHome && scaleEl.parentNode !== scaleHome) scaleHome.appendChild(scaleEl);
+  const el = map.getContainer();
+  el.style.width = "";
+  el.style.height = "";
+  el.style.left = "";
+  el.style.top = "";
+  el.style.transformOrigin = "";
+  el.style.transform = "";
+  map.invalidateSize();
+}
+function applyFollowMode(force = false) {
+  lastFitCenterPx = null;
+  if (FOLLOW === "center") enableCenterMode();
+  else disableCenterMode();
+  if (haveFix && lastHere) updateView(lastHere, lastCourse, force);
+}
+window.addEventListener("resize", () => {
+  if (FOLLOW === "center") setupCenterMap();
+});
+
+const basemapSel = document.getElementById("basemap");
+basemapSel.onchange = () => {
+  if (!basemapSel.value) return;               // the synthetic "mixed" entry
+  // The simple control sets one source for every stored level, collapsing any blend.
+  basemap = basemapSel.value;
+  SOURCES = ZOOMS.map(() => basemap);
+  PACK = basemap;
+  saveSettings({ basemap });
+  buildSourceRows(); setSrcOpen(false);
+  tileLayer.setUrl(tileUrl());
+  refreshCoverage(); refreshCacheSummary();    // per-pack
+};
+
+// Detail zoom: highest stored level. Each step up quarters the area that fits in
+// the tile budget, so the option labels carry that approximate square side.
+const detailSel = PREFLIGHT ? document.getElementById("detailzoom") : null;
+function buildDetailOptions() {
+  if (!detailSel) return;
+  let html = "";
+  for (let z = DETAIL_MIN; z <= DETAIL_MAX; z++) {
+    const m = DETAIL_ACCURACY_M[z];
+    html += `<option value="${z}">z${z}${m ? ` ~${m}m` : ""}</option>`;
+  }
+  detailSel.innerHTML = html;
+  detailSel.value = String(DETAIL_ZOOM);
+}
+if (detailSel) detailSel.onchange = () => {
+  DETAIL_ZOOM = parseInt(detailSel.value, 10);
+  setZooms([DETAIL_ZOOM - 4, DETAIL_ZOOM - 2, DETAIL_ZOOM]);
+  // sources are positional (one per stored level), so they survive a detail change
+  saveSettings({ detail_zoom: DETAIL_ZOOM });
+  if (cacheOnlyMode()) snapToNearestStoredZoom();
+  updateZoomBtns(); updateEstimate(); buildSourceRows();
+  refreshCoverage(); refreshCacheSummary();
+};
+
+// --- advanced download options ---------------------------------------------
+// The optional map name applies to one download. Source selectors remain one
+// per stored level; a blend auto-opens so the active mix is never hidden.
+const srcPanel = PREFLIGHT ? document.getElementById("srcpanel") : null;
+const srcHdr = PREFLIGHT ? document.getElementById("srchdr") : null;
+const srcBody = PREFLIGHT ? document.getElementById("srcbody") : null;
+const srcRows = PREFLIGHT ? document.getElementById("srcrows") : null;
+const srcCaret = PREFLIGHT ? document.getElementById("srccaret") : null;
+const srcSummary = PREFLIGHT ? document.getElementById("srcsummary") : null;
+const packNameEl = PREFLIGHT ? document.getElementById("packname") : null;
+const isBlend = () => new Set(SOURCES).size > 1;
+function setSrcOpen(open) {
+  if (!srcBody) return;
+  srcBody.style.display = open ? "block" : "none";
+  srcCaret.textContent = open ? "▾" : "▸";
+}
+function optionsHtml(sel) {
+  return BASEMAP_OPTS.map(b =>
+    `<option value="${b}"${BASEMAP_DISABLED[b] ? " disabled" : ""}${b === sel ? " selected" : ""}>` +
+    `${b}${BASEMAP_DISABLED[b] ? ` (${BASEMAP_DISABLED[b]})` : ""}</option>`).join("");
+}
+function buildSourceRows() {
+  if (!srcRows || !BASEMAP_OPTS.length) return;
+  srcRows.innerHTML = ZOOMS.map((z, i) =>
+    `<div class="row"><span>z${z}</span>` +
+    `<select data-idx="${i}" style="width:110px">${optionsHtml(SOURCES[i])}</select></div>`).join("");
+  srcRows.querySelectorAll("select").forEach(sel => {
+    sel.onchange = () => {
+      SOURCES[parseInt(sel.dataset.idx, 10)] = sel.value;
+      applySources();
+    };
+  });
+  srcSummary.textContent = "Advanced";
+  if (isBlend()) setSrcOpen(true);
+}
+// Push the current per-level mix to the server, then re-read everything that is
+// keyed by the pack (tiles, coverage overlay, cache summary).
+function applySources() {
+  saveSettings({ sources: SOURCES });
+  PACK = [...new Set(SOURCES)].join("+");
+  if (!isBlend()) basemapSel.value = SOURCES[0];
+  buildSourceRows();
+  tileLayer.setUrl(tileUrl());
+  tileLayer.redraw();
+  refreshCoverage(); refreshCacheSummary();
+}
+if (srcHdr) srcHdr.onclick = () => setSrcOpen(srcBody.style.display === "none");
+
+// --- markers / layers -------------------------------------------------------
+// Icon is created once; rotation is applied to the live element (rotatePlane) so the
+// blink CSS animation isn't restarted on every telemetry update.
+function planeIcon() {
+  return L.divIcon({
+    className: "plane-icon", iconSize: [26, 26], iconAnchor: [13, 13],
+    html: `<svg width="26" height="26" viewBox="-14 -14 28 28">
+             <path d="M0,-12 L1.6,-5 L1.6,-2 L11,3 L11,5 L1.6,2 L1.6,8 L4,11 L4,12.5 L0,11
+                      L-4,12.5 L-4,11 L-1.6,8 L-1.6,2 L-11,5 L-11,3 L-1.6,-2 L-1.6,-5 Z"
+                   fill="#ffec3d" stroke="#000" stroke-width="0.8"/></svg>`,
+  });
+}
+function rotatePlane(deg) {
+  const el = plane.getElement();
+  const svg = el && el.querySelector("svg");
+  if (svg) svg.style.transform = `rotate(${deg}deg)`;
+}
+const homeIcon = L.divIcon({
+  className: "home-icon", iconSize: [22, 22], iconAnchor: [11, 16],
+  html: `<svg width="22" height="22" viewBox="-11 -11 22 22">
+           <path d="M-8,1 L0,-7 L8,1 Z" fill="#ff7875" stroke="#000" stroke-width="0.8"/>
+           <rect x="-5" y="1" width="10" height="7" fill="#fff1b8" stroke="#000" stroke-width="0.8"/></svg>`,
+});
+const plane = L.marker([0, 0], { icon: planeIcon(), interactive: false });
+const homeMarker = L.marker([0, 0], { icon: homeIcon, interactive: false });
+const headingLine = L.polyline([], {
+  className: "heading-line",
+  color: "#ffec3d",
+  weight: 2,
+  dashArray: "6,4",
+  interactive: false
+});
+const targetLine = L.polyline([], {
+  color: "#ff4d4f",
+  weight: 2,
+  dashArray: "1,6",
+  lineCap: "round",
+  interactive: false
+});
+// One marker per slot, created lazily. Slot 0 is the historical target and is the
+// only one the plane-to-target line is drawn to, matching the OSD map.
+const targetMarkers = [];
+function applyTarget() {
+  for (let i = 0; i < TARGET_SLOTS; i++) {
+    const t = targets[i];
+    if (!targetMarkers[i]) {
+      targetMarkers[i] = {
+        dot: L.circleMarker([0, 0], { radius: 6, color: "#ff4d4f", weight: 2, fill: false, interactive: false }),
+        label: L.marker([0, 0], { interactive: false, keyboard: false,
+          icon: L.divIcon({ className: "tgtlabel", html: "", iconSize: [0, 0], iconAnchor: [-9, 8] }) }),
+      };
+    }
+    const m = targetMarkers[i];
+    if (t) {
+      m.dot.setLatLng([t.lat, t.lon]).addTo(map);
+      if (t.name) {
+        m.label.setLatLng([t.lat, t.lon]).addTo(map);
+        m.label.setIcon(L.divIcon({ className: "tgtlabel", html: escapeHtml(t.name),
+                                    iconSize: [0, 0], iconAnchor: [-9, 8] }));
+      } else map.removeLayer(m.label);
+    } else {
+      map.removeLayer(m.dot); map.removeLayer(m.label);
+      if (i === 0) targetLine.setLatLngs([]);
+    }
+  }
+}
+function escapeHtml(t) {
+  return String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+function applyHome() {
+  if (home) homeMarker.setLatLng([home.lat, home.lon]).addTo(map);
+  else map.removeLayer(homeMarker);
+}
+
+// --- target slots (preflight only) ------------------------------------------
+// Up to TARGET_SLOTS named points. Focusing any field of a slot arms it; the next
+// map click writes coordinates there. Slot 0 is the historical kind='target' row,
+// so a pack still works on ground stations that only know about one target.
+const tgtBody = PREFLIGHT ? document.getElementById("tgtbody") : null;
+const tgtRows = PREFLIGHT ? document.getElementById("tgtrows") : null;
+const tgtHdr = PREFLIGHT ? document.getElementById("tgthdr") : null;
+const tgtCaret = PREFLIGHT ? document.getElementById("tgtcaret") : null;
+const tgtSummary = PREFLIGHT ? document.getElementById("tgtsummary") : null;
+
+function saveTargets() {
+  fetch("target", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ targets: targets.slice(0, TARGET_SLOTS) }) });
+}
+function setArmed(i) {
+  armedSlot = i;
+  // one map click must do one thing: arming a waypoint slot cancels horizon placing
+  if (i >= 0 && typeof losArmed === "function" && losArmed()) losSetArmed(false);
+  if (!tgtRows) return;
+  tgtRows.querySelectorAll(".tgtslot").forEach((el, n) => el.classList.toggle("armed", n === i));
+}
+function targetSummary() {
+  const n = targets.filter(Boolean).length;
+  return n ? `Waypoints (${n}/${TARGET_SLOTS})` : "Waypoints";
+}
+// Rebuild only the values, so typing in a field is never interrupted by a redraw.
+function refreshTargetFields() {
+  if (!tgtRows) return;
+  tgtRows.querySelectorAll(".tgtslot").forEach((el, i) => {
+    const t = targets[i];
+    const [name, lat, lon] = el.querySelectorAll("input");
+    if (document.activeElement !== name) name.value = t ? (t.name || "") : "";
+    if (document.activeElement !== lat)  lat.value  = t ? t.lat.toFixed(5) : "";
+    if (document.activeElement !== lon)  lon.value  = t ? t.lon.toFixed(5) : "";
+  });
+  if (tgtSummary) tgtSummary.textContent = targetSummary();
+}
+function buildTargetRows() {
+  if (!tgtRows) return;
+  let html = "";
+  for (let i = 0; i < TARGET_SLOTS; i++)
+    html += `<div class="tgtslot" data-i="${i}">` +
+            `<input class="tgtname" type="text" maxlength="31" placeholder="name ${i + 1}">` +
+            `<div class="tgtcoords">` +
+              `<input type="number" step="0.00001" placeholder="lat">` +
+              `<input type="number" step="0.00001" placeholder="lon">` +
+              `<button class="tgtclr" title="Clear this waypoint">x</button>` +
+            `</div></div>`;
+  tgtRows.innerHTML = html;
+  tgtRows.querySelectorAll(".tgtslot").forEach((el, i) => {
+    const [name, lat, lon] = el.querySelectorAll("input");
+    el.querySelectorAll("input").forEach(inp => { inp.onfocus = () => setArmed(i); });
+    const commit = () => {
+      const la = parseFloat(lat.value), lo = parseFloat(lon.value);
+      targets[i] = (Number.isFinite(la) && Number.isFinite(lo))
+        ? { lat: la, lon: lo, name: name.value.trim() } : null;
+      applyTarget(); saveTargets();
+      if (tgtSummary) tgtSummary.textContent = targetSummary();
+    };
+    name.onchange = lat.onchange = lon.onchange = commit;
+    el.querySelector(".tgtclr").onclick = () => {
+      targets[i] = null; name.value = lat.value = lon.value = "";
+      applyTarget(); saveTargets();
+      if (tgtSummary) tgtSummary.textContent = targetSummary();
+    };
+  });
+  refreshTargetFields();
+}
+if (tgtHdr) tgtHdr.onclick = () => {
+  const open = tgtBody.style.display !== "none";
+  tgtBody.style.display = open ? "none" : "block";
+  tgtCaret.textContent = open ? "\u25b8" : "\u25be";
+};
+if (PREFLIGHT) {
+  map.on("click", (e) => {
+    if (armedSlot < 0) return;                 // nothing selected -> clicking does nothing
+    const prev = targets[armedSlot];
+    targets[armedSlot] = { lat: e.latlng.lat, lon: e.latlng.lng,
+                           name: prev ? (prev.name || "") : "" };
+    applyTarget(); refreshTargetFields(); saveTargets();
+  });
+}
+
+// --- POI type selection tree (preflight) ------------------------------------
+// Loads kind/subtype/count from /poi-types, lets the user toggle which types the
+// OSD draws, and persists the choice via POST /poi-selection (debounced).
+if (PREFLIGHT) {
+  var poitree = document.getElementById("poitree");
+  var poihdr = document.getElementById("poihdr");
+  var poibody = document.getElementById("poibody");
+  var poicaret = document.getElementById("poicaret");
+  var poiSel = [];                 // parallel to the fetched items: {kind,subtype,enabled}
+  var saveTimer = null;
+
+  poihdr.onclick = () => {
+    const open = poibody.style.display !== "none";
+    poibody.style.display = open ? "none" : "block";
+    poicaret.textContent = open ? "▸" : "▾";
+  };
+
+  // Briefly flash the POIs of a just-checked type on the map as small red circles.
+  var poiFlash = L.layerGroup().addTo(map);
+  var flashTimer = null;
+  var poimsg = document.getElementById("poimsg");
+  var poimsgTimer = null;
+  function showPoiMsg(text) {
+    poimsg.textContent = text; poimsg.style.display = "block";
+    clearTimeout(poimsgTimer);
+    poimsgTimer = setTimeout(() => { poimsg.style.display = "none"; }, 5000);
+  }
+  function flashPois(kind, subtype) {              // subtype null = the whole kind
+    const label = subtype ? `${kind}/${subtype}` : kind;
+    const b = map.getBounds();
+    showPoiMsg(`loading ${label} POIs...`);
+    fetch(`landmarks?n=${b.getNorth()}&s=${b.getSouth()}&e=${b.getEast()}&w=${b.getWest()}`)
+      .then(r => r.json()).then(items => {
+        poiFlash.clearLayers();
+        var n = 0;
+        for (var j = 0; j < items.length; j++) {
+          var lm = items[j];
+          if (lm.kind !== kind) continue;
+          if (subtype !== null && (lm.subtype || "") !== subtype) continue;
+          L.marker([lm.lat, lm.lon], {
+            interactive: false,
+            icon: L.divIcon({
+              className: "poi-flash-icon",
+              iconSize: [22, 22],
+              iconAnchor: [11, 11],
+              html: '<span class="poi-flash-dot"></span>',
+            }),
+          }).addTo(poiFlash);
+          n++;
+        }
+        showPoiMsg(n ? `${n} ${label} POI${n === 1 ? "" : "s"} shown`
+                     : `0 ${label} POIs in current view — pan/zoom to the area`);
+        clearTimeout(flashTimer);
+        flashTimer = setTimeout(() => poiFlash.clearLayers(), 5000);
+      }).catch(() => showPoiMsg(`failed to load ${label} POIs`));
+  }
+
+  function saveSel() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      fetch("poi-selection", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ selection: poiSel }) });
+    }, 300);
+  }
+
+  function buildPoiTree(items) {
+    poiSel = items.map(it => ({ kind: it.kind, subtype: it.subtype, enabled: it.enabled }));
+    poitree.innerHTML = "";
+    const byKind = {};
+    items.forEach((it, i) => (byKind[it.kind] = byKind[it.kind] || []).push(i));
+
+    for (const kind of Object.keys(byKind)) {
+      const idxs = byKind[kind];
+      const total = idxs.reduce((s, i) => s + items[i].count, 0);
+      const grp = document.createElement("div");
+
+      const hdr = document.createElement("div");
+      hdr.className = "poikind";
+      const caret = document.createElement("span"); caret.className = "caret"; caret.textContent = "▸";
+      const kcb = document.createElement("input"); kcb.type = "checkbox";
+      const klbl = document.createElement("span"); klbl.textContent = `${kind} (${total})`;
+      hdr.append(caret, kcb, klbl);
+
+      const kids = document.createElement("div");
+      kids.className = "poikids"; kids.style.display = "none";
+      const childCbs = [];
+      idxs.forEach(i => {
+        const row = document.createElement("div"); row.className = "poirow";
+        row.dataset.poiIndex = i;
+        const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = poiSel[i].enabled;
+        cb.dataset.poiIndex = i;
+        const t = document.createElement("span"); t.textContent = `${items[i].subtype || "—"} (${items[i].count})`;
+        row.append(cb, t); kids.append(row); childCbs.push(cb);
+      });
+
+      function syncKind() {
+        const on = idxs.map(i => poiSel[i].enabled);
+        kcb.checked = on.every(Boolean);
+        kcb.indeterminate = !kcb.checked && on.some(Boolean);
+      }
+      function poiRowFrom(target) {
+        while (target && target !== kids) {
+          if (target.classList && target.classList.contains("poirow")) return target;
+          target = target.parentNode;
+        }
+        return null;
+      }
+      function applyChildSelection(i, checked) {
+        if (poiSel[i].enabled === checked) return;
+        poiSel[i].enabled = checked;
+        childCbs[idxs.indexOf(i)].checked = checked;
+        syncKind(); saveSel();
+      }
+      kids.onclick = (e) => {
+        const row = poiRowFrom(e.target);
+        if (!row) return;
+        e.stopPropagation();
+        const i = Number(row.dataset.poiIndex);
+        const cb = row.querySelector("input");
+        if (e.target !== cb) cb.checked = !cb.checked;
+        if (cb.checked) {
+          flashPois(items[i].kind, items[i].subtype);
+        }
+        applyChildSelection(i, cb.checked);
+      };
+      function applyKindSelection(on) {
+        if (idxs.every(i => poiSel[i].enabled === on)) return;
+        idxs.forEach((i, j) => { poiSel[i].enabled = on; childCbs[j].checked = on; });
+        kcb.indeterminate = false; saveSel();
+      }
+      kcb.onclick = (e) => {
+        e.stopPropagation();                       // don't toggle the expander
+        if (kcb.checked) {
+          flashPois(kind, null);
+        }
+        applyKindSelection(kcb.checked);
+      };
+      hdr.onclick = () => {
+        const open = kids.style.display === "none";
+        kids.style.display = open ? "block" : "none";
+        caret.textContent = open ? "▾" : "▸";
+      };
+      syncKind();
+      grp.append(hdr, kids); poitree.append(grp);
+    }
+  }
+  // (Re)load the POI tree. Shows a clear caption when nothing is downloaded yet,
+  // and is called again after a download so freshly fetched POIs show up without
+  // a page reload. Exposed globally so the download poller can trigger it.
+  function reloadPoiTree() {
+    fetch("poi-types").then(r => r.json()).then(items => {
+      if (!items || items.length === 0) {
+        poitree.innerHTML =
+          '<div class="poi-empty"><b>No POIs downloaded yet.</b><br>' +
+          'Use <b>⬇ Download visible area</b> — the landmarks for that region are ' +
+          'fetched automatically and will appear here.</div>';
+        return;
+      }
+      buildPoiTree(items);
+    }).catch(() => {
+      poitree.innerHTML =
+        '<div class="poi-empty">Could not load POIs. Download a map area first.</div>';
+    });
+  }
+  window.reloadPoiTree = reloadPoiTree;
+  reloadPoiTree();
+}
+
+// --- tile download (preflight) ----------------------------------------------
+function lonlat2tile(latlng, z) {
+  const n = 1 << z, lat = latlng.lat * Math.PI / 180;
+  return { x: Math.floor((latlng.lng + 180) / 360 * n),
+           y: Math.floor((1 - Math.asinh(Math.tan(lat)) / Math.PI) / 2 * n) };
+}
+function visibleTileCount() {
+  const b = map.getBounds(); let total = 0;
+  for (const z of ZOOMS) {
+    const a = lonlat2tile(b.getNorthWest(), z), c = lonlat2tile(b.getSouthEast(), z);
+    total += (Math.abs(c.x - a.x) + 1) * (Math.abs(c.y - a.y) + 1);
+  }
+  return total;
+}
+const dlBtn = document.getElementById("dlBtn"), dlStatus = document.getElementById("dlstatus");
+const dlBar = document.getElementById("dlbar"), dlFill = document.getElementById("dlbarfill");
+const exportBtn = document.getElementById("exportBtn");
+const OVER_BUDGET_HINT = "Zoom in, make the window smaller (change the window size), " +
+  "or choose a lower detail zoom (z12–z18) to reduce the tile count.";
+function updateEstimate() {
+  if (!PREFLIGHT) return;
+  if (dlBtn.classList.contains("downloading")) return;   // don't clobber the live state
+  const n = visibleTileCount();
+  const over = n > MAX_TILES;
+  // Kept enabled even when over budget: a disabled button suppresses hover in
+  // some browsers, and the hint is only useful precisely in that state. The
+  // click handler refuses to start a download while .overbudget is set.
+  dlBtn.disabled = false;
+  dlBtn.classList.toggle("overbudget", over);
+  dlBtn.setAttribute("aria-disabled", over ? "true" : "false");
+  dlBtn.textContent = over
+    ? `Reduce Visible Area (${n.toLocaleString()} / ${MAX_TILES.toLocaleString()} tiles)`
+    : `⬇ Download visible area (~${n} tiles)`;
+  dlBtn.title = over ? OVER_BUDGET_HINT : "";
+}
+function startDownloadUI() {
+  dlBtn.disabled = true; dlBtn.classList.add("downloading");
+  dlBtn.textContent = "Downloading…";
+  dlBar.classList.add("on"); dlFill.style.width = "0%";
+  dlStatus.textContent = "starting…";
+}
+// The download runs in phases (tiles -> POIs -> elevation). The bar tracks whichever
+// is running and restarts per phase, so a finished tile phase can't sit at 100% while
+// elevation is still downloading — which read as a hang.
+const DL_PHASE = { tiles: "tiles", poi: "POIs", elevation: "elevation" };
+function setDownloadProgress(done, total, phase) {
+  const what = DL_PHASE[phase] || "tiles";
+  if (phase === "poi") {                       // one Overpass request, no granularity
+    dlFill.style.width = "100%";
+    dlStatus.textContent = "fetching POIs…";
+    return;
+  }
+  const pct = total ? Math.round(done / total * 100) : 0;
+  dlFill.style.width = pct + "%";
+  dlStatus.textContent = total
+    ? `${what} ${done}/${total} (${pct}%)…`
+    : `${what}…`;
+}
+function endDownloadUI() {
+  dlBtn.classList.remove("downloading");
+  dlBar.classList.remove("on"); dlFill.style.width = "0%";
+  updateEstimate();                                       // restores button label + disabled state
+}
+function updateZoomLabel() {
+  const el = document.getElementById("zlevel");
+  if (el) el.textContent = "z" + map.getZoom();
+  if (zoomBadgeEl) zoomBadgeEl.textContent = "z" + map.getZoom();
+}
+if (PREFLIGHT) {
+  map.on("moveend zoomend", updateEstimate);
+  map.on("zoomend", updateZoomLabel);
+  updateZoomLabel();
+  dlBtn.onclick = () => {
+    if (dlBtn.classList.contains("overbudget")) return;   // hoverable, but not clickable
+    const b = map.getBounds();
+    startDownloadUI();
+    fetch("download", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ north: b.getNorth(), south: b.getSouth(),
+        east: b.getEast(), west: b.getWest(), name: packNameEl ? packNameEl.value : "" }) })
+      .then(r => r.json()).then(j => {
+        if (j.error) { dlStatus.textContent = j.error; endDownloadUI(); }
+        else {
+          if (packNameEl) packNameEl.value = "";
+          pollDownload();
+        }
+      })
+      .catch(() => { dlStatus.textContent = "download failed to start"; endDownloadUI(); });
+  };
+}
+function pollDownload() {
+  fetch("download").then(r => r.json()).then(s => {
+    if (s.state === "running") {
+      setDownloadProgress(s.done || 0, s.total || 0, s.phase);
+      setTimeout(pollDownload, 500);
+    } else {
+      endDownloadUI();
+      dlStatus.textContent = s.msg || s.state;
+      if (s.state === "done" && s.pack) {
+        VIEW_PACK = s.pack;
+        try { localStorage.setItem("msposd-view-pack", VIEW_PACK); } catch (_) {}
+      }
+      tileLayer.redraw(); refreshCoverage(); refreshCacheSummary();
+      refreshDownloadedPacks();
+      if (window.reloadPoiTree) window.reloadPoiTree();    // show POIs fetched with this area
+    }
+  });
+}
+function saveSettings(patch) {
+  fetch("settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+}
+
+// --- downloaded-coverage overlay (preflight) --------------------------------
+const coverageLayer = L.layerGroup();
+function num2deg(x, y, z) {
+  const n = 1 << z;
+  const lat = Math.atan(Math.sinh(Math.PI * (1 - 2 * y / n))) * 180 / Math.PI;
+  return [lat, x / n * 360 - 180];
+}
+let lastStoredZoom = null;
+/** Resolve a zoom request to an available level, preserving its direction.
+ * @param {number} requested Zoom level requested by Leaflet.
+ * @param {number|null} previous Last available zoom level shown.
+ * @param {number[]} levels Available stored zoom levels.
+ * @returns {number} Exact stored level to display.
+ */
+function storedZoomForRequest(requested, previous, levels) {
+  if (!levels.length) return requested;
+  if (levels.includes(requested)) return requested;
+  if (levels.includes(previous)) {
+    if (requested > previous) {
+      const next = levels.find(level => level > previous);
+      return next === undefined ? levels[levels.length - 1] : next;
+    }
+    if (requested < previous) {
+      for (let i = levels.length - 1; i >= 0; i--)
+        if (levels[i] < previous) return levels[i];
+      return levels[0];
+    }
+  }
+  return levels.reduce((a, b) =>
+    Math.abs(b - requested) < Math.abs(a - requested) ? b : a);
+}
+/** Return the available zoom nearest the map's current zoom.
+ * @returns {number} Nearest stored zoom level.
+ */
+function nearestStoredZoom() {
+  return storedZoomForRequest(map.getZoom(), null, activeZooms());
+}
+/** Return the current zoom's index among available stored levels.
+ * @param {number} z Zoom level to locate.
+ * @returns {number} Level index, or -1 when unavailable.
+ */
+function storedZoomIndex(z = map.getZoom()) {
+  return activeZooms().indexOf(z);
+}
+/** Move by one available stored zoom level.
+ * @param {number} delta Positive to zoom in, negative to zoom out.
+ */
+function stepStoredZoom(delta) {
+  const zooms = activeZooms();
+  const current = nearestStoredZoom();
+  const idx = zooms.indexOf(current);
+  const next = Math.max(0, Math.min(zooms.length - 1, idx + delta));
+  map.setZoom(zooms[next], { animate: false });
+}
+/** Snap an intermediate Leaflet zoom in the direction the user requested. */
+function snapToStoredZoom() {
+  const requested = map.getZoom();
+  const snapped = storedZoomForRequest(requested, lastStoredZoom, activeZooms());
+  lastStoredZoom = snapped;
+  if (requested !== snapped) map.setZoom(snapped, { animate: false });
+}
+/** Snap to the mathematically nearest stored level without inferring direction. */
+function snapToNearestStoredZoom() {
+  const snapped = nearestStoredZoom();
+  lastStoredZoom = snapped;
+  if (map.getZoom() !== snapped) map.setZoom(snapped, { animate: false });
+}
+/** Fit the selected pack when the current map centre lies outside its bounds.
+ * @returns {boolean} True when the map view was changed.
+ */
+function fitSelectedPackIfOutside() {
+  const pack = DOWNLOADED_PACKS.find(item => item.id === VIEW_PACK && item.compatible);
+  if (!pack || !pack.bounds) return false;
+  const bounds = L.latLngBounds(
+    [pack.bounds.s, pack.bounds.w], [pack.bounds.n, pack.bounds.e]);
+  if (bounds.contains(map.getCenter())) return false;
+  lastStoredZoom = null;
+  map.fitBounds(bounds, { animate: false, maxZoom: pack.max_zoom });
+  return true;
+}
+/** Apply online or selected-pack cache-only tile behavior.
+ * @param {boolean} fitIfOutside Whether to reveal pack coverage when currently outside it.
+ */
+function applyOfflineMode(fitIfOutside = false) {
+  tileLayer.setUrl(tileUrl(), true);
+  if (cacheOnlyMode()) {
+    if (fitIfOutside) fitSelectedPackIfOutside();
+    snapToNearestStoredZoom();
+    map.on("zoomend", snapToStoredZoom);
+  } else {
+    map.off("zoomend", snapToStoredZoom);
+    lastStoredZoom = null;
+  }
+  tileLayer.redraw();
+  updateZoomBtns();
+}
+const covChk = PREFLIGHT ? document.getElementById("covChk") : null;
+const offChk = PREFLIGHT ? document.getElementById("offChk") : null;
+const covStatus = PREFLIGHT ? document.getElementById("covstatus") : null;
+const cacheInfo = PREFLIGHT ? document.getElementById("cacheinfo") : null;
+/** Format a byte count for the downloaded-pack panel.
+ * @param {number} n Size in bytes.
+ * @returns {string} Human-readable binary-unit size.
+ */
+function fmtBytes(n) {
+  if (!n) return "0 B";
+  const u = ["B", "KB", "MB", "GB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return `${n < 10 && i > 0 ? n.toFixed(1) : Math.round(n)} ${u[i]}`;
+}
+/** Format a distance for the downloaded-pack panel.
+ * @param {number} v Distance in kilometres.
+ * @returns {string|number} One decimal below 10 km, otherwise rounded kilometres.
+ */
+function fmtKm(v) { return v < 10 ? v.toFixed(1) : Math.round(v); }
+
+const packHdr = PREFLIGHT ? document.getElementById("packhdr") : null;
+const packCaret = PREFLIGHT ? document.getElementById("packcaret") : null;
+const packBody = PREFLIGHT ? document.getElementById("packbody") : null;
+const packList = PREFLIGHT ? document.getElementById("packlist") : null;
+const packSummary = PREFLIGHT ? document.getElementById("packsummary") : null;
+
+/** Select a downloaded pack for coverage and offline viewing.
+ * @param {string} id Safe pack id returned by the server.
+ * @param {boolean} fit Whether to fit the map to its maximum-detail bounds.
+ */
+function selectDownloadedPack(id, fit) {
+  const pack = DOWNLOADED_PACKS.find(item => item.id === id && item.compatible);
+  if (!pack) return;
+  VIEW_PACK = pack.id;
+  VIEW_ZOOMS = pack.zooms.map(item => item.z).sort((a, b) => a - b);
+  try { localStorage.setItem("msposd-view-pack", VIEW_PACK); } catch (_) {}
+  renderDownloadedPacks();
+  if (fit && pack.bounds) {
+    lastStoredZoom = null;
+    map.fitBounds([[pack.bounds.s, pack.bounds.w], [pack.bounds.n, pack.bounds.e]],
+                  { animate: false, maxZoom: pack.max_zoom });
+  }
+  applyOfflineMode();
+  refreshCoverage();
+  refreshCacheSummary();
+}
+
+/** Delete one downloaded MBTiles file after explicit user confirmation.
+ * @param {object} pack Inventory entry containing the safe id and display name.
+ */
+function deleteDownloadedPack(pack) {
+  const filename = `${pack.name}.mbtiles`;
+  if (!window.confirm(`Permanently delete "${filename}"?\n\nPOIs and elevation data are shared and will be kept.`))
+    return;
+  fetch(`packs?id=${encodeURIComponent(pack.id)}`, { method: "DELETE" })
+    .then(async response => {
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || `delete failed (${response.status})`);
+      if (VIEW_PACK === pack.id) {
+        VIEW_PACK = ""; VIEW_ZOOMS = [];
+        try { localStorage.removeItem("msposd-view-pack"); } catch (_) {}
+      }
+      dlStatus.textContent = `deleted ${filename}`;
+      refreshDownloadedPacks();
+    })
+    .catch(error => { dlStatus.textContent = error.message; });
+}
+
+/** Render every downloaded pack and its stored metadata into the selector. */
+function renderDownloadedPacks() {
+  if (!packList || !packSummary) return;
+  packSummary.textContent = `Downloaded maps (${DOWNLOADED_PACKS.length})`;
+  packList.textContent = "";
+  const selected = DOWNLOADED_PACKS.find(pack => pack.id === VIEW_PACK && pack.compatible);
+  if (exportBtn) exportBtn.disabled = !selected;
+  if (covChk) covChk.disabled = !selected;
+  if (offChk) offChk.disabled = !selected;
+  if (!selected) {
+    showDownloaded = false;
+    offlineTest = false;
+    if (covChk) covChk.checked = false;
+    if (offChk) offChk.checked = false;
+  }
+  if (!DOWNLOADED_PACKS.length) {
+    packList.className = "packempty";
+    packList.textContent = "No downloaded map packs in this folder.";
+    return;
+  }
+  packList.className = "";
+  for (const pack of DOWNLOADED_PACKS) {
+    const item = document.createElement("div");
+    item.className = "packitem" + (pack.id === VIEW_PACK ? " selected" : "") +
+      (pack.compatible ? "" : " invalid");
+
+    const title = document.createElement("div");
+    title.className = "packtitle";
+    const radio = document.createElement("input");
+    radio.type = "radio"; radio.name = "viewpack"; radio.value = pack.id;
+    radio.checked = pack.id === VIEW_PACK; radio.disabled = !pack.compatible;
+    radio.onchange = () => selectDownloadedPack(pack.id, true);
+    const name = document.createElement("b");
+    name.textContent = pack.name + (pack.active ? " (configured)" : "");
+    if (pack.compatible) name.onclick = () => selectDownloadedPack(pack.id, true);
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button"; deleteBtn.className = "packdelete";
+    deleteBtn.title = `Delete ${pack.name}.mbtiles`; deleteBtn.textContent = "×";
+    deleteBtn.onclick = () => deleteDownloadedPack(pack);
+    title.append(radio, name, deleteBtn); item.appendChild(title);
+
+    const details = [
+      `${pack.map_type || "type unknown"} · ${pack.fmt || "format unknown"} · ${fmtBytes(pack.bytes || 0)}`,
+      `${pack.total || 0} tiles · ${pack.zooms.map(z => `z${z.z} ${z.count}`).join(" · ")}`,
+    ];
+    if (typeof pack.max_zoom === "number") details.push(`maximum zoom z${pack.max_zoom}`);
+    if (pack.bounds) {
+      details.push(`coverage bounds ≈ ${fmtKm(pack.km_x)} × ${fmtKm(pack.km_y)} km at z${pack.max_zoom}`);
+      details.push(`N ${pack.bounds.n} · S ${pack.bounds.s} · W ${pack.bounds.w} · E ${pack.bounds.e}`);
+    }
+    if (pack.source_levels && new Set(pack.source_levels.map(level => level.source)).size > 1)
+      details.push(pack.source_levels.map(level => `z${level.z} ${level.source}`).join(" · "));
+    if (pack.error) details.push(`unreadable: ${pack.error}`);
+    for (const text of details) {
+      const line = document.createElement("div");
+      line.className = "packline"; line.textContent = text; item.appendChild(line);
+    }
+    packList.appendChild(item);
+  }
+}
+
+/** Reload the downloaded-pack inventory while preserving a valid selection. */
+function refreshDownloadedPacks() {
+  if (!PREFLIGHT) return;
+  fetch("packs").then(response => response.json()).then(packs => {
+    DOWNLOADED_PACKS = Array.isArray(packs) ? packs : [];
+    let wanted = VIEW_PACK;
+    if (!wanted) {
+      try { wanted = localStorage.getItem("msposd-view-pack") || ""; } catch (_) {}
+    }
+    let selected = DOWNLOADED_PACKS.find(pack => pack.id === wanted && pack.compatible);
+    if (!selected) selected = DOWNLOADED_PACKS.find(pack => pack.active && pack.compatible);
+    if (!selected) selected = DOWNLOADED_PACKS.find(pack => pack.compatible);
+    VIEW_PACK = selected ? selected.id : "";
+    VIEW_ZOOMS = selected ? selected.zooms.map(item => item.z).sort((a, b) => a - b) : [];
+    renderDownloadedPacks();
+    applyOfflineMode();
+    refreshCoverage();
+    refreshCacheSummary();
+  }).catch(() => {
+    if (packList) packList.textContent = "Could not read downloaded maps.";
+  });
+}
+
+if (packHdr) packHdr.onclick = () => {
+  const open = packBody.style.display !== "none";
+  packBody.style.display = open ? "none" : "block";
+  packCaret.textContent = open ? "▸" : "▾";
+};
+
+function refreshCacheSummary() {
+  if (!PREFLIGHT) return;
+  const summaryPack = VIEW_PACK || PACK || basemap;
+  fetch(`cache?src=${encodeURIComponent(summaryPack)}`).then(r => r.json()).then(c => {
+    const lmPart = c.lm_count ? ` · ${c.lm_count} POIs` : "";
+    cacheInfo.textContent = "";
+    // The pointer readout lives or dies by the DEM, not by the tile pack — set it
+    // before the "nothing downloaded" early return so elevation-only packs still work.
+    elevHave = !!(c.elevation && c.elevation.tiles);
+    if (!elevHave && elevBoxEl) elevBoxEl.style.display = "none";
+    if (!c.total) { cacheInfo.textContent = `${summaryPack}: nothing downloaded yet${lmPart}`; return; }
+    const add = (html, cls) => {
+      const d = document.createElement("div");
+      if (cls) d.className = cls;
+      d.innerHTML = html;
+      cacheInfo.appendChild(d);
+    };
+    // Line 1: what kind of map this is. Both PNG and JPEG render on the OSD
+    // (cairo reads PNG; map_render.c decodes JPEG via stb_image).
+    add(`<b>${summaryPack}</b>${c.fmt ? " · " + c.fmt : ""}`, "cachehdr");
+    // Line 2: what it costs to carry — pack size is what gets copied to the GS.
+    const per = c.zooms.map(z => `z${z.z} ${z.count}`).join(" · ");
+    const pack = (c.bytes || 0) + (c.lm_bytes || 0);
+    add(`${fmtBytes(pack)} · ${c.total} tiles (${per})${lmPart}`);
+    // Line 3: how much ground it actually covers, at the most detailed zoom.
+    const top = c.zooms[c.zooms.length - 1];
+    if (top && top.km_x)
+      add(`coverage ≈ ${fmtKm(top.km_x)} × ${fmtKm(top.km_y)} km at z${top.z}`);
+    // Line 4: terrain heights, stored separately in elevation.db.
+    const el = c.elevation;
+    if (el && el.tiles) {
+      const rng = (el.min_m === null || el.max_m === null)
+        ? "" : ` · ${Math.round(el.min_m)}…${Math.round(el.max_m)} m`;
+      add(`elevation ${el.tiles} tiles · ${fmtBytes(el.bytes)}${rng}`);
+    }
+  });
+}
+// Export the selected downloaded pack plus the shared points/elevation databases.
+// The browser handles the destination; the server sets the filename.
+if (exportBtn) exportBtn.onclick = () => {
+  if (exportBtn.disabled || !VIEW_PACK) return;
+  const a = document.createElement("a");
+  a.href = "export?src=" + encodeURIComponent(VIEW_PACK);
+  a.download = "";                                  // force download; use server filename
+  document.body.appendChild(a); a.click(); a.remove();
+};
+function refreshCoverage() {
+  if (!PREFLIGHT || !covChk.checked) return;
+  const z = nearestStoredZoom(), b = map.getBounds();
+  const u = `coverage?src=${encodeURIComponent(activePack())}&z=${z}` +
+            `&n=${b.getNorth()}&s=${b.getSouth()}&e=${b.getEast()}&w=${b.getWest()}`;
+  fetch(u).then(r => r.json()).then(d => {
+    coverageLayer.clearLayers();
+    if (d.truncated) { covStatus.textContent = `zoom in to see z${d.z} coverage`; return; }
+    for (const [x, y] of d.present) {
+      L.rectangle([num2deg(x, y + 1, z), num2deg(x + 1, y, z)],
+        { color: "#52c41a", weight: 0, fillColor: "#52c41a", fillOpacity: 0.25, interactive: false })
+        .addTo(coverageLayer);
+    }
+    covStatus.textContent = `${d.present.length}/${d.want} tiles cached at z${z} (${activePack()})`;
+  });
+}
+if (PREFLIGHT) {
+  covChk.onchange = () => {
+    showDownloaded = covChk.checked;
+    applyOfflineMode(showDownloaded);
+    if (showDownloaded) { coverageLayer.addTo(map); refreshCoverage(); }
+    else { map.removeLayer(coverageLayer); covStatus.textContent = ""; }
+  };
+  offChk.onchange = (e) => {
+    offlineTest = e.target.checked;
+    applyOfflineMode(offlineTest);
+  };
+  const demChk = document.getElementById("demChk");
+  if (demChk) demChk.onchange = () => saveSettings({ elevation: demChk.checked });
+  map.on("moveend", refreshCoverage);
+}
+
+
+// --- overlay zoom buttons (±1 from FIXED_ZOOM, only in preview/full modes) --
+const zinBtn = document.getElementById("zinBtn");
+const zoutBtn = document.getElementById("zoutBtn");
+function updateZoomBtns() {
+  if (PREFLIGHT) return;
+  const z = map.getZoom();
+  if (offlineTest) {
+    const idx = storedZoomIndex();
+    zinBtn.disabled = idx >= ZOOMS.length - 1;
+    zoutBtn.disabled = idx <= 0;
+  } else {
+    zinBtn.disabled  = z >= FIXED_ZOOM + 1;
+    zoutBtn.disabled = z <= FIXED_ZOOM - 1;
+  }
+}
+function zoomOverlayIn() {
+  if (offlineTest) stepStoredZoom(1);
+  else map.setZoom(Math.min(map.getZoom() + 1, FIXED_ZOOM + 1));
+}
+function zoomOverlayOut() {
+  if (offlineTest) stepStoredZoom(-1);
+  else map.setZoom(Math.max(map.getZoom() - 1, FIXED_ZOOM - 1));
+}
+if (!PREFLIGHT) {
+  const onlineCtl = document.getElementById("onlinectl");
+  const onlineChk = document.getElementById("onlineChk");
+  const followBtn = document.getElementById("followbtn");
+  const followBtnLabel = followBtn.querySelector("span");
+  const cycleFollowMode = () => {
+    const idx = FOLLOW_MODES.indexOf(FOLLOW);
+    FOLLOW = FOLLOW_MODES[(idx + 1) % FOLLOW_MODES.length];
+    followBtnLabel.textContent = FOLLOW;
+    followBtn.title = FOLLOW;
+    applyFollowMode(true);
+  };
+  onlineCtl.style.display = "block";
+  followBtn.style.display = "block";
+  followBtnLabel.textContent = FOLLOW;
+  followBtn.title = FOLLOW;
+  onlineChk.checked = false;
+  onlineChk.onchange = (e) => {
+    offlineTest = !e.target.checked;
+    applyOfflineMode();
+  };
+  followBtn.onclick = cycleFollowMode;
+  document.getElementById("zoombtns").style.display = "block";
+  zinBtn.onclick  = zoomOverlayIn;
+  zoutBtn.onclick = zoomOverlayOut;
+  map.on("zoomend", () => {
+    if (offlineTest) snapToStoredZoom();
+    updateZoomBtns();
+  });
+  window.addEventListener("keydown", (ev) => {
+    if (ev.key === "+" || ev.key === "=") {
+      ev.preventDefault();
+      zoomOverlayIn();
+    } else if (ev.key === "-") {
+      ev.preventDefault();
+      zoomOverlayOut();
+    } else if (ev.key === "Enter") {
+      ev.preventDefault();
+      cycleFollowMode();
+    }
+  });
+}
+applyFollowMode(true);
+
+// --- telemetry (SSE) --------------------------------------------------------
+function projectAhead(lat, lon, bearingDeg, distM) {
+  const rad = bearingDeg * Math.PI / 180;
+  return [lat + distM * Math.cos(rad) / EARTH_M_PER_DEG,
+          lon + distM * Math.sin(rad) / (EARTH_M_PER_DEG * Math.cos(lat * Math.PI / 180))];
+}
+function projectAheadPx(lat, lon, bearingDeg, distPx, z = map.getZoom()) {
+  const rad = bearingDeg * Math.PI / 180;
+  const startPx = map.project([lat, lon], z);
+  const endPx = startPx.add(L.point(distPx * Math.sin(rad), -distPx * Math.cos(rad)));
+  const end = map.unproject(endPx, z);
+  return [end.lat, end.lng];
+}
+const LEAD_FRAC = 0.30;     // offset plane this fraction of the screen, opposite course
+function validCoord(lat, lon) {
+  return Number.isFinite(lat) && Number.isFinite(lon)
+    && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180
+    && !(Math.abs(lat) < 1e-7 && Math.abs(lon) < 1e-7);
+}
+
+// Place the plane off-center so more map shows ahead of it. The plane sits at
+// (0.5 - LEAD*dx, 0.5 - LEAD*dy) of the view, where (dx,dy) is the course unit vector in
+// screen coords (dy down), Chebyshev-normalized so the dominant axis gets the full lead:
+//   N -> 50%/80%,  E -> 20%/50%,  NE -> 20%/80%.
+function leadCenter(here, courseDeg, z) {
+  const rad = courseDeg * Math.PI / 180;
+  let dx = Math.sin(rad), dy = -Math.cos(rad);          // east=+x, north=-y
+  const m = Math.max(Math.abs(dx), Math.abs(dy)) || 1;
+  dx /= m; dy /= m;
+  const size = map.getSize();
+  const planePx = map.project(here, z);
+  const centerPx = planePx.add(L.point(LEAD_FRAC * dx * size.x, LEAD_FRAC * dy * size.y));
+  return map.unproject(centerPx, z);
+}
+function refreshOverlayTiles(force = false) {
+  if (PREFLIGHT) return;
+  const now = performance.now();
+  if (!force && now - lastTileRefreshMs < TILE_REFRESH_MS) return;
+  tileLayer.redraw();
+  if (FOLLOW === "center") map.invalidateSize(false);
+  lastTileRefreshMs = now;
+}
+// All points FIT must keep in view: plane, plus home when set — matches the OSD
+// map's fit mode (osd/util/map_render.c) so both agree. Targets are deliberately
+// excluded: with several of them a single distant one would zoom the map out far
+// enough to lose all detail around the aircraft.
+function fitPoints(here) {
+  const pts = [here];
+  if (home) pts.push([home.lat, home.lon]);
+  return pts;
+}
+function shouldUpdateFit(pts) {
+  const center = L.latLngBounds(pts).getCenter();
+  const centerPx = map.project(center, map.getZoom());
+  if (!lastFitCenterPx) {
+    lastFitCenterPx = centerPx;
+    return true;
+  }
+  if (centerPx.distanceTo(lastFitCenterPx) < FIT_UPDATE_PX) return false;
+  lastFitCenterPx = centerPx;
+  return true;
+}
+function setOverlayView(target, z, force = false) {
+  const zoomChanged = map.getZoom() !== z;
+  const now = performance.now();
+  const deltaMs = now - lastViewMs;
+  if (!force && !zoomChanged && deltaMs < VIEW_UPDATE_MS) return false;
+
+  const targetPx = map.project(target, z);
+  const centerPx = map.project(map.getCenter(), z);
+  const deltaPx = targetPx.distanceTo(centerPx);
+  if (!force && !zoomChanged && deltaPx < VIEW_UPDATE_PX) return false;
+
+  map.setView(target, z, { animate: false });
+  lastViewMs = now;
+  refreshOverlayTiles(force || zoomChanged);
+  return true;
+}
+function updateView(here, courseDeg, force = false) {
+  if (PREFLIGHT) return;
+  const mapEl = map.getContainer();
+  const fitPts = FOLLOW === "fit" ? fitPoints(here) : null;
+  if (fitPts && fitPts.length >= 2) {
+    if (!force && !shouldUpdateFit(fitPts)) return;
+    mapEl.style.transform = "";
+    map.fitBounds(fitPts, { padding: [40, 40], animate: false });
+    if (force) refreshOverlayTiles(true);
+  } else if (FOLLOW === "center") {
+    // Track-up: plane stays at the #map centre (= window 50%,80%) and the whole
+    // map rotates so the course points up. The over-sized square from
+    // setupCenterMap() guarantees tile coverage at every rotation angle.
+    const z = haveFix ? map.getZoom() : FIXED_ZOOM;
+    setOverlayView(here, z, force || !haveFix);
+    mapEl.style.transform = `rotate(${-courseDeg}deg)`;
+  } else {
+    // plane mode (default)
+    mapEl.style.transform = "";
+    const z = haveFix ? map.getZoom() : FIXED_ZOOM;
+    setOverlayView(leadCenter(here, courseDeg, z), z, force || !haveFix);
+  }
+}
+const es = new EventSource("pos");
+es.onmessage = (ev) => {
+  const d = JSON.parse(ev.data);
+  if (!validCoord(d.lat, d.lon)) {
+    document.getElementById("status").textContent =
+      `no valid GPS  fix ${d.fix}  sats ${d.sats}`;
+    return;
+  }
+  const here = [d.lat, d.lon];
+  lastHere = here;
+  lastCourse = d.course;
+  if (!plane._map) { plane.addTo(map); headingLine.addTo(map); }
+  plane.setLatLng(here);
+  rotatePlane(FOLLOW === "center" ? d.course : d.heading);
+  headingLine.setLatLngs([here, projectAheadPx(d.lat, d.lon, d.heading, HEADING_VECTOR_PX)]);
+  if (targets[0]) targetLine.addTo(map).setLatLngs([here, [targets[0].lat, targets[0].lon]]);
+  updateView(here, d.course);
+  haveFix = true;
+  document.getElementById("status").textContent =
+    `fix ${d.fix}  sats ${d.sats}  hdg ${d.heading}  crs ${Math.round(d.course)}`;
+};
+
+// --- init / poll ------------------------------------------------------------
+let inited = false;
+function refreshStatus() {
+  fetch("status").then(r => r.json()).then(s => {
+    MAX_TILES = s.max_tiles || MAX_TILES;
+    // Zoom set is server-owned (config [map] detail_zoom); adopt it before any
+    // zoom snapping or tile-estimate work below.
+    if (Array.isArray(s.zooms) && s.zooms.length) setZooms(s.zooms);
+    if (s.detail_min) DETAIL_MIN = s.detail_min;
+    if (s.detail_max) DETAIL_MAX = s.detail_max;
+    if (s.detail_zoom) DETAIL_ZOOM = s.detail_zoom;
+    if (detailSel && detailSel.value !== String(DETAIL_ZOOM)) buildDetailOptions();
+    if (PREFLIGHT && s.zoom) FIXED_ZOOM = s.zoom;
+    if (!PREFLIGHT) FIXED_ZOOM = HIGHEST_ZOOM;
+    updateZoomBtns();
+    const dot = document.getElementById("netdot"), txt = document.getElementById("nettext");
+    dot.className = "dot " + (s.online ? "on" : "off");
+    txt.textContent = s.online ? "online" : (s.mbtiles ? "offline (cached)" : "offline (no tiles)");
+
+    home = s.home ? { lat: s.home.lat, lon: s.home.lon } : null; applyHome();
+
+    if (!inited) {
+      if (s.basemaps) {
+        // Grey out (disable) unusable basemaps: missing API key, or a tile format
+        // the native OSD renderer can't decode. Server sends name -> reason.
+        const disabled = s.basemaps_disabled || {};
+        BASEMAP_OPTS = s.basemaps; BASEMAP_DISABLED = disabled;
+        basemapSel.innerHTML = s.basemaps.map(b =>
+          `<option value="${b}"${disabled[b] ? " disabled" : ""}>${b}${disabled[b] ? ` (${disabled[b]})` : ""}</option>`
+        ).join("");
+        let want = s.basemap || s.basemaps[0];
+        if (disabled[want]) {
+          // Saved basemap is no longer usable (e.g. a JPEG source once the OSD
+          // renderer needs PNG). Persist the fallback so the server agrees --
+          // otherwise /cache, /export and downloads keep using the dead one.
+          want = s.basemaps.find(b => !disabled[b]) || want;
+          if (want !== s.basemap) saveSettings({ basemap: want });
+        }
+        basemap = want;
+        SOURCES = (Array.isArray(s.sources) && s.sources.length === ZOOMS.length)
+          ? s.sources.slice() : ZOOMS.map(() => basemap);
+        PACK = s.pack || basemap;
+        if (isBlend()) {
+          // A blend has no single basemap to show, so the simple control gets a
+          // synthetic entry rather than naming one of the sources and lying.
+          basemapSel.insertAdjacentHTML("afterbegin",
+            `<option value="" selected>— mixed (${[...new Set(SOURCES)].length} sources) —</option>`);
+        } else {
+          basemapSel.value = basemap;
+        }
+        buildSourceRows();            // auto-opens when the mix is non-uniform
+        tileLayer.setUrl(tileUrl());
+      }
+      // restore the saved elevation choice without firing onchange back at it
+      const demChkEl = document.getElementById("demChk");
+      if (demChkEl && typeof s.elevation === "boolean") demChkEl.checked = s.elevation;
+      setTargetsLocal(s);
+      // initial view: home (overlay) or last-downloaded center (preflight)
+      if (!PREFLIGHT) {
+        if (home) map.setView([home.lat, home.lon], FIXED_ZOOM, { animate: false });
+        else if (s.center) map.setView([s.center[0], s.center[1]], FIXED_ZOOM, { animate: false });
+        else map.setZoom(FIXED_ZOOM, { animate: false });
+      } else if (s.center) {
+        map.setView([s.center[0], s.center[1]], FIXED_ZOOM, { animate: false });
+      }
+      refreshCacheSummary();
+      refreshDownloadedPacks();
+      inited = true;
+    }
+    updateEstimate();
+  });
+}
+// Adopt the server's target slots without POSTing them back. Also used on the
+// overlay modes, which draw the markers but have no editor.
+function setTargetsLocal(s) {
+  if (s.target_slots) TARGET_SLOTS = s.target_slots;
+  targets = Array.isArray(s.targets) ? s.targets.slice(0, TARGET_SLOTS)
+          : (s.target ? [{ lat: s.target.lat, lon: s.target.lon, name: "" }] : []);
+  while (targets.length < TARGET_SLOTS) targets.push(null);
+  applyTarget();
+  if (PREFLIGHT) { buildTargetRows(); }
+}
+refreshStatus();
+setInterval(refreshStatus, PREFLIGHT ? 15000 : 5000);
+updateEstimate();
+</script>
+</body>
+</html>

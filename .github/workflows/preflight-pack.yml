@@ -1,0 +1,46 @@
+name: preflight-pack
+
+# Build the standalone preflight map app (gs/mapserver.py + web/) into a single
+# self-contained binary for Linux, macOS and Windows. Run manually or by pushing
+# a `preflight-v*` tag; grab the binaries from the run's Artifacts.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "preflight-v*"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: msposd-preflight-linux
+          - os: macos-latest
+            artifact: msposd-preflight-macos
+          - os: windows-latest
+            artifact: msposd-preflight-windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyInstaller
+        run: python -m pip install --upgrade pyinstaller
+
+      - name: Build
+        run: python -m PyInstaller --clean --noconfirm gs/pack/mapserver.spec
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/msposd-preflight
+            dist/msposd-preflight.exe
+          if-no-files-found: error

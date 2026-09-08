@@ -4,6 +4,7 @@ CFLAGS ?=
 CFLAGS += -Wno-address-of-packed-member -DVERSION_STRING="\"$(VERSION_STRING)\""
 
 SRCS := compat.c msposd.c bmp/bitmap.c bmp/region.c bmp/lib/schrift.c bmp/text.c osd/net/network.c osd/msp/msp.c osd/msp/msp_displayport.c libpng/lodepng.c osd/util/interface.c osd/util/settings.c osd/util/ini_parser.c osd/msp/vtxmenu.c osd/util/subtitle.c osd/util/simple_ini.c
+GS_SRCS := osd/util/terrain_elevation.c osd/util/terrain_agl.c
 OUTPUT ?= $(PWD)
 BUILD = $(CC) $(SRCS) -I $(SDK)/include -I$(TOOLCHAIN)/usr/include -I$(PWD) -L$(DRV) $(CFLAGS) $(LIB) -levent_core -Os -s $(CFLAGS) -o $(OUTPUT)
 
@@ -60,13 +61,31 @@ star6e: version.h
 native: version.h
 	$(eval SDK = ./sdk/gk7205v300)
 	$(eval CFLAGS += -D_x86)
-	$(eval LIB = -lcsfml-graphics -lcsfml-window -lcsfml-system `pkg-config --libs cairo x11 xext` -lXext -lm)
-	$(eval BUILD = $(CC) $(SRCS) -I $(SDK)/include -L $(DRV) $(CFLAGS) $(LIB) -levent_core -O0 -g -o $(OUTPUT))
+	$(eval LIB = -lcsfml-graphics -lcsfml-window -lcsfml-system `pkg-config --libs cairo x11 xext` -lXext -lm -lsqlite3)
+	$(eval BUILD = $(CC) $(SRCS) $(GS_SRCS) -I $(SDK)/include -L $(DRV) $(CFLAGS) $(LIB) -levent_core -O0 -g -o $(OUTPUT))
 	$(BUILD)
 
 rockchip: version.h
 	$(eval SDK = ./sdk/gk7205v300)
 	$(eval CFLAGS += -D__ROCKCHIP__)
-	$(eval LIB = `pkg-config --libs cairo x11 xext` -lXext -lm -lrt)
-	$(eval BUILD = $(CC) $(SRCS) -I $(SDK)/include -L $(DRV) $(CFLAGS) $(LIB) -levent_core -O0 -g -o $(OUTPUT))
+	$(eval LIB = `pkg-config --libs cairo x11 xext` -lXext -lm -lrt -lsqlite3)
+	$(eval BUILD = $(CC) $(SRCS) $(GS_SRCS) -I $(SDK)/include -L $(DRV) $(CFLAGS) $(LIB) -levent_core -O0 -g -o $(OUTPUT))
 	$(BUILD)
+
+test-terrain-elevation:
+	$(CC) tests/terrain_elevation_test.c osd/util/terrain_elevation.c -I$(PWD) \
+		-DTERRAIN_ELEVATION_DB_PATH='"/tmp/msposd-terrain-elevation-test.db"' \
+		-Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -no-pie \
+		-o /tmp/msposd-terrain-elevation-test -lsqlite3 -lm
+	ASAN_OPTIONS=detect_leaks=0:abort_on_error=1:handle_segv=0 \
+		/tmp/msposd-terrain-elevation-test
+
+test-terrain-agl:
+	$(CC) tests/terrain_agl_test.c osd/util/terrain_agl.c osd/util/terrain_elevation.c \
+		-I$(PWD) -DTERRAIN_ELEVATION_DB_PATH='"/tmp/msposd-terrain-agl-test.db"' \
+		-Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -no-pie \
+		-o /tmp/msposd-terrain-agl-test -lsqlite3 -lm
+	ASAN_OPTIONS=detect_leaks=0:abort_on_error=1:handle_segv=0 \
+		/tmp/msposd-terrain-agl-test
+
+test-terrain: test-terrain-elevation test-terrain-agl
