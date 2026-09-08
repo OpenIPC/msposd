@@ -157,7 +157,8 @@ void handle_key_press(XEvent *event) {
 	// Single-action hotkeys (POI/map toggle, follow, zoom): drop autorepeat so one
 	// physical press = one action. (Alt+arrow AHI keys are left to repeat.)
 	if (keysym == XK_p || keysym == XK_P || keysym == XK_g || keysym == XK_G ||
-	    keysym == XK_f || keysym == XK_F || keysym == XK_plus || keysym == XK_equal ||
+	    keysym == XK_f || keysym == XK_F || keysym == XK_h || keysym == XK_H ||
+	    keysym == XK_plus || keysym == XK_equal ||
 	    keysym == XK_KP_Add || keysym == XK_minus || keysym == XK_KP_Subtract) {
 		if (key_autorepeat(keysym))
 			return;
@@ -181,6 +182,10 @@ void handle_key_press(XEvent *event) {
 	}
 	if (keysym == XK_f || keysym == XK_F) {
 		map_follow_cycle();     // cycle plane/north/fit (no-op unless [map] enabled=1)
+		return;
+	}
+	if (keysym == XK_h || keysym == XK_H) {
+		map_switch_file();      // load next .mbtiles in the map folder, keeping zoom
 		return;
 	}
 	if ((event->xkey.state & Mod1Mask) && (keysym == XK_Up)) {
@@ -628,6 +633,7 @@ void FlushDrawing() {
         if (map_config_enabled()) {
             grab_hotkey(XK_g,           0);          // show/hide
             grab_hotkey(XK_f,           0);          // cycle follow mode
+            grab_hotkey(XK_h,           0);          // cycle .mbtiles pack
             grab_hotkey(XK_equal,       0);          // '=' zoom in
             grab_hotkey(XK_plus,        ShiftMask);  // '+' (Shift+'=') zoom in
             grab_hotkey(XK_KP_Add,      0);          // keypad + zoom in

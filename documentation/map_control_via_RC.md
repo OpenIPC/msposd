@@ -88,7 +88,7 @@ controllable in flight. Two binding kinds cover absolute + relative:
 Recommended default: a **stability window** (~200 ms) on position bindings so a band
 must hold before it applies, riding out transitional PWM — reuse `ChannelPersistPeriodMS`.
 
-### 3. Config — new `[map.rc]` block in [`msposd.ini`](../msposd.ini)
+### 3. Config — new `[map.rc]` block in [`msposd.ini`](../msposd.ini.example)
 Fully data-driven, so channel numbers are not hard-coded. Wire only the channels you
 actually have (e.g. one 3-position switch + one momentary button is a valid minimal
 setup). Any key omitted / `0` = that binding is inactive.

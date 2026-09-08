@@ -244,15 +244,27 @@ static double poi_project_y(double dist, int16_t alt_m, double pitch_deg,
 }
 
 /*
- * Preflight target — authored in the preflight map and stored in the landmarks
- * DB (`waypoints` table, kind='target'), so it travels with the POIs as part of
- * the map pack. Cached and refreshed at most once a second. A legacy target in
- * gs/state.ini [target] is honoured as a migration fallback. This is the single
- * reader of the target; map_render.c consumes it via poi_get_target().
+ * Preflight targets — up to POI_TARGETS named points authored in the preflight
+ * map and stored in the landmarks DB (`waypoints`, kinds 'target' and
+ * 'target2'..'targetN'), so they travel with the POIs as part of the map pack.
+ * Slot 0 keeps the historical kind='target' row, so a pack written by an older
+ * preflight still shows its target here. Cached and refreshed at most once a
+ * second. A legacy target in gs/state.ini [target] is honoured as a migration
+ * fallback. This is the single reader; map_render.c consumes them via
+ * poi_target_count()/poi_get_target_at().
  */
+#define POI_TARGETS    5
+#define POI_TARGET_NAME 32
+typedef struct {
+	double lat, lon;
+	char   name[POI_TARGET_NAME];
+} poi_target_t;
+static poi_target_t poi_targets[POI_TARGETS];
+static int      poi_ntarget = 0;                 /* how many slots are filled */
+static uint64_t poi_target_last_ms = 0;
+/* slot 0 mirrors, kept so the legacy ini fallback below stays readable */
 static bool     poi_target_set = false;
 static double   poi_target_lat = 0, poi_target_lon = 0;
-static uint64_t poi_target_last_ms = 0;
 
 /* Legacy fallback: read the target from gs/state.ini [target]. */
 static bool poi_target_from_ini(void) {
@@ -271,33 +283,59 @@ static void poi_refresh_target(void) {
 	if (poi_target_last_ms != 0 && now - poi_target_last_ms < 1000) return;
 	poi_target_last_ms = now;
 
+	poi_ntarget = 0;
 	poi_target_set = false;
 
 	sqlite3 *db = NULL;
 	if (sqlite3_open_v2(poi_db_path, &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
 		sqlite3_stmt *st = NULL;
-		if (sqlite3_prepare_v2(db, "SELECT lat, lon FROM waypoints WHERE kind='target'",
-		                       -1, &st, NULL) == SQLITE_OK
-		    && sqlite3_step(st) == SQLITE_ROW) {
-			poi_target_lat = sqlite3_column_double(st, 0);
-			poi_target_lon = sqlite3_column_double(st, 1);
-			poi_target_set = true;
+		/* One pass over the slot rows; ordering by kind puts 'target' (slot 0)
+		 * first, then 'target2'..'targetN' in numeric order for N < 10. */
+		if (sqlite3_prepare_v2(db,
+		        "SELECT lat, lon, name FROM waypoints "
+		        "WHERE kind='target' OR kind LIKE 'target_' ORDER BY kind",
+		        -1, &st, NULL) == SQLITE_OK) {
+			while (poi_ntarget < POI_TARGETS && sqlite3_step(st) == SQLITE_ROW) {
+				poi_target_t *t = &poi_targets[poi_ntarget++];
+				t->lat = sqlite3_column_double(st, 0);
+				t->lon = sqlite3_column_double(st, 1);
+				const unsigned char *nm = sqlite3_column_text(st, 2);
+				snprintf(t->name, sizeof(t->name), "%s", nm ? (const char *)nm : "");
+			}
 		}
 		sqlite3_finalize(st);
 	}
 	if (db) sqlite3_close(db);
 
-	if (!poi_target_set)                    /* migration: legacy state.ini target */
-		poi_target_set = poi_target_from_ini();
+	if (poi_ntarget == 0 && poi_target_from_ini()) {   /* migration: legacy state.ini */
+		poi_targets[0].lat = poi_target_lat;
+		poi_targets[0].lon = poi_target_lon;
+		poi_targets[0].name[0] = '\0';
+		poi_ntarget = 1;
+	}
+	poi_target_set = poi_ntarget > 0;
+	if (poi_target_set) {
+		poi_target_lat = poi_targets[0].lat;
+		poi_target_lon = poi_targets[0].lon;
+	}
 }
 
-/* Shared accessor so map_render.c need not open the DB itself. Returns 1 and
- * fills lat/lon when a target is set. */
-static bool poi_get_target(double *lat, double *lon) {
+/* Shared accessors so map_render.c need not open the DB itself. */
+static int poi_target_count(void) {
 	poi_refresh_target();                   /* throttled internally */
-	if (poi_target_set) { *lat = poi_target_lat; *lon = poi_target_lon; }
-	return poi_target_set;
+	return poi_ntarget;
 }
+
+/* Slot i (0-based) by value; name may be "". Returns false when i is not set. */
+static bool poi_get_target_at(int i, double *lat, double *lon, const char **name) {
+	poi_refresh_target();
+	if (i < 0 || i >= poi_ntarget) return false;
+	*lat = poi_targets[i].lat;
+	*lon = poi_targets[i].lon;
+	if (name) *name = poi_targets[i].name;
+	return true;
+}
+
 
 /*
  * Draw the preflight target as a red POI marker with its distance label. Unlike
@@ -307,29 +345,39 @@ static bool poi_get_target(double *lat, double *lon) {
 static void DrawTarget(double lat, double lon, double heading, int16_t alt_m,
                        double pitch_deg, int pos_y, double f,
                        double f_h, double cx) {
-	poi_refresh_target();
-	if (!poi_target_set) return;
+	int n = poi_target_count();
 
-	double dist, brg;
-	poi_dist_bearing(lat, lon, poi_target_lat, poi_target_lon, &dist, &brg);
+	for (int i = 0; i < n; i++) {
+		double tlat, tlon;
+		const char *name = NULL;
+		if (!poi_get_target_at(i, &tlat, &tlon, &name)) continue;
 
-	double az = poi_norm180(brg - heading);
-	if (fabs(az) > poi_fov_deg) return;
+		double dist, brg;
+		poi_dist_bearing(lat, lon, tlat, tlon, &dist, &brg);
 
-	double x = cx + f_h * tan(az * POI_D2R);
-	if (x < 0 || x > OVERLAY_WIDTH) return;
+		double az = poi_norm180(brg - heading);
+		if (fabs(az) > poi_fov_deg) continue;
 
-	double y = poi_project_y(dist, alt_m, pitch_deg, pos_y, f);
-	if (y < 0 || y > OVERLAY_HEIGHT) return;
+		double x = cx + f_h * tan(az * POI_D2R);
+		if (x < 0 || x > OVERLAY_WIDTH) continue;
 
-	char txt[32];
-	snprintf(txt, sizeof(txt), "%.1fkm", dist / 1000.0);
-	int ix = (int)(x + 0.5), iy = (int)(y + 0.5);
-	/* Two concentric rings (larger + smaller than the 6px POI marker) so the
-	 * target reads as a distinct crosshair against a busy background. */
-	drawCircleGS(ix, iy, 9, getcolor(COLOR_RED), 2, false);
-	drawCircleGS(ix, iy, 3, getcolor(COLOR_RED), 2, false);
-	drawText(txt, (int)x + 12, (int)y - 6, getcolor(COLOR_RED), poi_font_size * 1.2, false, 1, 0);
+		double y = poi_project_y(dist, alt_m, pitch_deg, pos_y, f);
+		if (y < 0 || y > OVERLAY_HEIGHT) continue;
+
+		/* "<name> <dist>" on one line; unnamed slots keep the plain distance. */
+		char txt[POI_TARGET_NAME + 16];
+		if (name && name[0])
+			snprintf(txt, sizeof(txt), "%s %.1fkm", name, dist / 1000.0);
+		else
+			snprintf(txt, sizeof(txt), "%.1fkm", dist / 1000.0);
+
+		int ix = (int)(x + 0.5), iy = (int)(y + 0.5);
+		/* Two concentric rings (larger + smaller than the 6px POI marker) so the
+		 * target reads as a distinct crosshair against a busy background. */
+		drawCircleGS(ix, iy, 9, getcolor(COLOR_RED), 2, false);
+		drawCircleGS(ix, iy, 3, getcolor(COLOR_RED), 2, false);
+		drawText(txt, (int)x + 12, (int)y - 6, getcolor(COLOR_RED), poi_font_size * 1.2, false, 1, 0);
+	}
 }
 
 /*

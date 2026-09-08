@@ -24,12 +24,32 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <dirent.h>     /* cycling the .mbtiles packs in the map folder ('h' key) */
+
+/* Baseline-JPEG decoding for imagery basemaps (Esri World Imagery/Streets/Topo
+ * serve JPEG; OSM-derived rasters serve PNG). Cairo reads PNG natively but has
+ * no JPEG reader, so a vendored single-file decoder fills the gap — same pattern
+ * as libpng/lodepng.c. JPEG only: PNG keeps using cairo's own reader. */
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_STATIC
+#define STBI_ONLY_JPEG
+#define STBI_NO_STDIO
+#define STBI_NO_FAILURE_STRINGS
+#include "stb_image.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 #define MAP_D2R        (M_PI / 180.0)
 #define MAP_TILE_PX    256
+/* Target slots come from poi_osd.c, which osd.c includes just above this file.
+ * Guarded so map_render.c still compiles if that order ever changes. */
+#ifndef POI_TARGETS
+#define POI_TARGETS 5
+#endif
+
+#define MAP_MAX_PACKS  32          /* .mbtiles files the 'h' cycle will consider */
+#define MAP_PACK_NAME  256         /* fits any dirent d_name without truncation */
 #define MAP_TILE_CACHE 128          /* decoded tile surfaces kept in LRU */
 #define MAP_MAX_ZOOMS  32
 
@@ -48,6 +68,14 @@ static char  map_mbtiles[512] = "gs/maps/OpenTopoMap.mbtiles";
 static int   map_zoom        = 15;      /* requested zoom, snapped to available */
 static int   map_follow      = MAP_FOLLOW_PLANE;
 static int   map_shown       = 0;       /* hidden on start; show/hide with the 'g' key, gated by enabled */
+/* On show, briefly name the loaded MBTiles and draw the key guide. Independent
+ * timers let a later pack switch refresh only the name. Both are drawn per frame
+ * (like the plane), so they clear without forcing a tile recompose. */
+#define MAP_BANNER_MS 3000
+#define MAP_NAME_SIZE 11.0
+static double map_help_size = 20.0;   /* key-guide font size, px ([map] help_font_size) */
+static uint64_t map_name_until_ms = 0;
+static uint64_t map_help_until_ms = 0;
 static int   map_layout      = MAP_LAYOUT_CORNER;
 static char  map_geometry[64] = "";     /* "WxH+X+Y" absolute px; overrides the anchor scheme below */
 /* Anchor+size scheme (used when geometry is empty): a named corner plus
@@ -66,6 +94,12 @@ static int    map_frame_on    = 1;       /* rounded window frame around a corner
 static int    map_on_top      = 0;       /* 0 = map under the OSD text/icons; 1 = over them */
 static double map_recenter_px   = 48.0; /* re-render tiles once the plane drifts this many px (WebKit VIEW_UPDATE_PX) */
 static double map_head_gate_deg = 3.0;  /* re-render when course changes this much (affects lead/rotation) */
+/* Track vector: a line along the GPS ground course, so a crabbing aircraft shows
+ * where it is actually going as well as where its nose points (the icon). */
+static int    map_track_vec     = 1;    /* draw it at all */
+static double map_track_len     = 26.0; /* px from the icon centre (icon nose is at 11) */
+static double map_track_min_spd = 150.0;/* cm/s below which GPS course is noise, so hide it */
+static double map_track_alpha   = 0.6;  /* composite the whole arrow at this opacity */
 
 /* ---- MBTiles handle + available zooms ----------------------------------- */
 static sqlite3      *map_db        = NULL;
@@ -113,6 +147,10 @@ static int    map_last_want = 0, map_last_got = 0;   /* tiles wanted/decoded (di
 static const char *map_follow_name(int f);
 static int map_snap_zoom(int z);
 
+/* folder helpers, defined below with the rest of the pack-switching code */
+static void map_pack_dir(char *out, size_t outsz);
+static int  map_list_packs(const char *dir, char names[][MAP_PACK_NAME], int max);
+
 static void map_read_config(void) {
 	int v;
 	int has_en = ReadIniInt("map", "enabled", &v);
@@ -126,12 +164,34 @@ static void map_read_config(void) {
 	if (ReadIniInt("map", "on_top", &v))   map_on_top   = v ? 1 : 0;
 	if (ReadIniInt("map", "recenter_px", &v) && v > 0) map_recenter_px = v;
 	if (ReadIniInt("map", "heading_gate_deg", &v) && v >= 0) map_head_gate_deg = v;
+	if (ReadIniInt("map", "track_vector", &v))     map_track_vec = v ? 1 : 0;
+	/* clamped, so a mistyped length can't draw a line across the whole screen */
+	if (ReadIniInt("map", "track_vector_len", &v) && v > 0)
+		map_track_len = (v < 6 ? 6 : v > 200 ? 200 : v);
+	if (ReadIniInt("map", "track_vector_min_speed", &v) && v >= 0) map_track_min_spd = v;
+	if (ReadIniInt("map", "track_vector_alpha", &v))
+		map_track_alpha = (v < 0 ? 0 : v > 100 ? 100 : v) / 100.0;
+	if (ReadIniInt("map", "help_font_size", &v) && v > 0)
+		map_help_size = (v < 6 ? 6 : v > 64 ? 64 : v);
 
 	ReadIniString("map", "mbtiles", map_mbtiles, sizeof(map_mbtiles));
 	if (map_mbtiles[0] && map_mbtiles[0] != '/') {
 		char abs[1024];
 		snprintf(abs, sizeof(abs), "%s/%s", exe_dir(), map_mbtiles);
 		snprintf(map_mbtiles, sizeof(map_mbtiles), "%s", abs);
+	}
+	/* Configured pack missing -> take the first one in that folder, so renaming or
+	 * rebuilding a pack (or leaving `mbtiles` at its default) still shows a map
+	 * instead of an error panel. 'h' then cycles from there. */
+	if (map_mbtiles[0] && access(map_mbtiles, F_OK) != 0) {
+		char dir[sizeof(map_mbtiles) - MAP_PACK_NAME - 1];
+		map_pack_dir(dir, sizeof(dir));
+		char names[MAP_MAX_PACKS][MAP_PACK_NAME];
+		int n = map_list_packs(dir, names, MAP_MAX_PACKS);
+		if (n > 0) {
+			printf("[map] %s not found; using %s\n", map_mbtiles, names[0]);
+			snprintf(map_mbtiles, sizeof(map_mbtiles), "%s/%s", dir, names[0]);
+		}
 	}
 	char s[32] = "";
 	if (ReadIniString("map", "follow", s, sizeof(s))) {
@@ -179,7 +239,10 @@ static bool map_open_db(void) {
 	}
 	sqlite3_busy_timeout(map_db, 250);   /* tolerate preflight download writers */
 
-	/* available zoom levels, ascending */
+	/* available zoom levels, ascending. Reset first: this runs again on the retry
+	 * backoff and on every pack switch, and appending would merge one pack's
+	 * levels into the next one's. */
+	map_nzoom = 0;
 	sqlite3_stmt *zs = NULL;
 	if (sqlite3_prepare_v2(map_db,
 	        "SELECT DISTINCT zoom_level FROM tiles ORDER BY zoom_level", -1, &zs, NULL)
@@ -227,6 +290,56 @@ static const char *map_follow_name(int f) {
 	     :                          "plane";
 }
 
+/* ---- pack switching ('h' key) ------------------------------------------- *
+ * Cycle the .mbtiles files sitting in the map folder. Everything derived from
+ * the open pack has to go: the prepared statement (sqlite refuses to close a
+ * handle with live statements), the zoom list, the composited tile layer, and —
+ * easy to miss — the decoded-tile LRU, whose entries are keyed by (z,x,y) with
+ * no pack identity and would otherwise be served from the previous file. */
+static void map_close_db(void) {
+	if (map_tile_stmt) { sqlite3_finalize(map_tile_stmt); map_tile_stmt = NULL; }
+	if (map_db)        { sqlite3_close(map_db);           map_db = NULL; }
+	map_nzoom = 0;
+	for (int i = 0; i < map_cache_n; i++)
+		if (map_cache[i].surf) cairo_surface_destroy(map_cache[i].surf);
+	map_cache_n = 0;
+	if (map_surface) { cairo_surface_destroy(map_surface); map_surface = NULL; }
+	map_r_z = -1;
+}
+
+static int map_name_cmp(const void *a, const void *b) {
+	return strcmp((const char *)a, (const char *)b);
+}
+
+/* Fill `names` with the *.mbtiles basenames in `dir`, sorted alphabetically.
+ * Returns the count. Matches only an exact ".mbtiles" ending, so sqlite's
+ * "<pack>.mbtiles-journal" side files are skipped. */
+static int map_list_packs(const char *dir, char names[][MAP_PACK_NAME], int max) {
+	DIR *d = opendir(dir);
+	if (!d) return 0;
+	int n = 0;
+	struct dirent *e;
+	while ((e = readdir(d)) && n < max) {
+		size_t len = strlen(e->d_name);
+		const char *ext = ".mbtiles";
+		size_t elen = strlen(ext);
+		if (len <= elen || strcmp(e->d_name + len - elen, ext) != 0) continue;
+		snprintf(names[n], MAP_PACK_NAME, "%s", e->d_name);
+		n++;
+	}
+	closedir(d);
+	qsort(names, n, MAP_PACK_NAME, map_name_cmp);
+	return n;
+}
+
+/* Directory holding the configured pack (map_mbtiles is absolute by now). */
+static void map_pack_dir(char *out, size_t outsz) {
+	snprintf(out, outsz, "%s", map_mbtiles);
+	char *slash = strrchr(out, '/');
+	if (slash) *slash = '\0';
+	else       snprintf(out, outsz, ".");
+}
+
 /* 'g' — show/hide the overlay. No-op unless the feature is enabled in config, so
  * a disabled map can never be turned on by a keypress. */
 static void map_toggle_enabled(void) {
@@ -236,7 +349,12 @@ static void map_toggle_enabled(void) {
 		return;
 	}
 	map_shown = !map_shown;
-	if (map_shown) map_r_z = -1;            /* force a fresh compose */
+	if (map_shown) {
+		uint64_t now = get_time_ms();
+		map_r_z = -1;                       /* force a fresh compose */
+		map_name_until_ms = now + MAP_BANNER_MS;
+		map_help_until_ms = now + MAP_BANNER_MS;
+	}
 	else if (map_surface) { cairo_surface_destroy(map_surface); map_surface = NULL; }
 	printf("[map] %s\n", map_shown ? "shown" : "hidden");
 }
@@ -267,6 +385,58 @@ static void map_follow_cycle(void) {
 	map_follow = order[(idx + 1) % 4];
 	map_r_z = -1; map_r_follow = -1;        /* force recompose */
 	printf("[map] follow=%s\n", map_follow_name(map_follow));
+}
+
+static int map_snap_zoom(int z);
+
+/* 'h' — load the next .mbtiles in the map folder, keeping the zoom.
+ *
+ * The zoom carried over is the *effective* one (what was on screen), snapped to
+ * whatever the new pack stores: leaving a z13/15/17 pack at z17 lands on z15 in a
+ * z11/13/15 pack. Only acts while the map is shown. A pack that fails to open is
+ * skipped; if every candidate fails the previous pack is reopened, so this can
+ * never leave the map without a file. Runtime only — msposd.ini is not rewritten,
+ * so a restart returns to the configured default. */
+static void map_switch_file(void) {
+	if (!map_config_enabled()) return;
+	if (!map_shown) return;                  /* no-op while hidden */
+
+	char dir[sizeof(map_mbtiles) - MAP_PACK_NAME - 1];
+	map_pack_dir(dir, sizeof(dir));
+	char names[MAP_MAX_PACKS][MAP_PACK_NAME];
+	int n = map_list_packs(dir, names, MAP_MAX_PACKS);
+	if (n < 2) {
+		printf("[map] only %d pack(s) in %s — nothing to switch to\n", n, dir);
+		return;
+	}
+
+	/* where we are now (absent -> start before the first, so 'h' loads names[0]) */
+	const char *cur = strrchr(map_mbtiles, '/');
+	cur = cur ? cur + 1 : map_mbtiles;
+	int idx = -1;
+	for (int i = 0; i < n; i++) if (strcmp(names[i], cur) == 0) { idx = i; break; }
+
+	char prev[sizeof(map_mbtiles)];
+	snprintf(prev, sizeof(prev), "%s", map_mbtiles);
+	int want_zoom = map_snap_zoom(map_zoom);   /* remember what was on screen */
+
+	map_close_db();
+	for (int step = 1; step <= n; step++) {
+		int cand = (idx + step) % n;
+		snprintf(map_mbtiles, sizeof(map_mbtiles), "%s/%s", dir, names[cand]);
+		if (map_open_db()) {
+			map_zoom = map_snap_zoom(want_zoom);
+			map_name_until_ms = get_time_ms() + MAP_BANNER_MS;
+			printf("[map] pack -> %s (zoom %d)\n", names[cand], map_zoom);
+			return;
+		}
+		fprintf(stderr, "[map] skipping %s: cannot open\n", names[cand]);
+		map_close_db();                        /* clear partial state before retry */
+	}
+	/* nothing opened — go back to what we had so the map keeps working */
+	snprintf(map_mbtiles, sizeof(map_mbtiles), "%s", prev);
+	if (map_open_db()) map_zoom = map_snap_zoom(want_zoom);
+	fprintf(stderr, "[map] no usable pack in %s; kept %s\n", dir, prev);
 }
 
 /* Nearest available zoom to `z`. */
@@ -308,6 +478,55 @@ static cairo_status_t map_blob_read(void *closure, unsigned char *out, unsigned 
 	return CAIRO_STATUS_SUCCESS;
 }
 
+/* Decode a JPEG tile into a cairo surface, or NULL if it isn't decodable.
+ * stb gives us tightly-packed RGB; cairo wants native-endian 32-bit pixels with
+ * its own stride, so repack row by row. RGB24 (not ARGB32) because tiles are
+ * opaque — that skips any alpha compositing cost when they are drawn. */
+static cairo_surface_t *map_decode_jpeg(const unsigned char *data, int len) {
+	int w = 0, h = 0, comp = 0;
+	/* Refuse absurd dimensions before decoding: a corrupt or hostile blob can
+	 * declare a huge frame that stb would happily allocate. Real map tiles are
+	 * 256px (512 for @2x sources), so this can only reject broken input. */
+	if (stbi_info_from_memory(data, len, &w, &h, &comp)
+	    && (w <= 0 || h <= 0 || w > 2048 || h > 2048))
+		return NULL;
+	w = h = comp = 0;
+	unsigned char *rgb = stbi_load_from_memory(data, len, &w, &h, &comp, 3);
+	if (!rgb) return NULL;
+
+	cairo_surface_t *s = cairo_image_surface_create(CAIRO_FORMAT_RGB24, w, h);
+	if (cairo_surface_status(s) != CAIRO_STATUS_SUCCESS) {
+		stbi_image_free(rgb);
+		cairo_surface_destroy(s);
+		return NULL;
+	}
+	cairo_surface_flush(s);
+	unsigned char *dst = cairo_image_surface_get_data(s);
+	int stride = cairo_image_surface_get_stride(s);
+	for (int row = 0; row < h; row++) {
+		const unsigned char *sp = rgb + (size_t)row * w * 3;
+		uint32_t *dp = (uint32_t *)(dst + (size_t)row * stride);
+		for (int col = 0; col < w; col++, sp += 3)
+			dp[col] = ((uint32_t)sp[0] << 16) | ((uint32_t)sp[1] << 8) | sp[2];
+	}
+	cairo_surface_mark_dirty(s);
+	stbi_image_free(rgb);
+	return s;
+}
+
+/* Decode one tile blob. JPEG is sniffed by its SOI marker (the same test the
+ * preflight server uses); everything else goes to cairo's PNG reader. */
+static cairo_surface_t *map_decode_tile(const unsigned char *data, int len) {
+	if (len > 3 && data[0] == 0xFF && data[1] == 0xD8)
+		return map_decode_jpeg(data, len);
+
+	map_blob_t rd = { data, (unsigned long)len, 0 };
+	cairo_surface_t *s = cairo_image_surface_create_from_png_stream(map_blob_read, &rd);
+	if (cairo_surface_status(s) == CAIRO_STATUS_SUCCESS) return s;
+	cairo_surface_destroy(s);
+	return NULL;
+}
+
 /* Fetch a tile surface (from cache or MBTiles). Returns NULL if absent. */
 static cairo_surface_t *map_get_tile(int z, int x, int y) {
 	int world = 1 << z;
@@ -331,12 +550,8 @@ static cairo_surface_t *map_get_tile(int z, int x, int y) {
 	if (sqlite3_step(map_tile_stmt) == SQLITE_ROW) {
 		const void *blob = sqlite3_column_blob(map_tile_stmt, 0);
 		int n = sqlite3_column_bytes(map_tile_stmt, 0);
-		if (blob && n > 0) {
-			map_blob_t rd = { (const unsigned char *)blob, (unsigned long)n, 0 };
-			cairo_surface_t *s = cairo_image_surface_create_from_png_stream(map_blob_read, &rd);
-			if (cairo_surface_status(s) == CAIRO_STATUS_SUCCESS) surf = s;
-			else cairo_surface_destroy(s);
-		}
+		if (blob && n > 0)
+			surf = map_decode_tile((const unsigned char *)blob, n);
 	}
 	sqlite3_reset(map_tile_stmt);
 
@@ -357,8 +572,8 @@ static cairo_surface_t *map_get_tile(int z, int x, int y) {
 
 /* ---- home from gs/state.ini (throttled: at most once a second) ----------- *
  * Home is captured live on the station at arm, so it stays in state.ini. The
- * target is preflight-authored and comes from the landmarks DB via poi_osd's
- * poi_get_target(), so map_render opens no DB of its own for it. */
+ * targets are preflight-authored and come from the landmarks DB via poi_osd's
+ * poi_target_count()/poi_get_target_at(), so map_render opens no DB of its own. */
 static bool map_read_pt(const char *section, double *lat, double *lon) {
 	int set = 0;
 	if (!ReadIniIntPath(GS_STATE_PATH, section, "set", &set) || !set) return false;
@@ -370,23 +585,44 @@ static bool map_read_pt(const char *section, double *lat, double *lon) {
 	return true;
 }
 
-static bool     map_home_set = false, map_tgt_set = false;
-static double   map_home_lat = 0, map_home_lon = 0, map_tgt_lat = 0, map_tgt_lon = 0;
+static bool     map_home_set = false;
+static double   map_home_lat = 0, map_home_lon = 0;
+static int      map_ntgt = 0;                    /* target slots currently set */
+static double   map_tgt_lat[POI_TARGETS], map_tgt_lon[POI_TARGETS];
 static uint64_t map_pts_last_ms = 0;
-static bool     map_pts_dirty = false;   /* set when home/target changed -> recompose */
+static bool     map_pts_dirty = false;   /* set when home/targets changed -> recompose */
 
 static void map_refresh_points(void) {
 	uint64_t now = get_time_ms();
 	if (map_pts_last_ms != 0 && now - map_pts_last_ms < 1000) return;
 	map_pts_last_ms = now;
-	bool oh = map_home_set, ot = map_tgt_set;
-	double ohla = map_home_lat, ohlo = map_home_lon, otla = map_tgt_lat, otlo = map_tgt_lon;
+	bool oh = map_home_set;
+	double ohla = map_home_lat, ohlo = map_home_lon;
+	int on = map_ntgt;
+	double ola[POI_TARGETS], olo[POI_TARGETS];
+	memcpy(ola, map_tgt_lat, sizeof(ola));
+	memcpy(olo, map_tgt_lon, sizeof(olo));
+
 	map_home_set = map_read_pt("home", &map_home_lat, &map_home_lon);
-	map_tgt_set  = poi_get_target(&map_tgt_lat, &map_tgt_lon);   /* from landmarks DB */
-	if (map_home_set != oh || map_tgt_set != ot ||
-	    map_home_lat != ohla || map_home_lon != ohlo ||
-	    map_tgt_lat != otla || map_tgt_lon != otlo)
+	map_ntgt = 0;
+	int n = poi_target_count();                  /* from the landmarks DB */
+	for (int i = 0; i < n && map_ntgt < POI_TARGETS; i++) {
+		double la, lo;
+		if (poi_get_target_at(i, &la, &lo, NULL)) {
+			map_tgt_lat[map_ntgt] = la;
+			map_tgt_lon[map_ntgt] = lo;
+			map_ntgt++;
+		}
+	}
+	if (map_home_set != oh || map_home_lat != ohla || map_home_lon != ohlo ||
+	    map_ntgt != on)
 		map_pts_dirty = true;
+	else
+		for (int i = 0; i < map_ntgt; i++)
+			if (map_tgt_lat[i] != ola[i] || map_tgt_lon[i] != olo[i]) {
+				map_pts_dirty = true;
+				break;
+			}
 }
 
 /* ---- markers (drawn directly on the compose context) -------------------- */
@@ -430,6 +666,47 @@ static void map_marker_target(cairo_t *c, double px, double py) {
 }
 
 /* Plane triangle at (px,py), nose rotated `ang` rad (0 = screen up). */
+/* Track (ground-course) vector: where the aircraft is actually travelling, which
+ * differs from where its nose points whenever it is crabbing — a wing in a
+ * crosswind, or a tilted multirotor. Drawn after the plane icon, starting at the
+ * icon's centre, so the whole vector stays visible across it.
+ *
+ * Black core inside a yellow outline: the black reads against the map and against
+ * the icon it crosses, while the yellow keeps it visible over dark tiles. */
+static void map_marker_track(cairo_t *c, double px, double py, double ang, double len) {
+	cairo_save(c);
+	cairo_translate(c, px, py);
+	cairo_rotate(c, ang);
+	cairo_set_line_cap(c, CAIRO_LINE_CAP_ROUND);
+	cairo_set_line_join(c, CAIRO_LINE_JOIN_ROUND);
+	/* Draw the arrow opaque into a group, then composite the finished thing once
+	 * at map_track_alpha. Stroking the two passes at alpha directly would let the
+	 * yellow bleed through the black core and turn it muddy brown. */
+	cairo_push_group(c);
+	const double hl = 5.0, hw = 2.4;               /* head: length along shaft, half-width */
+	for (int pass = 0; pass < 2; pass++) {
+		if (pass == 0) cairo_set_source_rgba(c, 1.0, 0.85, 0.0, 1.0);   /* outline */
+		else           cairo_set_source_rgba(c, 0.0, 0.0, 0.0, 1.0);    /* core */
+		cairo_set_line_width(c, pass == 0 ? 4.0 : 1.8);
+		cairo_new_path(c);
+		cairo_move_to(c, 0, 0);                    /* from the icon's centre */
+		cairo_line_to(c, 0, -(len - hl * 0.6));    /* shaft, 0 deg = up = the bearing */
+		cairo_stroke(c);
+		/* Head is filled rather than stroked: a stroked V this small would be
+		 * swallowed by its own line width and read as a blob. */
+		cairo_new_path(c);
+		cairo_move_to(c, 0, -len);
+		cairo_line_to(c, -hw, -(len - hl));
+		cairo_line_to(c,  hw, -(len - hl));
+		cairo_close_path(c);
+		if (pass == 0) { cairo_set_line_width(c, 2.4); cairo_stroke_preserve(c); }
+		cairo_fill(c);
+	}
+	cairo_pop_group_to_source(c);
+	cairo_paint_with_alpha(c, map_track_alpha);
+	cairo_restore(c);
+}
+
 static void map_marker_plane(cairo_t *c, double px, double py, double ang) {
 	cairo_save(c);
 	cairo_translate(c, px, py);
@@ -543,7 +820,7 @@ static void map_draw_scalebar(cairo_t *c, int W, int H, int z, double clat) {
  *   course : ground course — drives the plane-mode lead offset and center rotation. */
 static void map_compose(double cwx, double cwy, int z, double clat, double course, int W, int H,
                         bool have_home, double hwx, double hwy,
-                        bool have_tgt,  double twx, double twy) {
+                        int ntgt, const double *twx, const double *twy) {
 	if (map_surface) { cairo_surface_destroy(map_surface); map_surface = NULL; }
 	map_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, W, H);
 	cairo_t *c = cairo_create(map_surface);
@@ -600,7 +877,8 @@ static void map_compose(double cwx, double cwy, int z, double clat, double cours
 
 	/* geo-anchored markers (rings are rotation-invariant, so fine inside rot) */
 	if (have_home) map_marker_home(c, hwx - cwx, hwy - cwy);
-	if (have_tgt)  map_marker_target(c, twx - cwx, twy - cwy);
+	for (int i = 0; i < ntgt; i++)
+		map_marker_target(c, twx[i] - cwx, twy[i] - cwy);
 
 	cairo_restore(c);
 
@@ -742,6 +1020,77 @@ static void map_text_center(cairo_t *c, double cx, double y, double size, int bo
 	cairo_fill(c);
 }
 
+/**
+ * Draw the transient map keyboard guide down the map's left edge.
+ *
+ * @param c Cairo context for the map-local frame surface.
+ */
+static void map_draw_help(cairo_t *c, int H)
+{
+	static const char *lines[] = {
+		/* ASCII '-', not U+2212 MINUS SIGN: the sans-serif face fontconfig
+		 * resolves to (Noto Sans here) has no U+2212 glyph, so it drew a tofu
+		 * box — barely visible at the old 11px, obvious at this size. */
+		"G Hide", "F Mode", "H Type", "P POIs", "-/+ Zoom"
+	};
+	const int n = (int)(sizeof(lines) / sizeof(lines[0]));
+	const double x = 9.0;
+	const double top = MAP_NAME_SIZE + 22.0;      /* clear of the filename banner */
+	double size = map_help_size;
+
+	/* Line spacing and outline weight follow the font size, so enlarging the text
+	 * does not overlap the lines or leave the outline looking hairline. */
+	/* A small corner map cannot fit five big lines — shrink to fit rather than
+	 * running the guide off the bottom edge. */
+	if (H > 0) {
+		double avail = H - top - 4.0;
+		if (avail > 0) {
+			double fit = avail / (1.0 + (n - 1) * 1.35);
+			if (fit < size) size = fit;
+		}
+	}
+	if (size < 6.0) size = 6.0;
+	const double step = size * 1.35;
+	double y = top + size;                        /* baseline of the first line */
+
+	cairo_save(c);
+	cairo_set_operator(c, CAIRO_OPERATOR_OVER);
+	cairo_select_font_face(c, "sans-serif", CAIRO_FONT_SLANT_NORMAL,
+	                       CAIRO_FONT_WEIGHT_NORMAL);
+	cairo_set_font_size(c, size);
+	cairo_set_line_join(c, CAIRO_LINE_JOIN_ROUND);
+	for (int i = 0; i < n; i++, y += step) {
+		cairo_move_to(c, x, y);
+		cairo_text_path(c, lines[i]);
+		cairo_set_source_rgba(c, 0, 0, 0, 0.85);
+		cairo_set_line_width(c, size * 0.25 < 2.0 ? 2.0 : size * 0.25);
+		cairo_stroke_preserve(c);
+		cairo_set_source_rgba(c, 1.0, 1.0, 1.0, 1.0);
+		cairo_fill(c);
+	}
+	cairo_restore(c);
+}
+
+/**
+ * Draw the current AGL at the map's bottom centre.
+ *
+ * @param c Cairo context for the map-local frame surface.
+ * @param W Map width in pixels.
+ * @param H Map height in pixels.
+ */
+static void map_draw_agl(cairo_t *c, int W, int H)
+{
+	if (!AGL_enabled)
+		return;
+
+	char label[32] = "AGL ---- m";
+	long agl_m;
+	if (get_rounded_agl_meters(&agl_m, get_time_ms()))
+		snprintf(label, sizeof(label), "AGL %ld m", agl_m);
+	cairo_set_operator(c, CAIRO_OPERATOR_OVER);
+	map_text_center(c, W / 2.0, H - 10.0, 15.0, 1, 1.0, 1.0, 1.0, label);
+}
+
 /* Shrink a long string to fit maxw px by dropping the middle: keeps the leading
  * app-root and the trailing filename, e.g. "/home/…/OpenTopoMap.mbtiles". Sets
  * the (normal-weight) font at `size` for measuring, matching how it is drawn. */
@@ -812,12 +1161,15 @@ static void map_draw_message(cairo_t *cr, int X, int Y, int W, int H,
  * slot) and once just before FlushDrawing() (over_phase=true, the "over the OSD"
  * slot). The map only paints at the slot matching [map] on_top, so exactly one
  * call does work; DEST_OVER puts it under the OSD, OVER puts it on top.
- * lat_e7/lon_e7: plane position (MSP_RAW_GPS). heading_deg: aircraft yaw
- * (plane-icon direction in north-up modes). course_deg: ground course (plane-mode
- * lead offset and center-mode rotation) — matching the WebKit map.
+ * lat_e7/lon_e7: plane position (MSP_RAW_GPS). heading_deg: aircraft yaw — where
+ * the nose points, so the icon direction. course_deg: ground course — where it is
+ * actually travelling, driving the plane-mode lead offset, the center-mode
+ * rotation and the track vector. speed_cms: ground speed in cm/s, used only to
+ * suppress the track vector when the aircraft is too slow for GPS course to mean
+ * anything.
  */
 static void DrawMap(int32_t lat_e7, int32_t lon_e7, int16_t heading_deg, int16_t course_deg,
-                    bool over_phase) {
+                    int16_t speed_cms, bool over_phase) {
 	if (map_enabled < 0) map_read_config();
 	if (map_enabled != 1) return;    /* master switch off -> behave exactly as before */
 	if (!map_shown) return;          /* hidden via 'g' */
@@ -861,8 +1213,9 @@ static void DrawMap(int32_t lat_e7, int32_t lon_e7, int16_t heading_deg, int16_t
 	bool have_plane = !(lat_e7 == 0 && lon_e7 == 0);
 	double plat = lat_e7 / 1e7, plon = lon_e7 / 1e7;
 	map_refresh_points();
-	bool have_home = map_home_set, have_tgt = map_tgt_set;
-	double hlat = map_home_lat, hlon = map_home_lon, tlat = map_tgt_lat, tlon = map_tgt_lon;
+	bool have_home = map_home_set;
+	double hlat = map_home_lat, hlon = map_home_lon;
+	int ntgt = map_ntgt;
 
 	/* centre + zoom */
 	double clat, clon;
@@ -871,11 +1224,12 @@ static void DrawMap(int32_t lat_e7, int32_t lon_e7, int16_t heading_deg, int16_t
 	 * so none is clipped. Falls through to fixed-zoom centring when fewer than two
 	 * points exist (a single point defines no box). */
 	int fit_n = 0;
-	double fit_lat[3], fit_lon[3];
+	double fit_lat[2], fit_lon[2];
 	if (map_follow == MAP_FOLLOW_FIT) {
 		if (have_plane) { fit_lat[fit_n] = plat; fit_lon[fit_n] = plon; fit_n++; }
 		if (have_home)  { fit_lat[fit_n] = hlat; fit_lon[fit_n] = hlon; fit_n++; }
-		if (have_tgt)   { fit_lat[fit_n] = tlat; fit_lon[fit_n] = tlon; fit_n++; }
+		/* targets deliberately excluded: one distant target would zoom the map
+		 * out far enough to lose all detail around the aircraft. */
 	}
 	if (map_follow == MAP_FOLLOW_FIT && fit_n >= 2) {
 		z = map_fit_zoom(fit_lat, fit_lon, fit_n, W, H);
@@ -900,11 +1254,13 @@ static void DrawMap(int32_t lat_e7, int32_t lon_e7, int16_t heading_deg, int16_t
 		z = map_snap_zoom(map_zoom);
 	}
 
-	double cwx, cwy, pwx = 0, pwy = 0, hwx = 0, hwy = 0, twx = 0, twy = 0;
+	double cwx, cwy, pwx = 0, pwy = 0, hwx = 0, hwy = 0;
+	double twx[POI_TARGETS], twy[POI_TARGETS];
 	map_lonlat_px(clon, clat, z, &cwx, &cwy);
 	if (have_plane) map_lonlat_px(plon, plat, z, &pwx, &pwy);
 	if (have_home)  map_lonlat_px(hlon, hlat, z, &hwx, &hwy);
-	if (have_tgt)   map_lonlat_px(tlon, tlat, z, &twx, &twy);
+	for (int i = 0; i < ntgt; i++)
+		map_lonlat_px(map_tgt_lon[i], map_tgt_lat[i], z, &twx[i], &twy[i]);
 
 	double course = course_deg, heading = heading_deg;
 
@@ -921,7 +1277,7 @@ static void DrawMap(int32_t lat_e7, int32_t lon_e7, int16_t heading_deg, int16_t
 	          || (have_plane && dcourse > map_head_gate_deg);
 	if (recenter) {
 		map_compose(cwx, cwy, z, clat, course, W, H,
-		            have_home, hwx, hwy, have_tgt, twx, twy);
+		            have_home, hwx, hwy, ntgt, twx, twy);
 		map_pts_dirty = false;
 	}
 	if (!map_surface) return;
@@ -930,7 +1286,7 @@ static void DrawMap(int32_t lat_e7, int32_t lon_e7, int16_t heading_deg, int16_t
 		printf("[map] %s: centre %.5f,%.5f z=%d region %dx%d+%d+%d tiles %d/%d "
 		       "(plane=%d home=%d tgt=%d)\n", recenter ? "re-render" : "move",
 		       clat, clon, z, W, H, X, Y, map_last_got, map_last_want,
-		       have_plane, have_home, have_tgt);
+		       have_plane, have_home, ntgt);
 	if (map_last_got == 0 && diag)
 		printf("[map] WARNING: 0 tiles at this location/zoom — is %.5f,%.5f inside "
 		       "the MBTiles coverage at z=%d?\n", clat, clon, z);
@@ -961,12 +1317,36 @@ static void DrawMap(int32_t lat_e7, int32_t lon_e7, int16_t heading_deg, int16_t
 	if (have_plane) {
 		double sx, sy;
 		map_world_to_screen(pwx, pwy, &sx, &sy);      /* current plane position */
-		/* center mode is track-up so the pinned plane points up; otherwise the
-		 * icon points along the aircraft heading. */
-		double ang = (map_follow == MAP_FOLLOW_CENTER) ? 0.0 : heading * MAP_D2R;
+		/* Screen angle for a world bearing is bearing + the rotation the tiles were
+		 * actually rendered with. Use map_r_rot, not the live course: the static
+		 * map is only re-composed once course moves past map_head_gate_deg, so
+		 * between re-renders the live value disagrees with the pixels on screen.
+		 * In north-up modes map_r_rot is 0; in center mode it is -course, which is
+		 * what makes the icon show the crab angle there instead of always up. */
+		double ang_head  = heading * MAP_D2R + map_r_rot;
+		double ang_track = course  * MAP_D2R + map_r_rot;
 		cairo_set_operator(fc, CAIRO_OPERATOR_OVER);
-		map_marker_plane(fc, sx, sy, ang);
+		map_marker_plane(fc, sx, sy, ang_head);
+		/* Track vector over the icon, from its centre, so the drift angle stays
+		 * readable even when it points back across the aircraft. Hidden below a
+		 * speed threshold because GPS course is noise at rest — which also covers
+		 * MSP_RAW_GPS never arriving, leaving course and speed both 0. */
+		if (map_track_vec && speed_cms >= map_track_min_spd)
+			map_marker_track(fc, sx, sy, ang_track, map_track_len);
 	}
+
+	/* Briefly name the loaded pack and show its controls after the map appears. */
+	uint64_t now = get_time_ms();
+	if (now < map_name_until_ms) {
+		const char *base = strrchr(map_mbtiles, '/');
+		base = base ? base + 1 : map_mbtiles;
+		cairo_set_operator(fc, CAIRO_OPERATOR_OVER);
+		map_text_center(fc, W / 2.0, MAP_NAME_SIZE + 5.0, MAP_NAME_SIZE,
+		                0, 1.0, 1.0, 1.0, base);
+	}
+	if (now < map_help_until_ms)
+		map_draw_help(fc, H);
+	map_draw_agl(fc, W, H);
 	cairo_destroy(fc);
 
 	/* Composite into the OSD canvas, clipped to the region. on_top -> OVER (draw

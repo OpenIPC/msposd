@@ -1,0 +1,130 @@
+; msposd.ini.example — reference configuration.
+;
+; Copy to `msposd.ini` NEXT TO THE BINARY and edit. msposd.ini itself is
+; gitignored (*.ini), so your local settings are never committed; this file is
+; the tracked template. Every key is optional: when the file or a key is
+; missing, msposd keeps its compiled-in default and behaves exactly as it did
+; before that key existed.
+;
+; NOTE: msposd APPENDS per-flight-controller sections to msposd.ini at runtime,
+; keyed by the FC UID (the Alt+Up/Down and Alt+Left/Right AHI adjustments are
+; saved there). Those are machine- and craft-specific and are deliberately not
+; included here — they appear on their own the first time you use those keys.
+;
+[poi]
+enabled=1
+db_path=gs/maps/landmarks.db
+range_m=10000
+fov_deg=45
+font_size=12
+y_mode=distance
+; y_mode: distance = far at screen centre, near at bottom; vector = elevation angle
+
+heading_tc_ms=150
+; heading_tc_ms: low-pass time constant for heading (smooths 1-deg steps); 0 = off , 50ms jitter, 250 normal
+
+[map]
+; Native offline moving-map overlay (ground-station rendering only). Independent
+; of the interactive WebKit map (gs/map.sh + gs/mapwin); reads the same MBTiles
+; read-only. Leave disabled to keep using the WebKit map.
+enabled=1
+mbtiles=gs/maps/OpenTopoMap_Satellite.mbtiles
+zoom=15
+; zoom is snapped to the nearest zoom level actually stored in the MBTiles.
+follow=plane
+; follow (matches gs/map.sh --follow):
+;   plane  = north-up, plane offset opposite its course so more map shows ahead (default)
+;   north  = north-up, plane centred
+;   fit    = north-up, zoom+centre to fit all of plane, home and target in view
+;   center = track-up (map rotates on course), plane pinned near the bottom edge
+lead=30
+; lead: plane mode only — how far (percent of the region) the plane sits ahead of
+;       centre, opposite its course. 30 matches the WebKit map. Ignored in other modes.
+plane_y=80
+; plane_y: center mode only — the plane's vertical position as a percent of the
+;          region (80 = near the bottom edge, like the WebKit "center" view). Others ignore it.
+layout=corner
+; layout: corner (a small map window, placed by the anchor keys / geometry below)
+;         or full (map fills the whole OSD).
+geometry=
+; geometry: WxH+X+Y in absolute OSD pixels. When set it OVERRIDES the anchor keys
+;           below. Empty = use the anchor scheme / computed default.
+;
+; Anchor scheme (corner layout, used when geometry is empty). width/height/margin
+; each take pixels ("480") OR a percent of the OSD ("28%"). Setting any one of these
+; keys activates the scheme; anything omitted falls back to the default box
+; (~27% x 38%, 40px margin). All commented out below = the legacy top-right default.
+;   corner = top-right   ; top-left | top-right | bottom-left | bottom-right | center
+;   width  = 28%         ; or pixels, e.g. 480
+;   height = 38%         ; or pixels, e.g. 380
+;   margin = 2%          ; gap from the docked edges (px or %); ignored for center
+corner   = top-right  ; top-left | top-right | bottom-left | bottom-right | center
+width    = 37%
+height   = 43%
+margin   = 19  
+
+opacity=65
+; opacity: 0..100 percent.
+scalebar=1
+; scalebar: 1 = draw a distance scale bar (bottom-left of the map), 0 = off.
+frame=1
+; frame: 1 = draw a rounded window frame (2px border + soft halo) around a corner
+;        map so it reads as a floating window, 0 = off. Ignored for layout=full.
+on_top=1
+; on_top: 0 = map under the OSD text/icons (default); 1 = map drawn on top of them.
+;         With on_top=1 use opacity<100 to let the OSD show through the map.
+recenter_px=48
+heading_gate_deg=3
+; recenter_px: the map tiles are held still and only the plane marker moves each
+; frame; the tiles are re-rendered (recentred) once the plane drifts this many
+; pixels, or the course turns heading_gate_deg. Larger = fewer redraws, plane
+; roams further before the map recentres. Keeps CPU low on the Radxa.
+;
+track_vector=1
+track_vector_len=36
+track_vector_min_speed=150
+track_vector_alpha=60
+help_font_size=20
+; help_font_size: size in px of the key guide (G Hide / F Mode / ...) shown down
+;               the left side for 3 seconds after the map appears. Line spacing and
+;               the text outline scale with it. Clamped to 6..64, and shrunk
+;               automatically if the map window is too short to fit five lines.
+;
+; The plane marker points along the aircraft HEADING (where the nose points). The
+; track vector is a separate arrow drawn from the centre of the marker along the
+; GPS GROUND COURSE (where the aircraft is actually travelling). Flying straight
+; the two line up; the angle between them is the drift/crab angle — a wing held
+; into a crosswind, or a tilted multirotor being pushed sideways.
+;
+; track_vector: 1 = draw it (default), 0 = off. A black line inside a yellow
+;               outline, drawn ON TOP of the plane marker starting at the marker's
+;               centre, so the whole vector stays readable — including when it
+;               points back across the aircraft. Legible over imagery and topo.
+; track_vector_len: length in pixels measured from the centre of the plane marker.
+;               The marker's nose reaches 11px, so anything past ~20 clearly
+;               protrudes (26 = default).
+;               Clamped to 6..200 — a mistyped value cannot draw across the screen.
+; track_vector_min_speed: hide the vector below this ground speed, in cm/s
+;               (150 = 1.5 m/s). GPS ground course is meaningless when stationary,
+;               so this also keeps the vector hidden when no GPS data is arriving
+;               at all (course and speed both read 0 in that case).
+; track_vector_alpha: 0..100 percent opacity of the whole arrow (60 = default).
+;               The arrow is composited as one piece, so lowering this fades it
+;               evenly instead of letting the yellow bleed through the black core.
+;               Over dark satellite tiles 60 reads quite faint — try 75..85 there.
+;
+; Hotkeys (x86 ground stations only). Grabbed globally, so msposd does not need
+; window focus.
+;
+; Map keys — grabbed ONLY while enabled=1. With enabled=0 they are not grabbed at
+; all and pass straight through to the desktop, so msposd behaves exactly as before:
+;   g        show / hide the map
+;   f        cycle follow mode (plane -> center -> north -> fit)
+;   h        load the next .mbtiles in the map folder, keeping the current zoom
+;            (runtime only — a restart returns to the pack named above)
+;   + / -    zoom in / out; '=' and the keypad +/- also work. Steps through the
+;            zoom levels actually stored in the MBTiles, not arbitrary zooms.
+;
+; Not a map key, listed here because it shares the same grab:
+;   p        toggle the POI markers. Belongs to the POI overlay, so it is grabbed
+;            whenever the GS renderer runs — including with enabled=0.

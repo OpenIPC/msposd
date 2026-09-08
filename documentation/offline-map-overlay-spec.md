@@ -322,7 +322,11 @@ trigger a recompose when they change.
 - **Radxa (HW buttons, no keyboard):** planned via the RC/MSP channel stream feeding a
   `map_control()` dispatcher — see [`map_control_via_RC.md`](map_control_via_RC.md).
 
-### 14.8 Constraint — PNG tiles only
-The native path decodes tiles with Cairo's PNG reader, so the OSD overlay needs **PNG**
-MBTiles. JPEG basemaps (e.g. Esri imagery) preview in the WebKit map but do not render
-natively until a JPEG decoder is added. See `gs/README.md` for the per-basemap format.
+### 14.8 Tile formats — PNG and JPEG
+The native path decodes **PNG** with Cairo's reader and **JPEG** with a vendored
+single-file decoder (`osd/util/stb_image.h`, built JPEG-only from `map_render.c`), so
+imagery basemaps such as Esri World Imagery render natively as well as in the WebKit map.
+JPEG matters for imagery specifically: an aerial tile is ~22 KB as JPEG against ~62 KB for
+the same tile as PNG. Accepted formats are declared by `OSD_TILE_FORMATS` in
+`gs/mapserver.py`, which greys out any basemap serving something the OSD cannot decode.
+See `gs/README.md` for the per-basemap format.

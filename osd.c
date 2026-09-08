@@ -15,13 +15,16 @@
 #include "osd/msp/msp_displayport.h"
 
 #if defined(_x86) || defined(__ROCKCHIP__)
+#include "osd/util/terrain_agl.h"
+#include "osd/util/terrain_elevation.h"
 static void poi_toggle_enabled(void);
 static void map_toggle_enabled(void);
 static int  map_config_enabled(void);
 static void DrawMap(int32_t lat_e7, int32_t lon_e7, int16_t heading_deg, int16_t course_deg,
-                    bool over_phase);
+                    int16_t speed_cms, bool over_phase);
 static void map_zoom_step(int dir);
 static void map_follow_cycle(void);
+static void map_switch_file(void);
 uint64_t get_time_ms(void);   // defined later in osd.c; used by the throttled OSD raise
 // #include <cairo/cairo.h>
 // #include <cairo/cairo-xlib.h>
@@ -274,8 +277,13 @@ static bool gs_seen_disarmed = false;
 static bool gs_home_pending = false;
 static bool gs_home_captured_armed_cycle = false;
 
+/**
+ * Return whether the native ground-station map needs home capture.
+ *
+ * @return true when OSD rendering and the native map are both enabled.
+ */
 static bool gs_mode_active(void) {
-	return !DrawOSD;
+	return DrawOSD && map_config_enabled();
 }
 
 static bool current_gps_valid(void) {
@@ -418,6 +426,52 @@ char font_load_name[255];
 
 bool LoadFont();
 
+#if defined(_x86) || defined(__ROCKCHIP__)
+/**
+ * Return the current AGL rounded to the five-cell display range.
+ *
+ * @param rounded_m Receives rounded AGL in metres and remains unchanged on failure.
+ * @param now_ms Current monotonic timestamp in milliseconds.
+ * @return true when a current representable AGL value exists; otherwise false.
+ */
+static bool get_rounded_agl_meters(long *rounded_m, uint64_t now_ms)
+{
+	if (!rounded_m)
+		return false;
+	double agl_m;
+	if (!terrain_agl_get(&agl_m, now_ms))
+		return false;
+
+	long value = lround(agl_m);
+	if (value < -999 || value > 9999)
+		return false;
+	*rounded_m = value;
+	return true;
+}
+
+/**
+ * Format the current AGL for one five-character OSD placeholder.
+ *
+ * @param text Receives five display characters followed by a null terminator.
+ * @param now_ms Current monotonic timestamp in milliseconds.
+ */
+static void format_agl_placeholder(char text[6], uint64_t now_ms)
+{
+	memcpy(text, "----m", 6);
+	long rounded_m;
+	if (!get_rounded_agl_meters(&rounded_m, now_ms))
+		return;
+
+	snprintf(text, 6, "%4ldm", rounded_m);
+}
+#endif
+
+/**
+ * Replace supported placeholders in an MSP DisplayPort string.
+ *
+ * @param payload DisplayPort payload containing row, column and text data.
+ * @return true when a whole widget placeholder consumed the string; otherwise false.
+ */
 static bool InjectChars(char *payload) {
 	char *str = payload + 4;
 	// string starts at 4 payload[0]==MSP_subtype
@@ -434,6 +488,15 @@ static bool InjectChars(char *payload) {
 	int cnt = 0;
 	// may have several in one text message
 	while (str[0] != 0 && cnt < 20) {
+#if defined(_x86) || defined(__ROCKCHIP__)
+		if (DrawOSD && strncmp(str, "!AGL!", 5) == 0) {
+			char text[6] = "----m";
+			if (AGL_enabled)
+				format_agl_placeholder(text, get_time_ms());
+			memcpy(str, text, 5);
+			str += 4;
+		}
+#endif
 		// set extra temp on screen
 		if (str[0] == '!' && str[1] == 'T' && str[2] == 'M' && str[3] == 'P' && str[4] == '!') {
 			int temp = 103;
@@ -535,6 +598,8 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 
 	switch (msp_message->cmd) {
 	case MSP_CMD_STATUS: {
+		if (msp_message->size < 7)
+			break;
 		// we need the armed state
 #if defined(_x86) || defined(__ROCKCHIP__)
 		bool was_armed = armed;
@@ -542,6 +607,8 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 		armed = (msp_message->payload[6] & 0x01);
 #if defined(_x86) || defined(__ROCKCHIP__)
 		update_gs_home_capture(was_armed, armed);
+		if (DrawOSD && AGL_enabled)
+			terrain_agl_update_armed(armed, get_time_ms());
 #endif
 		if (armed)
 			vtxMenuActive = false;
@@ -621,6 +688,8 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 	}
 
 	case MSP_RAW_GPS: {
+		if (msp_message->size < 16)
+			break;
 #if defined(_x86) || defined(__ROCKCHIP__)
 		last_gps_fix = msp_message->payload[0];         // GS map/POI only; skipped on air units
 		last_lat = *(int32_t *)&msp_message->payload[2];  // deg * 1e7
@@ -630,6 +699,9 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 		last_altitude = *(int16_t *)&msp_message->payload[10];
 		last_speed = *(int16_t *)&msp_message->payload[12];
 #if defined(_x86) || defined(__ROCKCHIP__)
+		if (DrawOSD && AGL_enabled)
+			terrain_agl_update_gps(last_lat / 10000000.0, last_lon / 10000000.0,
+				(double)last_altitude, current_gps_valid(), get_time_ms());
 		capture_home_if_pending();
 #endif
 		//last_groundCourse = last_heading + stat_msp_ttl%90 -45; //Simulate offset 
@@ -2344,7 +2416,7 @@ static void draw_screenBMP2(bool OnlyAHI) {
 		// glyph base and, on x86, points cr at this frame) and before the overlays.
 		// heading orients the plane icon; ground course drives the lead/rotation.
 		// The map paints here only when [map] on_top=0.
-		DrawMap(last_lat, last_lon, last_heading, last_groundCourse, /*over_phase=*/false);
+		DrawMap(last_lat, last_lon, last_heading, last_groundCourse, last_speed, /*over_phase=*/false);
 
 		if (AHI_Enabled == 2)
 			draw_AHI();
@@ -2379,7 +2451,7 @@ static void draw_screenBMP2(bool OnlyAHI) {
 
 		// Moving map, OVER-OSD slot: painted last (over everything) with OVER. Paints
 		// here only when [map] on_top=1; use map opacity<100 to see the OSD through it.
-		DrawMap(last_lat, last_lon, last_heading, last_groundCourse, /*over_phase=*/true);
+		DrawMap(last_lat, last_lon, last_heading, last_groundCourse, last_speed, /*over_phase=*/true);
 
 		FlushDrawing();
 	}
@@ -2750,6 +2822,9 @@ static void InitMSPHook() {
 
 #endif
 #if defined(_x86) || defined(__ROCKCHIP__)
+	AGL_enabled = terrain_elevation_available();
+	if (AGL_enabled)
+		terrain_agl_reset();
 	// Enable this to simulate I4 Bitmap Processing of SigmaStar ON THE DESKOP !
 	if (false){
 	 	PIXEL_FORMAT_DEFAULT=PIXEL_FORMAT_I4;//I4 format, 4 bits per pixel

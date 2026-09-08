@@ -1,11 +1,17 @@
 #!/bin/bash
 # Mode launcher for the GS offline map.
 #
-#   ./map.sh preflight                 # create or show maximized config window
+#   ./map.sh preflight                 # config UI in the default system browser
+#   ./map.sh preflight --GTK           # ...in the WebKitGTK window (mapwin) instead
 #   ./map.sh preview --follow plane    # create or show borderless preview window
 #   ./map.sh full    --follow fit      # create or show fullscreen overlay
 #   ./map.sh preview --toggle          # hide/show the existing map window
 #   ./map.sh --kill                    # kill existing map/webkit/server and exit
+#
+# Preflight opens in the system browser by default, matching the packaged
+# dist/msposd-preflight app. In-flight the map is drawn by the native in-OSD
+# renderer (osd/util/map_render.c), so the WebKit preview/full overlay modes and
+# --GTK preflight are kept for compatibility rather than as the primary path.
 #
 # Normal mode reuses the existing map window if present. Use --kill to replace it
 # with a new mode/follow/flag combination.
@@ -58,7 +64,7 @@ else
   case "$MODE" in
     preflight|preview|full) shift || true ;;
     *)
-      echo "usage: $0 [--kill] | preflight|preview|full [--follow plane|fit|center] [--toggle] [--kill] [--topmost] [--transparent] [--browser]"
+      echo "usage: $0 [--kill] | preflight|preview|full [--follow plane|fit|center] [--toggle] [--kill] [--topmost] [--transparent] [--GTK]"
       exit 1
       ;;
   esac
@@ -68,7 +74,10 @@ FOLLOW="plane"
 KILL_FIRST=0
 TOGGLE=0
 TOPMOST=0
-BROWSER=0  # preflight in the system browser instead of mapwin (dev preview of the standalone app)
+# NB: deliberately not named BROWSER — that is the standard env var xdg-open and
+# python's webbrowser read to pick a browser, and assigning it here would clobber
+# the user's choice for the browser we are about to launch.
+WANT_BROWSER=1  # preflight in the system browser (default); --GTK selects mapwin instead
 EXTRA=()   # passthrough window flags for mapwin
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -95,7 +104,11 @@ while [ $# -gt 0 ]; do
       shift
       ;;
     --browser)
-      BROWSER=1
+      WANT_BROWSER=1   # kept for compatibility; this is now the default
+      shift
+      ;;
+    --GTK|--gtk)
+      WANT_BROWSER=0   # render preflight in the WebKitGTK window (mapwin)
       shift
       ;;
     *)
@@ -196,7 +209,18 @@ fi
 
 ensure_server
 
-WIN_ID="$(get_window_id || true)"
+# Window reuse/toggle applies to mapwin windows only. In browser preflight we own
+# no X window, so skip the lookup — otherwise a leftover --GTK window would be
+# raised instead of the browser opening.
+USE_BROWSER=0
+if [ "$MODE" = "preflight" ] && [ "$WANT_BROWSER" -eq 1 ]; then
+  USE_BROWSER=1
+fi
+
+WIN_ID=""
+if [ "$USE_BROWSER" -eq 0 ]; then
+  WIN_ID="$(get_window_id || true)"
+fi
 if [ -n "$WIN_ID" ]; then
   if [ "$TOGGLE" -eq 1 ]; then
     if window_is_visible "$WIN_ID"; then
@@ -212,9 +236,9 @@ fi
 
 case "$MODE" in
   preflight)
-    if [ "$BROWSER" = "1" ]; then
-      # Dev preview of the standalone app: open preflight in the default browser
-      # (same as the packaged binary) instead of the WebKit mapwin window.
+    if [ "$USE_BROWSER" -eq 1 ]; then
+      # Default: open preflight in the system browser, same as the packaged
+      # dist/msposd-preflight app. Pass --GTK to use the WebKit window instead.
       URL="${BASE}?mode=preflight&v=${CB}"
       echo "opening $URL in the system browser"
       python3 -c "import webbrowser,sys; webbrowser.open(sys.argv[1])" "$URL" || true

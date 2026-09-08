@@ -39,7 +39,7 @@ def raw_gps(lat, lon, course_deg, speed_ms):
         "<BBiihhh",
         3, 14,                              # fix type, sats
         int(lat * 1e7), int(lon * 1e7),     # lat, lon (deg * 1e7)
-        100,                                # altitude (m)
+        300,                                # altitude (m)
         int(speed_ms * 100),                # speed (cm/s)
         int(course_deg * 10),               # ground course (decidegrees)
     ))
@@ -76,6 +76,12 @@ def main():
     ap.add_argument("--arm", action="store_true",
                     help="send ARMED after --arm-delay s (triggers home capture)")
     ap.add_argument("--arm-delay", type=float, default=3.0)
+    # Heading normally equals course here, which makes drift indicators invisible.
+    # --crab offsets the nose from the track, like a wing held into a crosswind.
+    ap.add_argument("--crab", type=float, default=0.0,
+                    help="degrees the nose points off the track (+ = nose right)")
+    ap.add_argument("--crab-period", type=float, default=0.0,
+                    help="if set, oscillate the crab angle over this many seconds")
     args = ap.parse_args()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -95,10 +101,15 @@ def main():
         ang = 2 * math.pi * (t / period)            # position angle on the circle
         lat = args.lat + dlat_r * math.cos(ang)
         lon = args.lon + dlon_r * math.sin(ang)
-        # heading is tangent to the circle (direction of travel)
+        # course is tangent to the circle (direction of travel)
         course = (math.degrees(ang) + 90) % 360
+        # the nose may sit off the track — that gap is what a drift indicator shows
+        crab = args.crab
+        if args.crab_period > 0:
+            crab *= math.sin(2 * math.pi * t / args.crab_period)
+        heading = (course + crab) % 360
         sock.sendto(raw_gps(lat, lon, course, args.speed_ms), dst)
-        sock.sendto(attitude(course), dst)
+        sock.sendto(attitude(heading), dst)
         if args.arm:
             sock.sendto(status(t >= args.arm_delay), dst)   # disarmed first, then armed
         time.sleep(1.0 / args.rate)

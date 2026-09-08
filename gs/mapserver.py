@@ -12,6 +12,7 @@ Single stdlib-only process that:
 See documentation/offline-map-overlay-spec.md.
 """
 
+import http.client
 import json
 import math
 import os
@@ -19,6 +20,7 @@ import re
 import signal
 import socket
 import sqlite3
+import ssl
 import sys
 import struct
 import tempfile
@@ -26,9 +28,10 @@ import threading
 import time
 import urllib.request
 import zipfile
+import zlib
 from configparser import ConfigParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urljoin
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -42,15 +45,46 @@ APP_DIR = os.path.dirname(sys.executable) if _FROZEN else HERE  # writable data 
 RES_DIR = getattr(sys, "_MEIPASS", HERE)                        # bundled read-only assets
 
 CONFIG_PATH = os.path.join(APP_DIR, "config.ini")
-ZOOMS = [11, 13, 15]          # zoom levels stored for offline / flight use
+# Offline storage keeps three levels: the chosen detail zoom plus two coarser
+# fallbacks, two steps apart. Detail zoom is user-selectable ([map] detail_zoom);
+# each step up quadruples the tiles a given area needs, so the area that fits in
+# MAX_TILES shrinks accordingly (~95 km square at z15, ~12 km at z18). The panel
+# labels each level with its ground resolution (~3.6 m/pixel at z15).
+DETAIL_MIN, DETAIL_MAX = 12, 18
+DETAIL_DEFAULT = 15
 BROWSE_MIN, BROWSE_MAX = 2, 18  # live-proxy browse range
 MAX_TILES = 12000              # refuse offline downloads larger than this
+
+
+def zoom_set(detail):
+    """The three stored zoom levels for a detail zoom: [detail-4, detail-2, detail]."""
+    return [detail - 4, detail - 2, detail]
+
+
+def clamp_detail(v):
+    """Clamp a detail-zoom value into [DETAIL_MIN, DETAIL_MAX]. Takes no lock, so
+    it is safe to call from code already holding config_lock."""
+    try:
+        return max(DETAIL_MIN, min(DETAIL_MAX, int(v)))
+    except (TypeError, ValueError):
+        return DETAIL_DEFAULT
+
+
+def detail_zoom():
+    """The configured detail (highest stored) zoom, clamped to the allowed range."""
+    with config_lock:
+        return clamp_detail(config["map"].get("detail_zoom", DETAIL_DEFAULT))
+
+
+def zooms():
+    """The zoom levels currently stored for offline / flight use, ascending."""
+    return zoom_set(detail_zoom())
 
 # Selectable basemaps — all keyless and OK for app/proxy use (unlike OSM's volunteer
 # servers, which 403 bulk/proxy traffic). ESRI uses {z}/{y}/{x} ordering; the OSM-style
 # sources use {z}/{x}/{y} and may include {s} for a/b/c subdomain rotation (see
-# _fmt_tile). NOTE: the Esri imagery layer serves JPEG — it previews in the browser but
-# the native OSD map decodes PNG only, so the PNG sources below also render in the OSD.
+# _fmt_tile). The Esri layers serve JPEG and the OSM-derived ones PNG; both render in the
+# browser and on the OSD (see BASEMAP_FORMAT / OSD_TILE_FORMATS below).
 # You are responsible for each provider's usage terms and attribution.
 BASEMAPS = {
     "Satellite": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
@@ -64,6 +98,36 @@ BASEMAPS = {
 # NB: volunteer OSM servers (CyclOSM, OSM-Humanitarian, tile.openstreetmap.org) are
 # deliberately NOT listed — they throttle/block app/proxy/bulk traffic and make the
 # preview go blank mid-browse. Use custom sources via [server] tile_url at your own risk.
+
+# Tile format each basemap serves (verified against the live endpoints).
+BASEMAP_FORMAT = {
+    "Satellite": "JPEG",
+    "Streets": "JPEG",
+    "Topo": "JPEG",
+    "OpenTopoMap": "PNG",
+    "Thunderforest": "PNG",
+}
+# Formats the native in-OSD renderer can decode: PNG via cairo's own reader, JPEG
+# via the vendored stb_image decoder in osd/util/map_render.c. Every basemap here
+# renders both in this browser UI and on the OSD in flight, so nothing is greyed
+# out for format reasons; a basemap serving something else would be.
+OSD_TILE_FORMATS = {"PNG", "JPEG"}
+
+
+def basemap_issues(tile_key):
+    """Why each basemap can't be selected, keyed by name.
+
+    tile_key: the configured API key ("" if none).
+    Returns: {basemap: short reason} for unusable basemaps; usable ones absent.
+    """
+    issues = {}
+    for name, url in BASEMAPS.items():
+        fmt = BASEMAP_FORMAT.get(name)
+        if "{key}" in url and not tile_key:
+            issues[name] = "needs key"
+        elif fmt not in OSD_TILE_FORMATS:
+            issues[name] = f"{fmt or '?'} — not on OSD"
+    return issues
 
 DEFAULTS = {
     "server": {
@@ -79,7 +143,14 @@ DEFAULTS = {
     },
     "map": {
         "zoom": "15",
+        # highest stored zoom; the offline set is [detail-4, detail-2, detail]
+        "detail_zoom": str(DETAIL_DEFAULT),
+        # per-zoom sources, one per stored level, coarse -> detail. Empty means
+        # "use `basemap` for every level" (the simple, single-source case).
+        "sources": "",
         "basemap": "Satellite",
+        # download terrain elevation for the same area (separate maps/elevation.db)
+        "elevation": "1",
         "center_lat": "", "center_lon": "",
     },
 }
@@ -150,11 +221,89 @@ MAPS_DIR = os.path.dirname(os.path.normpath(os.path.join(APP_DIR, config["server
 LANDMARKS_DB = os.path.join(MAPS_DIR, "landmarks.db")
 landmarks_db_lock = threading.Lock()
 
+# Terrain elevation, kept in its own DB because it does not depend on the basemap.
+# Source is the AWS Open Data "terrarium" set: ordinary XYZ PNG tiles whose pixels
+# encode metres rather than colour, elev = (R*256 + G + B/256) - 32768.
+ELEVATION_DB = os.path.join(MAPS_DIR, "elevation.db")
+elevation_db_lock = threading.Lock()
+DEM_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
+# z12 is ~28 m/pixel at 43°N, which matches the ~30 m native posting of the
+# underlying SRTM-derived data. Higher zooms only interpolate: measured on three
+# summits, z10 through z15 return the same metre values. Storing above z12 costs
+# 4x per level and adds no information.
+DEM_ZOOM = 12
+# Each z12 tile is a fixed 256*256 int16 = 128 KiB, so the DEM area needs its own
+# ceiling: at detail z12 a MAX_TILES download spans ~11250 z12 tiles = 1.5 GB.
+# 1000 tiles is ~228x228 km / 131 MB — wide enough that a line-of-sight horizon
+# runs into terrain rather than into the edge of the downloaded area.
+MAX_DEM_TILES = 1000
+DEM_NODATA = -32768
+
 
 def current_basemap():
     """Return the active basemap name from config (default "Satellite")."""
     with config_lock:
         return config["map"].get("basemap", "Satellite")
+
+
+def parse_sources(raw, fallback, n):
+    """Parse a "src,src,src" list into exactly n valid basemap names.
+
+    Lock-free, so it is safe to call while holding config_lock. Anything missing,
+    unknown or short falls back to `fallback`, which keeps configs written before
+    per-zoom sources existed (and hand-edited ones) working unchanged.
+    """
+    out = [s.strip() for s in (raw or "").split(",") if s.strip()]
+    out = [s for s in out if s in BASEMAPS]
+    if len(out) < n:
+        out += [fallback] * (n - len(out))
+    return out[:n]
+
+
+def sources():
+    """Per-zoom basemap names, aligned with zooms() (ascending, coarse -> detail)."""
+    with config_lock:
+        m = config["map"]
+        detail = clamp_detail(m.get("detail_zoom", DETAIL_DEFAULT))
+        return parse_sources(m.get("sources", ""), m.get("basemap", "Satellite"),
+                             len(zoom_set(detail)))
+
+
+def source_for(z, zs=None, srcs=None):
+    """The basemap to use at zoom z: the source of the nearest stored level.
+
+    Browsing ranges over BROWSE_MIN..BROWSE_MAX while only len(zooms()) levels are
+    stored, so preview zooms between/outside them snap to the closest stored level
+    -- the same rule nearestStoredZoom() uses in the viewer.
+    """
+    zs = zs if zs is not None else zooms()
+    srcs = srcs if srcs is not None else sources()
+    best = min(range(len(zs)), key=lambda i: abs(zs[i] - z))
+    return srcs[best]
+
+
+def pack_id(srcs=None):
+    """Build the configured preview id and unnamed-download fallback.
+
+    srcs: Optional source snapshot; defaults to the configured zoom sources.
+    Returns: Distinct source names joined in ascending-zoom order. A uniform mix
+    remains its plain basemap name for compatibility with existing caches.
+    """
+    srcs = srcs if srcs is not None else sources()
+    seen = []
+    for s in srcs:
+        if s not in seen:
+            seen.append(s)
+    return "+".join(seen)
+
+
+def valid_pack(name):
+    """True if name is a pack id: one or more known basemaps joined by '+'.
+
+    Guards the ?src= query param so it can only ever name a pack this server could
+    itself have written (mbtiles_for also sanitises the path).
+    """
+    return bool(name) and all(p in BASEMAPS for p in name.split("+"))
 
 
 def mbtiles_for(basemap):
@@ -165,6 +314,78 @@ def mbtiles_for(basemap):
     """
     safe = re.sub(r"[^A-Za-z0-9_-]", "_", basemap or "Satellite")
     return os.path.join(MAPS_DIR, safe + ".mbtiles")
+
+
+def pack_name_base(name, srcs=None):
+    """Normalize an optional user map name into a portable filename stem.
+
+    name: Requested display/file name; an optional .mbtiles suffix is removed.
+    srcs: Source list used for the fallback name when name is empty.
+    Returns: Non-empty ASCII stem containing only letters, digits, '_' and '-'.
+    """
+    raw = name.strip() if isinstance(name, str) else ""
+    if raw.lower().endswith(".mbtiles"):
+        raw = raw[:-8]
+    if not raw:
+        raw = pack_id(srcs)
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", raw).strip("_-")[:80].rstrip("_-")
+    if not safe:
+        safe = re.sub(r"[^A-Za-z0-9_-]+", "_", pack_id(srcs)).strip("_-") or "map"
+    # These basenames are reserved even with an extension on Windows.
+    reserved = {"CON", "PRN", "AUX", "NUL",
+                *(f"COM{i}" for i in range(1, 10)),
+                *(f"LPT{i}" for i in range(1, 10))}
+    if safe.upper() in reserved:
+        safe = "map_" + safe
+    return safe
+
+
+def allocate_pack_id(name, srcs=None, timestamp=None):
+    """Choose a new pack id without overwriting an existing filesystem entry.
+
+    name: Optional requested map name.
+    srcs: Source list used when the requested name is empty.
+    timestamp: Optional Unix timestamp for deterministic tests; defaults to now.
+    Returns: Available filename stem, timestamped only when the base already exists.
+    """
+    base = pack_name_base(name, srcs)
+    if not os.path.lexists(mbtiles_for(base)):
+        return base
+    stamp = time.strftime("%Y%m%d_%H%M%S", time.gmtime(
+        time.time() if timestamp is None else timestamp))
+    candidate = f"{base}_{stamp}"
+    serial = 2
+    while os.path.lexists(mbtiles_for(candidate)):
+        candidate = f"{base}_{stamp}_{serial}"
+        serial += 1
+    return candidate
+
+
+def downloaded_pack_exists(name):
+    """Check whether a safe pack id names a regular MBTiles file in MAPS_DIR.
+
+    name: Filename stem supplied by the preflight inventory UI.
+    Returns: True only for a non-symlink file contained directly in MAPS_DIR.
+    """
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+        return False
+    path = mbtiles_for(name)
+    root = os.path.realpath(MAPS_DIR)
+    return (os.path.dirname(os.path.realpath(path)) == root and
+            os.path.isfile(path) and not os.path.islink(path))
+
+
+def resolve_pack(name):
+    """Resolve a query-string pack name without permitting arbitrary paths.
+
+    name: Logical configured pack id or downloaded filename stem.
+    Returns: A pack id accepted by mbtiles_for(), or None when invalid.
+    """
+    if valid_pack(name):
+        return name
+    if downloaded_pack_exists(name):
+        return name
+    return None
 
 STATIC_WHITELIST = {
     "viewer.html": "text/html; charset=utf-8",
@@ -215,40 +436,79 @@ MSP_CMD_STATUS_EX = 150
 # Shared home/target state.
 #   home   : captured live from GPS on the OSD station at arm; station-local
 #            runtime, kept in state.ini (also read by msposd.c via ini_parser).
-#   target : preflight-authored; stored in landmarks.db `waypoints` so it travels
-#            with the POIs as part of the map pack (see osd/util/poi_osd.c).
+#   targets: up to TARGET_SLOTS preflight-authored named points, stored in
+#            landmarks.db `waypoints` so they travel with the POIs as part of the
+#            map pack (see osd/util/poi_osd.c). Slot 0 keeps the historical
+#            kind='target' row, so packs and ground stations predating the extra
+#            slots keep working unchanged.
 # ---------------------------------------------------------------------------
 
 STATE_PATH = os.path.join(APP_DIR, "state.ini")
 state_io_lock = threading.Lock()
-geo = {"target": None, "home": None}   # each None or (lat, lon)
+TARGET_SLOTS = 5
+
+
+def target_kind(i):
+    """DB `kind` for slot i. Slot 0 stays 'target' for backward compatibility."""
+    return "target" if i == 0 else "target%d" % (i + 1)
+
+
+# targets: list of TARGET_SLOTS entries, each None or {"name","lat","lon"}
+geo = {"targets": [None] * TARGET_SLOTS, "home": None}
 armed_state = False
 seen_disarmed = False                  # gates home capture (see on_status)
 home_pending = False
 
 
-def load_target_from_db():
-    """Return the preflight target (lat, lon) from landmarks.db, or None."""
+def load_targets_from_db():
+    """Return the target slots from landmarks.db as a TARGET_SLOTS-long list."""
+    out = [None] * TARGET_SLOTS
     try:
         with landmarks_db_lock:
             conn = open_landmarks_db()
-            row = conn.execute(
-                "SELECT lat, lon FROM waypoints WHERE kind='target'").fetchone()
+            rows = dict((r[0], (r[1], r[2], r[3])) for r in conn.execute(
+                "SELECT kind, lat, lon, name FROM waypoints"))
             conn.close()
-        return (row[0], row[1]) if row else None
     except sqlite3.Error:
-        return None
+        return out
+    for i in range(TARGET_SLOTS):
+        r = rows.get(target_kind(i))
+        if r:
+            out[i] = {"lat": r[0], "lon": r[1], "name": r[2] or ""}
+    return out
 
 
-def save_target_to_db(pt):
-    """Persist (or clear, when pt is None) the target in landmarks.db `waypoints`."""
+def clip_name(s, maxbytes=31):
+    """Trim a waypoint name to fit the C side's fixed buffer without splitting a
+    character. poi_osd.c reads these into char[32] and snprintf() cuts on bytes,
+    so slicing by characters here could hand it invalid UTF-8 (any non-ASCII name
+    is ~2 bytes per character)."""
+    b = str(s).encode("utf-8")[:maxbytes]
+    while b:
+        try:
+            return b.decode("utf-8")
+        except UnicodeDecodeError:
+            b = b[:-1]        # dropped a continuation byte; step back a byte
+    return ""
+
+
+def save_targets_to_db(slots):
+    """Persist the target slots to landmarks.db `waypoints`.
+
+    slots: TARGET_SLOTS-long list; each entry {"name","lat","lon"} or None.
+    An empty slot deletes its row, so clearing a target really removes it from
+    the pack rather than leaving a stale point for the OSD to draw.
+    """
     with landmarks_db_lock:
         conn = open_landmarks_db()
-        if pt:
-            conn.execute("INSERT OR REPLACE INTO waypoints(kind, lat, lon) "
-                         "VALUES('target', ?, ?)", (float(pt[0]), float(pt[1])))
-        else:
-            conn.execute("DELETE FROM waypoints WHERE kind='target'")
+        for i, t in enumerate(slots):
+            kind = target_kind(i)
+            if t:
+                conn.execute(
+                    "INSERT OR REPLACE INTO waypoints(kind, lat, lon, name) VALUES(?,?,?,?)",
+                    (kind, float(t["lat"]), float(t["lon"]), clip_name(t.get("name", ""))))
+            else:
+                conn.execute("DELETE FROM waypoints WHERE kind=?", (kind,))
         conn.commit()
         conn.close()
 
@@ -274,16 +534,16 @@ def load_geo_state():
 
     geo["home"] = pt("home")
 
-    geo["target"] = load_target_from_db()
-    if geo["target"] is None:                       # migration: adopt legacy state.ini target
+    geo["targets"] = load_targets_from_db()
+    if geo["targets"][0] is None:                   # migration: adopt legacy state.ini target
         legacy = pt("target")
         if legacy:
-            geo["target"] = legacy
-            save_target_to_db(legacy)
+            geo["targets"][0] = {"lat": legacy[0], "lon": legacy[1], "name": ""}
+            save_targets_to_db(geo["targets"])
 
 
 def save_geo_state():
-    """Atomically write the home point to state.ini (target lives in the DB).
+    """Atomically write the home point to state.ini (targets live in the DB).
 
     Uses a temp file + os.replace so a concurrent C-side read (msposd.c)
     never observes a half-written file.
@@ -492,14 +752,15 @@ def bbox_tile_ranges(north, south, east, west, z):
     return range(min(x0, x1), max(x0, x1) + 1), range(min(y0, y1), max(y0, y1) + 1)
 
 
-def plan_total(north, south, east, west):
-    """Count tiles a bbox download would cover across all ZOOMS.
+def plan_total(north, south, east, west, levels=None):
+    """Count tiles a bbox download would cover across all stored zooms.
 
     north/south/east/west: bbox edges in degrees.
-    Returns: total tile count summed over every zoom in ZOOMS.
+    levels: Optional zoom-level snapshot; defaults to the current configuration.
+    Returns: Total tile count summed over the selected zoom levels.
     """
     total = 0
-    for z in ZOOMS:
+    for z in levels if levels is not None else zooms():
         xs, ys = bbox_tile_ranges(north, south, east, west, z)
         total += len(xs) * len(ys)
     return total
@@ -553,6 +814,84 @@ def read_tile(basemap, z, x, y):
             conn.close()
 
 
+# Kept-alive tile connections, one per (scheme, host) and per thread.
+#
+# A fresh TLS handshake per tile costs more than the tile transfer itself, so
+# reusing the connection is the single biggest download speedup — and it lowers
+# load on the tile server too, which matters for the volunteer-run ones.
+#
+# Thread-local rather than a shared pool: http.client connections are not
+# thread-safe, and the download worker and the HTTP handler threads both fetch.
+# Each thread's connections are closed when it exits and the local dies.
+_tile_conns = threading.local()
+_TILE_TIMEOUT = 15
+_REDIRECTS = (301, 302, 303, 307, 308)
+
+
+def _tile_conn(scheme, host):
+    """Return a kept-alive connection to (scheme, host) for the calling thread."""
+    pool = getattr(_tile_conns, "pool", None)
+    if pool is None:
+        pool = _tile_conns.pool = {}
+    conn = pool.get((scheme, host))
+    if conn is None:
+        conn = (http.client.HTTPSConnection(host, timeout=_TILE_TIMEOUT,
+                                            context=ssl.create_default_context())
+                if scheme == "https"
+                else http.client.HTTPConnection(host, timeout=_TILE_TIMEOUT))
+        pool[(scheme, host)] = conn
+        return conn, True                       # freshly opened
+    return conn, False                          # reused, may be stale
+
+
+def _drop_tile_conn(scheme, host):
+    """Discard a connection that failed or that the server asked to close."""
+    pool = getattr(_tile_conns, "pool", None)
+    if not pool:
+        return
+    conn = pool.pop((scheme, host), None)
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _tile_get(url, hops=3):
+    """GET a tile URL over a kept-alive connection, following redirects.
+
+    Returns: response body bytes. Raises on network or non-200 HTTP status.
+    """
+    u = urlparse(url)
+    scheme, host = u.scheme or "https", u.netloc
+    target = u.path + (f"?{u.query}" if u.query else "")
+    # One retry: a pooled connection the server closed while idle fails on its
+    # next use, which is normal and must not surface as a tile error.
+    for _ in range(2):
+        conn, fresh = _tile_conn(scheme, host)
+        try:
+            conn.request("GET", target, headers={"User-Agent": USER_AGENT,
+                                                 "Accept": "image/*,*/*"})
+            r = conn.getresponse()
+            body = r.read()                     # always drain, or the socket is unusable
+        except (OSError, http.client.HTTPException):
+            _drop_tile_conn(scheme, host)
+            if fresh:
+                raise                           # a real failure, not a stale socket
+            continue
+        if r.will_close or r.getheader("Connection", "").lower() == "close":
+            _drop_tile_conn(scheme, host)
+        if r.status in _REDIRECTS:
+            loc = r.getheader("Location")
+            if not loc or hops <= 0:
+                raise OSError(f"tile redirect loop or missing Location ({r.status})")
+            return _tile_get(urljoin(url, loc), hops - 1)
+        if r.status != 200:
+            raise OSError(f"tile HTTP {r.status}")
+        return body
+    raise OSError("tile connection lost")
+
+
 def fetch_tile(basemap, z, x, y):
     """Fetch one tile live from a basemap's remote tile server.
 
@@ -560,9 +899,7 @@ def fetch_tile(basemap, z, x, y):
     Returns: tile bytes. Raises on network/HTTP error.
     """
     url = _fmt_tile(BASEMAPS.get(basemap, config["server"]["tile_url"]), z, x, y)
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=15) as r:
-        return r.read()
+    return _tile_get(url)
 
 
 def coverage_in_bbox(basemap, z, north, south, east, west):
@@ -586,30 +923,623 @@ def coverage_in_bbox(basemap, z, north, south, east, west):
     return [[c, ymax - r] for c, r in rows]    # back to XYZ y
 
 
+def box_km(nlat, wlon, slat, elon):
+    """Ground size of a lat/lon box in km (x = east-west, y = north-south).
+
+    Uses the spherical approximation at the box's mid-latitude, which is well
+    within the accuracy needed to judge "does my flight fit in this area".
+    """
+    km_y = (nlat - slat) * 111.32
+    km_x = (elon - wlon) * 111.32 * math.cos(math.radians((nlat + slat) / 2))
+    return abs(km_x), abs(km_y)
+
+
 def cache_summary(basemap):
-    """Per-zoom tile counts and covered box for a basemap's offline cache."""
+    """Per-zoom tile counts and covered box for a basemap's offline cache.
+
+    basemap: Safe configured or downloaded pack id.
+    Returns: JSON-ready pack metadata, or an empty summary when absent.
+    Also reports the cache size on disk and the stored tile format (PNG and JPEG
+    both render, in the browser and on the OSD). Raises ValueError when tile
+    coordinates or zooms are not valid MBTiles values.
+    """
     path = mbtiles_for(basemap)
     if not os.path.exists(path):
         return {"basemap": basemap, "total": 0, "zooms": []}
     with db_lock:
         conn = open_mbtiles(basemap, write=False)
         try:
+            # substr() keeps this to the leading signature instead of loading a
+            # whole tile blob per level.
             rows = conn.execute(
                 "SELECT zoom_level, COUNT(*), MIN(tile_column), MAX(tile_column), "
-                "MIN(tile_row), MAX(tile_row) FROM tiles GROUP BY zoom_level ORDER BY zoom_level"
+                "MIN(tile_row), MAX(tile_row), substr(tile_data, 1, 8) "
+                "FROM tiles GROUP BY zoom_level ORDER BY zoom_level"
             ).fetchall()
+            try:
+                metadata = dict(conn.execute("SELECT name, value FROM metadata").fetchall())
+            except sqlite3.Error:
+                metadata = {}
         finally:
             conn.close()
-    zooms, total = [], 0
-    for z, cnt, minc, maxc, minr, maxr in rows:
+    zooms, total, fmts = [], 0, []
+    for z, cnt, minc, maxc, minr, maxr, magic in rows:
+        values = (z, cnt, minc, maxc, minr, maxr)
+        if not all(isinstance(value, int) for value in values):
+            raise ValueError("non-integer tile index in MBTiles database")
+        if not 0 <= z <= 30:
+            raise ValueError(f"invalid MBTiles zoom level: {z}")
+        tile_max = (1 << z) - 1
+        if (cnt < 1 or minc < 0 or minr < 0 or maxc > tile_max or maxr > tile_max or
+                minc > maxc or minr > maxr):
+            raise ValueError(f"invalid tile coordinates at zoom {z}")
         total += cnt
+        signature = bytes(magic or b"")
+        if signature[:2] == b"\xff\xd8":
+            zfmt = "JPEG"
+        elif signature == b"\x89PNG\r\n\x1a\n":
+            zfmt = "PNG"
+        else:
+            zfmt = "UNKNOWN"
+        if zfmt not in fmts:
+            fmts.append(zfmt)
         ymax = (1 << z) - 1
         nlat, wlon = num2deg(minc, ymax - maxr, z)
         slat, elon = num2deg(maxc + 1, (ymax - minr) + 1, z)
+        km_x, km_y = box_km(nlat, wlon, slat, elon)
         zooms.append({"z": z, "count": cnt,
                       "n": round(nlat, 4), "w": round(wlon, 4),
-                      "s": round(slat, 4), "e": round(elon, 4)})
-    return {"basemap": basemap, "total": total, "zooms": zooms}
+                      "s": round(slat, 4), "e": round(elon, 4),
+                      "km_x": round(km_x, 1), "km_y": round(km_y, 1), "fmt": zfmt})
+    # A blended pack holds more than one format, so report every format present
+    # rather than whichever one a single sampled tile happened to be.
+    fmt = "+".join(fmts) if fmts else None
+    source_levels = []
+    raw_sources = metadata.get("sources", "")
+    if not isinstance(raw_sources, str):
+        raw_sources = ""
+    for item in raw_sources.split(","):
+        try:
+            z_text, source = item.split(":", 1)
+            source_levels.append({"z": int(z_text), "source": source.strip()})
+        except (ValueError, TypeError):
+            continue
+    source_levels.sort(key=lambda item: item["z"])
+    source_names = []
+    for item in source_levels:
+        if item["source"] and item["source"] not in source_names:
+            source_names.append(item["source"])
+    if not source_names and basemap in BASEMAPS:
+        source_names = [basemap]
+    if not source_names:
+        inferred = basemap.split("_")
+        if inferred and all(name in BASEMAPS for name in inferred):
+            source_names = inferred
+    top = zooms[-1] if zooms else None
+    try:
+        lm_bytes = os.path.getsize(LANDMARKS_DB) if os.path.exists(LANDMARKS_DB) else 0
+    except OSError:
+        lm_bytes = 0
+    return {"basemap": basemap, "total": total, "zooms": zooms, "fmt": fmt,
+            "bytes": os.path.getsize(path), "lm_bytes": lm_bytes,
+            "min_zoom": zooms[0]["z"] if zooms else None,
+            "max_zoom": top["z"] if top else None,
+            "km_x": top["km_x"] if top else None, "km_y": top["km_y"] if top else None,
+            "bounds": ({"n": top["n"], "w": top["w"], "s": top["s"], "e": top["e"]}
+                       if top else None),
+            "map_type": "+".join(source_names) if source_names else None,
+            "source_levels": source_levels}
+
+
+def downloaded_pack_summaries():
+    """Describe every downloaded MBTiles pack in the configured maps directory.
+
+    Returns: Sorted JSON-ready summaries; unreadable packs carry an error field.
+    """
+    packs = []
+    try:
+        entries = sorted(os.scandir(MAPS_DIR), key=lambda entry: entry.name.lower())
+    except OSError:
+        return packs
+    configured_path = os.path.normcase(os.path.abspath(mbtiles_for(pack_id())))
+    for entry in entries:
+        if not entry.name.lower().endswith(".mbtiles") or entry.is_symlink():
+            continue
+        stem = entry.name[:-8]
+        if not downloaded_pack_exists(stem):
+            continue
+        try:
+            summary = cache_summary(stem)
+            summary["compatible"] = bool(summary["total"] and summary["fmt"] and
+                                         all(fmt in OSD_TILE_FORMATS
+                                             for fmt in summary["fmt"].split("+")))
+        except (OSError, sqlite3.Error, TypeError, ValueError, OverflowError) as exc:
+            summary = {"basemap": stem, "total": 0, "zooms": [], "bytes": 0,
+                       "compatible": False, "error": str(exc)}
+        summary["id"] = stem
+        summary["name"] = stem
+        summary["active"] = (os.path.normcase(os.path.abspath(entry.path)) == configured_path)
+        packs.append(summary)
+    return packs
+
+
+# ---------------------------------------------------------------------------
+# Terrain elevation (DEM)
+# ---------------------------------------------------------------------------
+
+def decode_png_rgb(buf):
+    """Decode an 8-bit RGB/RGBA non-interlaced PNG using only the stdlib.
+
+    This server carries no image library on purpose, and terrain tiles must be
+    read losslessly (a JPEG round-trip would corrupt the encoded metres), so the
+    few PNG features the DEM source actually uses are decoded here directly:
+    colour type 2/6, bit depth 8, no interlacing.
+
+    buf: PNG bytes.
+    Returns: (width, height, channels, bytearray of raw samples).
+    Raises ValueError on anything outside that subset.
+    """
+    if buf[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("not a PNG")
+    idat = bytearray()
+    w = h = ctype = None
+    pos = 8
+    while pos + 8 <= len(buf):
+        ln = struct.unpack(">I", buf[pos:pos + 4])[0]
+        typ = buf[pos + 4:pos + 8]
+        body = buf[pos + 8:pos + 8 + ln]
+        if typ == b"IHDR":
+            w, h, depth, ctype, _, _, interlace = struct.unpack(">IIBBBBB", body)
+            if depth != 8 or ctype not in (2, 6) or interlace != 0:
+                raise ValueError(
+                    f"unsupported PNG (depth={depth} colour={ctype} interlace={interlace})")
+        elif typ == b"IDAT":
+            idat += body
+        elif typ == b"IEND":
+            break
+        pos += 12 + ln                       # length + type + data + CRC
+    if w is None:
+        raise ValueError("PNG has no IHDR")
+    nch = 3 if ctype == 2 else 4
+    try:
+        data = zlib.decompress(bytes(idat))
+    except zlib.error as e:                  # truncated/corrupt IDAT
+        raise ValueError(f"PNG inflate failed: {e}") from None
+    stride = w * nch
+    if len(data) < h * (stride + 1):
+        raise ValueError("PNG truncated")
+    out = bytearray(h * stride)
+    prev = bytearray(stride)
+    p = 0
+    for row in range(h):
+        f = data[p]
+        p += 1
+        line = bytearray(data[p:p + stride])
+        p += stride
+        if f == 1:                                        # Sub
+            for i in range(nch, stride):
+                line[i] = (line[i] + line[i - nch]) & 0xFF
+        elif f == 2:                                      # Up
+            for i in range(stride):
+                line[i] = (line[i] + prev[i]) & 0xFF
+        elif f == 3:                                      # Average
+            for i in range(stride):
+                a = line[i - nch] if i >= nch else 0
+                line[i] = (line[i] + ((a + prev[i]) >> 1)) & 0xFF
+        elif f == 4:                                      # Paeth
+            for i in range(stride):
+                a = line[i - nch] if i >= nch else 0
+                b = prev[i]
+                c = prev[i - nch] if i >= nch else 0
+                pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
+                pr = a if (pa <= pb and pa <= pc) else (b if pb <= pc else c)
+                line[i] = (line[i] + pr) & 0xFF
+        elif f != 0:
+            raise ValueError(f"bad PNG filter {f}")
+        out[row * stride:(row + 1) * stride] = line
+        prev = line
+    return w, h, nch, out
+
+
+def terrarium_to_int16(w, h, nch, px):
+    """Convert decoded terrarium RGB samples to a grid of metres.
+
+    Returns: (bytes of w*h little-endian int16, min_m, max_m), row-major and
+    north-to-south — the same order the PNG rows arrive in.
+    """
+    grid = bytearray(w * h * 2)
+    lo, hi = 32767, -32768
+    o = 0
+    for i in range(w * h):
+        j = i * nch
+        e = (px[j] * 256 + px[j + 1] + px[j + 2] / 256.0) - 32768.0
+        e = int(round(e))
+        # keep the nodata sentinel distinguishable from a real reading
+        if e <= DEM_NODATA:
+            e = DEM_NODATA + 1
+        elif e > 32767:
+            e = 32767
+        if e < lo:
+            lo = e
+        if e > hi:
+            hi = e
+        struct.pack_into("<h", grid, o, e)
+        o += 2
+    return bytes(grid), lo, hi
+
+
+def open_elevation_db():
+    """Open (creating if needed) the elevation DB.
+
+    Returns: an sqlite3 connection with a 10s busy timeout. Caller holds
+    elevation_db_lock.
+    """
+    os.makedirs(MAPS_DIR, exist_ok=True)
+    conn = sqlite3.connect(ELEVATION_DB, timeout=10)
+    conn.execute("PRAGMA busy_timeout=10000")
+    conn.execute("CREATE TABLE IF NOT EXISTS meta(name TEXT PRIMARY KEY, value TEXT)")
+    # NB: tile_x/tile_y are XYZ, NOT the TMS row order the sibling .mbtiles files
+    # use. Reading this table with MBTiles' flipped y mirrors the terrain
+    # north-south, so the convention is recorded in meta as well.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS elevation("
+        "zoom INTEGER, tile_x INTEGER, tile_y INTEGER,"
+        "width INTEGER, height INTEGER,"
+        "min_m INTEGER, max_m INTEGER,"       # range without decoding the blob
+        "data BLOB,"                          # width*height int16 LE, row 0 = north
+        "PRIMARY KEY(zoom, tile_x, tile_y))"
+    )
+    for k, v in (("zoom", str(DEM_ZOOM)),
+                 ("encoding", "int16_le"),
+                 ("compression", "none"),
+                 ("nodata", str(DEM_NODATA)),
+                 ("tile_scheme", "xyz"),      # not tms
+                 ("row_order", "north_to_south"),
+                 ("units", "m"),
+                 ("vertical_datum", "EGM96 geoid (mean sea level)"),
+                 ("source", DEM_URL)):
+        conn.execute("INSERT OR REPLACE INTO meta VALUES(?,?)", (k, v))
+    conn.commit()
+    return conn
+
+
+def dem_on(m):
+    """Read the elevation flag from an already-held [map] section.
+
+    Lock-free on purpose: callers that already hold config_lock must use this,
+    since config_lock is not reentrant.
+    """
+    return m.get("elevation", "1").strip().lower() not in ("0", "false", "no", "")
+
+
+def dem_enabled():
+    """Whether terrain elevation should be downloaded alongside tiles."""
+    with config_lock:
+        return dem_on(config["map"])
+
+
+def dem_plan_total(north, south, east, west):
+    """Number of DEM tiles the given bbox needs at DEM_ZOOM."""
+    xs, ys = bbox_tile_ranges(north, south, east, west, DEM_ZOOM)
+    return len(xs) * len(ys)
+
+
+def download_elevation(north, south, east, west, progress=None):
+    """Fetch and store terrain elevation for a bbox, as int16 metre grids.
+
+    Covers exactly the same bbox as the tile download. Skips tiles already
+    stored, so it resumes like the tile cache does.
+    progress: optional callback(done, total) for the UI progress bar; `done`
+    counts every planned tile including cached ones, so a resume still advances.
+    Returns: (stored, failed, note). Raises only on a DB-level failure.
+    """
+    xs, ys = bbox_tile_ranges(north, south, east, west, DEM_ZOOM)
+    want = len(xs) * len(ys)
+    if want > MAX_DEM_TILES:
+        return 0, 0, (f"elevation skipped ({want} > {MAX_DEM_TILES} tiles; "
+                      f"area too large)")
+    if progress:
+        progress(0, want)
+    delay = int(config["server"]["tile_delay_ms"]) / 1000.0
+    stored = failed = seen = 0
+    with elevation_db_lock:
+        conn = open_elevation_db()
+        try:
+            for x in xs:
+                for y in ys:
+                    seen += 1
+                    if progress:
+                        progress(seen, want)
+                    have = conn.execute(
+                        "SELECT 1 FROM elevation WHERE zoom=? AND tile_x=? AND tile_y=?",
+                        (DEM_ZOOM, x, y),
+                    ).fetchone()
+                    if have:
+                        continue
+                    data = None
+                    for _ in range(3):              # retry transient fetch errors
+                        try:
+                            data = _tile_get(_fmt_tile(DEM_URL, DEM_ZOOM, x, y))
+                            break
+                        except Exception:
+                            time.sleep(0.3)
+                    if data is None:
+                        failed += 1
+                        continue
+                    try:
+                        w, h, nch, px = decode_png_rgb(data)
+                        grid, lo, hi = terrarium_to_int16(w, h, nch, px)
+                    except Exception as e:          # a bad tile must not kill the run
+                        print(f"[mapserver] DEM decode failed at {DEM_ZOOM}/{x}/{y}: {e}")
+                        failed += 1
+                        continue
+                    conn.execute(
+                        "INSERT OR REPLACE INTO elevation VALUES(?,?,?,?,?,?,?,?)",
+                        (DEM_ZOOM, x, y, w, h, lo, hi, grid),
+                    )
+                    stored += 1
+                    if stored % 8 == 0:
+                        conn.commit()
+                    time.sleep(delay)
+            conn.commit()
+        finally:
+            conn.close()
+    note = f"{stored} elevation tiles" if stored else "elevation up to date"
+    if failed:
+        note += f" ({failed} failed)"
+    return stored, failed, note
+
+
+def elevation_at(lat, lon, bilinear=True):
+    """Terrain height above sea level at a point, in metres.
+
+    lat/lon: degrees. bilinear: interpolate across the 4 nearest samples;
+    nearest-sample lookup otherwise gives ~28 m stair-steps.
+    Returns: float metres, or None if that point was never downloaded.
+    """
+    if not os.path.exists(ELEVATION_DB):
+        return None
+    n = 1 << DEM_ZOOM
+    try:
+        r = math.radians(lat)
+        fx = (lon + 180.0) / 360.0 * n
+        fy = (1.0 - math.log(math.tan(r) + 1 / math.cos(r)) / math.pi) / 2.0 * n
+    except (ValueError, ZeroDivisionError):
+        return None
+
+    tiles = {}
+
+    def sample(gx, gy, size):
+        """Read one sample from the global pixel grid, loading its tile as needed."""
+        tx, ty = gx // size, gy // size
+        if (tx, ty) not in tiles:
+            row = conn.execute(
+                "SELECT width, height, data FROM elevation "
+                "WHERE zoom=? AND tile_x=? AND tile_y=?", (DEM_ZOOM, tx, ty)).fetchone()
+            tiles[(tx, ty)] = row
+        row = tiles[(tx, ty)]
+        if not row:
+            return None
+        w, h, blob = row
+        px, py = gx - tx * size, gy - ty * size
+        if not (0 <= px < w and 0 <= py < h):
+            return None
+        off = (py * w + px) * 2
+        if off + 2 > len(blob):
+            return None
+        v = struct.unpack_from("<h", blob, off)[0]
+        return None if v == DEM_NODATA else float(v)
+
+    # No elevation_db_lock here: that lock serialises the writer, which holds it for a
+    # whole download, and the pointer readout polls straight through one. This is a
+    # read-only connection, so SQLite's own locking plus busy_timeout is enough.
+    try:
+        conn = sqlite3.connect(f"file:{ELEVATION_DB}?mode=ro", uri=True, timeout=10)
+        try:
+            size = conn.execute(
+                "SELECT width FROM elevation WHERE zoom=? LIMIT 1", (DEM_ZOOM,)).fetchone()
+            if not size:
+                return None
+            size = size[0]
+            # global pixel coordinates, offset by half a pixel so the samples
+            # bracketing the point are the ones interpolated between
+            gpx = fx * size - 0.5
+            gpy = fy * size - 0.5
+            x0, y0 = math.floor(gpx), math.floor(gpy)
+            if not bilinear:
+                return sample(int(round(gpx)), int(round(gpy)), size)
+            dx, dy = gpx - x0, gpy - y0
+            v00 = sample(int(x0), int(y0), size)
+            v10 = sample(int(x0) + 1, int(y0), size)
+            v01 = sample(int(x0), int(y0) + 1, size)
+            v11 = sample(int(x0) + 1, int(y0) + 1, size)
+            if v00 is None:
+                return None
+            # fall back to the anchor sample at the edge of stored coverage
+            v10 = v00 if v10 is None else v10
+            v01 = v00 if v01 is None else v01
+            v11 = v10 if v11 is None else v11
+            top = v00 + (v10 - v00) * dx
+            bot = v01 + (v11 - v01) * dx
+            return round(top + (bot - top) * dy, 1)
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+
+
+# --- line-of-sight horizon (viewshed) --------------------------------------
+# Standard radio refraction: the atmosphere bends signals down, which is modelled
+# as a 4/3 earth radius. Included because it is three lines; it only matters at
+# long range over flat ground (a 30 km path drops 53 m against 71 m geometric),
+# but it costs nothing to be right.
+K_REFRACT = 4.0 / 3.0
+R_EARTH = 6371000.0
+VIEWSHED_MAX_KM = 100
+VIEWSHED_MAX_AZ = 720
+
+
+def _dem_area(lat0, lon0, radius_m):
+    """Load the DEM tiles covering a disc into memory.
+
+    Returns: (tiles dict keyed by (tx, ty), tile size in px), or (None, 0).
+    Bounded by the requested radius, not by the whole DB — a 30 km disc is ~70
+    tiles (~9 MB), where loading a full 1000-tile DB would be 131 MB.
+    """
+    if not os.path.exists(ELEVATION_DB):
+        return None, 0
+    dlat = radius_m / 111320.0
+    dlon = radius_m / (111320.0 * max(0.05, math.cos(math.radians(lat0))))
+    xs, ys = bbox_tile_ranges(lat0 + dlat, lat0 - dlat,
+                              lon0 + dlon, lon0 - dlon, DEM_ZOOM)
+    if not xs or not ys:
+        return None, 0
+    tiles, size = {}, 0
+    try:
+        conn = sqlite3.connect(f"file:{ELEVATION_DB}?mode=ro", uri=True, timeout=10)
+        try:
+            q = ("SELECT tile_x, tile_y, width, data FROM elevation WHERE zoom=? "
+                 "AND tile_x BETWEEN ? AND ? AND tile_y BETWEEN ? AND ?")
+            for tx, ty, w, blob in conn.execute(
+                    q, (DEM_ZOOM, xs[0], xs[-1], ys[0], ys[-1])):
+                tiles[(tx, ty)] = (w, blob)
+                size = w
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None, 0
+    return (tiles, size) if tiles else (None, 0)
+
+
+def viewshed(lat0, lon0, ant_h=5.0, target_h=100.0, max_m=30000, n_az=360):
+    """Terrain line-of-sight horizon around a point, one radius per azimuth.
+
+    lat0/lon0: the centre (ground station). ant_h: antenna height above the ground
+    there. target_h: aircraft altitude above that same ground level.
+
+    Walks each azimuth outward tracking the running maximum terrain elevation
+    angle. Because the angle needed to see a fixed-altitude target falls with
+    distance while the terrain horizon angle only rises, each azimuth blocks
+    exactly once — so the result is a single closed ring rather than a set of
+    patches.
+
+    Returns: dict with the ring, the centre's ground height and stats, or
+    {"error": ...} when the centre is not covered.
+    """
+    max_m = max(1000.0, min(float(max_m), VIEWSHED_MAX_KM * 1000.0))
+    n_az = max(8, min(int(n_az), VIEWSHED_MAX_AZ))
+    tiles, size = _dem_area(lat0, lon0, max_m)
+    if not tiles:
+        return {"error": "no elevation data for this area"}
+
+    n = 1 << DEM_ZOOM
+
+    def raw(gx, gy):
+        t = tiles.get((gx // size, gy // size))
+        if t is None:
+            return None
+        w, blob = t
+        px, py = gx - (gx // size) * size, gy - (gy // size) * size
+        off = (py * w + px) * 2
+        if off < 0 or off + 2 > len(blob):
+            return None
+        v = struct.unpack_from("<h", blob, off)[0]
+        return None if v == DEM_NODATA else v
+
+    def sample(lat, lon):
+        """Bilinear terrain height, or None outside the loaded tiles."""
+        try:
+            r = math.radians(lat)
+            gpx = (lon + 180.0) / 360.0 * n * size - 0.5
+            gpy = (1.0 - math.log(math.tan(r) + 1 / math.cos(r)) / math.pi) / 2.0 * n * size - 0.5
+        except (ValueError, ZeroDivisionError):
+            return None
+        x0, y0 = math.floor(gpx), math.floor(gpy)
+        v00 = raw(int(x0), int(y0))
+        if v00 is None:
+            return None
+        v10 = raw(int(x0) + 1, int(y0))
+        v01 = raw(int(x0), int(y0) + 1)
+        v11 = raw(int(x0) + 1, int(y0) + 1)
+        v10 = v00 if v10 is None else v10
+        v01 = v00 if v01 is None else v01
+        v11 = v10 if v11 is None else v11
+        dx, dy = gpx - x0, gpy - y0
+        top = v00 + (v10 - v00) * dx
+        bot = v01 + (v11 - v01) * dx
+        return top + (bot - top) * dy
+
+    g0 = sample(lat0, lon0)
+    if g0 is None:
+        return {"error": "centre is outside the downloaded elevation data"}
+    h_obs = g0 + ant_h
+    h_t = g0 + target_h
+    step = 156543.03392 * math.cos(math.radians(lat0)) / (1 << DEM_ZOOM)   # one sample
+    reff = K_REFRACT * R_EARTH
+    mlat = 111320.0
+    mlon = 111320.0 * max(0.05, math.cos(math.radians(lat0)))
+
+    ring, radii, n_cov = [], [], 0
+    for i in range(n_az):
+        az = 2 * math.pi * i / n_az
+        sx, sy = math.sin(az), math.cos(az)
+        max_ang = -9e9
+        hit, coverage_limited = max_m, False
+        r = step
+        while r <= max_m:
+            z = sample(lat0 + (sy * r) / mlat, lon0 + (sx * r) / mlon)
+            if z is None:                       # ran off the downloaded data
+                hit, coverage_limited = r, True
+                break
+            # Earth curves away from the observer, so everything at range r sits
+            # lower than the observer's tangent plane by this much. It applies to
+            # the AIRCRAFT as well as the terrain — dropping only the terrain would
+            # make curvature extend the horizon instead of shortening it.
+            drop = (r * r) / (2 * reff)
+            a = (z - drop - h_obs) / r          # terrain horizon angle
+            if a > max_ang:
+                max_ang = a
+            if (h_t - drop - h_obs) / r < max_ang:   # terrain now blocks the view
+                hit = r
+                break
+            r += step
+        if coverage_limited:
+            n_cov += 1
+        radii.append(hit)
+        ring.append([round(lat0 + (sy * hit) / mlat, 6),
+                     round(lon0 + (sx * hit) / mlon, 6)])
+
+    s = sorted(radii)
+    return {"center": {"lat": lat0, "lon": lon0, "ground_m": round(g0, 1)},
+            "antenna_m": ant_h, "altitude_m": target_h,
+            "ring": ring,
+            "min_km": round(min(radii) / 1000.0, 2),
+            "median_km": round(s[len(s) // 2] / 1000.0, 2),
+            "max_km": round(max(radii) / 1000.0, 2),
+            "coverage_limited": n_cov, "azimuths": n_az,
+            "max_range_km": round(max_m / 1000.0, 1)}
+
+
+def elevation_summary():
+    """What the elevation DB holds, for the panel and tiles_info.
+
+    Returns: {tiles, bytes, min_m, max_m, zoom} — tiles 0 when nothing is stored.
+    """
+    empty = {"tiles": 0, "bytes": 0, "min_m": None, "max_m": None, "zoom": DEM_ZOOM}
+    if not os.path.exists(ELEVATION_DB):
+        return empty
+    try:                                  # read-only: no writer lock, see elevation_at()
+        conn = sqlite3.connect(f"file:{ELEVATION_DB}?mode=ro", uri=True, timeout=10)
+        try:
+            cnt, lo, hi = conn.execute(
+                "SELECT COUNT(*), MIN(min_m), MAX(max_m) FROM elevation WHERE zoom=?",
+                (DEM_ZOOM,)).fetchone()
+        finally:
+            conn.close()
+        return {"tiles": cnt or 0, "bytes": os.path.getsize(ELEVATION_DB),
+                "min_m": lo, "max_m": hi, "zoom": DEM_ZOOM}
+    except (sqlite3.Error, OSError):
+        return empty
 
 
 # ---------------------------------------------------------------------------
@@ -617,7 +1547,8 @@ def cache_summary(basemap):
 # ---------------------------------------------------------------------------
 
 dl_lock = threading.Lock()
-dl_status = {"state": "idle", "done": 0, "total": 0, "failed": 0, "msg": "", "lm_count": None}
+dl_status = {"state": "idle", "phase": "idle", "done": 0, "total": 0, "failed": 0,
+             "msg": "", "pack": None, "lm_count": None, "dem_count": None}
 
 
 def set_dl(**kw):
@@ -629,25 +1560,38 @@ def set_dl(**kw):
         dl_status.update(kw)
 
 
-def download_worker(basemap, north, south, east, west):
-    """Download a bbox's tiles (all ZOOMS) into the basemap cache, then POIs.
+def download_worker(basemap, zs, srcs, north, south, east, west):
+    """Download a bbox's tiles (all stored zooms) into the pack, then POIs.
 
-    basemap: basemap name. north/south/east/west: bbox edges in degrees.
+    basemap: Unique pack id to write. zs: snapshotted stored zoom levels.
+    srcs: snapshotted tile sources aligned with zs.
+    north/south/east/west: bbox edges in degrees.
     Runs in a thread; reports progress via set_dl and refuses areas over
     MAX_TILES. Also stores center in config and fetches Overpass landmarks.
+
+    Each stored zoom is fetched from its own source, so one pack can hold e.g.
+    topographic tiles at the coarse levels and imagery at the detail level.
     """
-    total = plan_total(north, south, east, west)
+    total = plan_total(north, south, east, west, zs)
     if total > MAX_TILES:
-        set_dl(state="error", msg=f"{total} tiles > limit {MAX_TILES}; zoom in")
+        set_dl(state="error",
+               msg=f"{total} tiles > limit {MAX_TILES}; reduce the area or the detail zoom")
         return
-    set_dl(state="running", done=0, total=total, failed=0, msg=f"downloading {basemap}")
+    set_dl(state="running", phase="tiles", done=0, total=total, failed=0,
+           msg=f"downloading {basemap}", pack=basemap)
     delay = int(config["server"]["tile_delay_ms"]) / 1000.0
     done = failed = 0
     try:
         with db_lock:
             conn = open_mbtiles(basemap, write=True)
+            # Record the mix this pack was built from, so the tool can tell when a
+            # pack no longer matches the configured sources.
+            conn.execute("DELETE FROM metadata WHERE name='sources'")
+            conn.execute("INSERT INTO metadata VALUES('sources',?)",
+                         (",".join(f"{z}:{s}" for z, s in zip(zs, srcs)),))
+            conn.commit()
         try:
-            for z in ZOOMS:
+            for z, z_src in zip(zs, srcs):
                 xs, ys = bbox_tile_ranges(north, south, east, west, z)
                 ymax = (1 << z) - 1
                 for x in xs:
@@ -662,7 +1606,7 @@ def download_worker(basemap, north, south, east, west):
                             data = None
                             for _ in range(3):          # retry transient fetch errors
                                 try:
-                                    data = fetch_tile(basemap, z, x, y)
+                                    data = fetch_tile(z_src, z, x, y)
                                     break
                                 except Exception:
                                     time.sleep(0.3)
@@ -696,7 +1640,7 @@ def download_worker(basemap, north, south, east, west):
     log_cache_summary(basemap)
 
     # Download POI landmarks for the same area (non-fatal if Overpass is unreachable)
-    set_dl(done=done, failed=failed, msg="tiles saved; fetching POIs…")
+    set_dl(phase="poi", done=done, failed=failed, msg="tiles saved; fetching POIs…")
     n_lm, lm_note = 0, "POIs unavailable"
     try:
         raw = fetch_landmarks(north, south, east, west)
@@ -707,8 +1651,29 @@ def download_worker(basemap, north, south, east, west):
     except Exception as e:
         print(f"[mapserver] POI download failed: {e}")
 
-    set_dl(state="done", done=done, failed=failed,
-           msg=f"saved ({failed} failed) · {lm_note}", lm_count=n_lm)
+    # Terrain elevation for the same area (non-fatal: a DEM failure must never
+    # fail a tile download that already succeeded).
+    dem_note, n_dem = "", 0
+    if dem_enabled():
+        # The bar restarts from 0 for this phase: the tile phase already reached
+        # 100%, and leaving it there made the elevation download look like a hang.
+        set_dl(phase="elevation", done=0, total=0, msg="downloading elevation…")
+
+        def dem_progress(d, t):
+            set_dl(done=d, total=t, msg=f"elevation {d}/{t}…")
+
+        try:
+            n_dem, _dem_failed, dem_note = download_elevation(
+                north, south, east, west, progress=dem_progress)
+            print(f"[mapserver] {dem_note}")
+        except Exception as e:
+            dem_note = "elevation unavailable"
+            print(f"[mapserver] elevation download failed: {e}")
+
+    set_dl(state="done", phase="done", done=done, total=total, failed=failed,
+           msg=f"saved {basemap}.mbtiles ({failed} failed) · {lm_note}" +
+               (f" · {dem_note}" if dem_note else ""),
+           lm_count=n_lm, dem_count=n_dem)
 
 
 def log_cache_summary(basemap):
@@ -943,19 +1908,51 @@ def save_poi_selection(items):
             conn.close()
 
 
-def start_download(basemap, north, south, east, west):
-    """Spawn a download_worker thread unless one is already running.
+def start_download(name, zs, srcs, north, south, east, west):
+    """Reserve a unique pack and spawn its download worker unless busy.
 
-    basemap: basemap name. north/south/east/west: bbox edges in degrees.
-    Returns: True if a download was started, False if one is in progress.
+    name: Optional requested map name. zs: stored zoom snapshot.
+    srcs: source snapshot used for the fallback filename and downloaded tiles.
+    north/south/east/west: bbox edges in degrees.
+    Returns: Reserved pack id, False when busy, or None on filesystem failure.
     """
     with dl_lock:
         if dl_status["state"] == "running":
             return False
-    threading.Thread(
-        target=download_worker, args=(basemap, north, south, east, west), daemon=True
-    ).start()
-    return True
+        try:
+            os.makedirs(MAPS_DIR, exist_ok=True)
+        except OSError as exc:
+            dl_status.update(state="error", phase="error",
+                             msg=f"cannot create maps folder: {exc}")
+            return None
+        while True:
+            basemap = allocate_pack_id(name, srcs)
+            try:
+                fd = os.open(mbtiles_for(basemap), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+                os.close(fd)
+                break
+            except FileExistsError:
+                continue
+            except OSError as exc:
+                dl_status.update(state="error", phase="error",
+                                 msg=f"cannot create map file: {exc}")
+                return None
+        dl_status.update(state="running", phase="starting", done=0, total=0, failed=0,
+                         msg=f"starting {basemap}", pack=basemap,
+                         lm_count=None, dem_count=None)
+    try:
+        threading.Thread(
+            target=download_worker,
+            args=(basemap, zs, srcs, north, south, east, west), daemon=True
+        ).start()
+    except RuntimeError as exc:
+        try:
+            os.remove(mbtiles_for(basemap))
+        except OSError:
+            pass
+        set_dl(state="error", phase="error", msg=f"cannot start download: {exc}")
+        return None
+    return basemap
 
 
 # ---------------------------------------------------------------------------
@@ -1029,6 +2026,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.serve_coverage()
         if path == "/cache":
             return self.serve_cache()
+        if path == "/packs":
+            return self.serve_packs()
+        if path == "/elevation":
+            return self.serve_elevation()
+        if path == "/viewshed":
+            return self.serve_viewshed()
         if path == "/landmarks":
             return self.serve_landmarks()
         if path == "/poi-types":
@@ -1052,6 +2055,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.serve_poi_selection_post()
         self._send(404, b"not found")
 
+    def do_DELETE(self):
+        """Route deletion of one explicitly named downloaded map pack."""
+        path = urlparse(self.path).path
+        if path == "/packs":
+            return self.serve_pack_delete()
+        self._send(404, b"not found")
+
     def serve_static(self, name):
         """Serve a whitelisted static file from WEB_ROOT (no-store cached).
 
@@ -1073,8 +2083,10 @@ class Handler(BaseHTTPRequestHandler):
     def serve_tile(self, path):
         """Serve a /tiles/{z}/{x}/{y} tile: offline cache first, else live proxy.
 
-        path: the request path. The optional ?src= picks a basemap and
-        ?offline= forces cache-only. Sends 204 when no tile is available.
+        path: the request path. The optional ?src= picks a pack and ?offline=
+        forces cache-only. Sends 204 when no tile is available. The live proxy
+        uses whichever source owns the nearest stored zoom, so browsing previews
+        the same imagery the download would store at that level.
         """
         parts = path.split("/")
         try:
@@ -1085,16 +2097,16 @@ class Handler(BaseHTTPRequestHandler):
         q = parse_qs(urlparse(self.path).query)
         src = q.get("src", [None])[0]
         offline = q.get("offline", [None])[0]      # "test offline" -> cache only, no proxy
-        basemap = src if src in BASEMAPS else current_basemap()
-        # 1) offline cache for this basemap
+        pack = resolve_pack(src) or pack_id()
+        # 1) offline cache for this pack
         try:
-            data = read_tile(basemap, z, x, y)
+            data = read_tile(pack, z, x, y)
         except sqlite3.Error:
             data = None
         # 2) live proxy when online (unless the user is testing offline coverage)
         if data is None and not offline and BROWSE_MIN <= z <= BROWSE_MAX and is_online():
             try:
-                data = fetch_tile(basemap, z, x, y)
+                data = fetch_tile(source_for(z), z, x, y)
             except Exception:
                 data = None
         if data is None:
@@ -1107,20 +2119,99 @@ class Handler(BaseHTTPRequestHandler):
         Basemap is chosen by the ?src= query param, else the active basemap.
         """
         src = parse_qs(urlparse(self.path).query).get("src", [None])[0]
-        basemap = src if src in BASEMAPS else current_basemap()
+        basemap = resolve_pack(src) or pack_id()
         summary = cache_summary(basemap)
         summary["lm_count"] = landmarks_count()
+        summary["elevation"] = elevation_summary()
         self._send(200, json.dumps(summary), "application/json")
 
+    def serve_packs(self):
+        """Send metadata for every downloaded map pack as JSON.
+
+        Returns an array containing safe pack ids, zooms, sources, formats,
+        sizes and maximum-detail coverage bounds.
+        """
+        self._send(200, json.dumps(downloaded_pack_summaries()), "application/json")
+
+    def serve_pack_delete(self):
+        """Permanently delete the safe existing .mbtiles file named by ?id=.
+
+        Sends 409 when that pack is being downloaded, 404 when it does not name
+        a regular pack file, and never removes shared landmarks or elevation.
+        """
+        name = parse_qs(urlparse(self.path).query).get("id", [None])[0]
+        if not downloaded_pack_exists(name):
+            return self._send(404, json.dumps({"error": "map pack not found"}),
+                              "application/json")
+        with dl_lock:
+            if dl_status["state"] == "running" and dl_status.get("pack") == name:
+                return self._send(409, json.dumps({"error": "map is still downloading"}),
+                                  "application/json")
+        try:
+            with db_lock:
+                if not downloaded_pack_exists(name):
+                    return self._send(404, json.dumps({"error": "map pack not found"}),
+                                      "application/json")
+                os.remove(mbtiles_for(name))
+        except OSError as exc:
+            return self._send(500, json.dumps({"error": f"cannot delete map: {exc}"}),
+                              "application/json")
+        self._send(200, json.dumps({"deleted": name}), "application/json")
+
+    def serve_elevation(self):
+        """Send the stored terrain height at ?lat=&lon= as JSON.
+
+        Replies {"elev_m": null} when the point was never downloaded, so the UI
+        can tell "no coverage" from a real reading of 0 m at sea level.
+        """
+        q = parse_qs(urlparse(self.path).query)
+        try:
+            lat, lon = float(q["lat"][0]), float(q["lon"][0])
+        except (KeyError, ValueError, IndexError):
+            return self._send(400, b"need lat, lon")
+        if not valid_coord(lat, lon):
+            return self._send(400, b"bad lat/lon")
+        self._send(200, json.dumps({"lat": lat, "lon": lon,
+                                    "elev_m": elevation_at(lat, lon),
+                                    "datum": "EGM96 (MSL)"}), "application/json")
+
+    def serve_viewshed(self):
+        """Send the terrain line-of-sight horizon around ?lat=&lon= as JSON.
+
+        Query: lat, lon (required); ant (antenna height above ground, default 5),
+        alt (aircraft altitude above the centre's ground, default 100),
+        max_km (default 30), az (azimuth count, default 360).
+        """
+        q = parse_qs(urlparse(self.path).query)
+
+        def num(key, default, lo, hi):
+            try:
+                return max(lo, min(hi, float(q[key][0])))
+            except (KeyError, ValueError, IndexError):
+                return default
+
+        try:
+            lat, lon = float(q["lat"][0]), float(q["lon"][0])
+        except (KeyError, ValueError, IndexError):
+            return self._send(400, b"need lat, lon")
+        if not valid_coord(lat, lon):
+            return self._send(400, b"bad lat/lon")
+        res = viewshed(lat, lon,
+                       ant_h=num("ant", 5.0, 0.0, 500.0),
+                       target_h=num("alt", 100.0, 1.0, 10000.0),
+                       max_m=num("max_km", 30.0, 1.0, VIEWSHED_MAX_KM) * 1000.0,
+                       n_az=int(num("az", 360, 8, VIEWSHED_MAX_AZ)))
+        self._send(200, json.dumps(res), "application/json")
+
     def serve_export(self):
-        """Stream a zip of the map pack (the basemap's .mbtiles + landmarks.db).
+        """Stream a zip of the map pack (.mbtiles + landmarks.db + elevation.db).
 
         This is the preflight->flight handoff: the user saves it wherever they
         want (the browser's download picks the location) and copies it to the OSD
         station's gs/maps/. Basemap comes from ?src=, else the active one.
         """
         src = parse_qs(urlparse(self.path).query).get("src", [None])[0]
-        basemap = src if src in BASEMAPS else current_basemap()
+        basemap = resolve_pack(src) or pack_id()
         mb = mbtiles_for(basemap)
         if not os.path.exists(mb):
             return self._send(404, b"nothing downloaded for this basemap yet")
@@ -1136,6 +2227,9 @@ class Handler(BaseHTTPRequestHandler):
                 with landmarks_db_lock:                # keep landmarks.db read-consistent
                     if os.path.exists(LANDMARKS_DB):
                         zf.write(LANDMARKS_DB, "landmarks.db")
+                with elevation_db_lock:
+                    if os.path.exists(ELEVATION_DB):
+                        zf.write(ELEVATION_DB, "elevation.db")
 
             size = os.path.getsize(tmp.name)
             self.send_response(200)
@@ -1184,7 +2278,7 @@ class Handler(BaseHTTPRequestHandler):
         except (KeyError, ValueError):
             return self._send(400, b"need z, n, s, e, w")
         src = q.get("src", [None])[0]
-        basemap = src if src in BASEMAPS else current_basemap()
+        basemap = resolve_pack(src) or pack_id()
         xs, ys = bbox_tile_ranges(n, s, e, w, z)
         want = len(xs) * len(ys)
         if want > 4000:
@@ -1207,22 +2301,32 @@ class Handler(BaseHTTPRequestHandler):
             zoom = int(m["zoom"])
             basemap = m.get("basemap", "Satellite")
             key = config["server"].get("tile_key", "")
-        # basemaps that need an API key ({key} in the URL) but have none configured:
-        # the UI greys these out so they can't be selected until a key is set.
-        disabled = [n for n, u in BASEMAPS.items() if "{key}" in u and not key]
+        # basemaps the UI greys out: missing API key, or a tile format the native
+        # OSD renderer cannot decode. Maps name -> short reason shown in the option.
+        disabled = basemap_issues(key)
+        srcs = sources()                  # per-zoom sources (config_lock released above)
         with dl_lock:
             dl = dict(dl_status)
         with state_lock:
             ar = armed_state
-        tgt, hm = geo["target"], geo["home"]
+        tgts, hm = list(geo["targets"]), geo["home"]
         body = json.dumps({
             "online": is_online(),
-            "mbtiles": os.path.exists(mbtiles_for(basemap)),
+            "mbtiles": os.path.exists(mbtiles_for(pack_id(srcs))),
             "center": center, "zoom": zoom, "max_tiles": MAX_TILES, "download": dl,
+            "detail_zoom": detail_zoom(), "detail_min": DETAIL_MIN,
+            "detail_max": DETAIL_MAX, "zooms": zooms(),
+            "sources": srcs, "pack": pack_id(srcs),
             "basemaps": list(BASEMAPS.keys()), "basemaps_disabled": disabled,
             "basemap": basemap,
+            "elevation": dem_enabled(), "dem_zoom": DEM_ZOOM,
+            "max_dem_tiles": MAX_DEM_TILES,
             "armed": ar,
-            "target": {"lat": tgt[0], "lon": tgt[1]} if tgt else None,
+            "targets": tgts, "target_slots": TARGET_SLOTS,
+            # slot 0 repeated under the old key so overlay clients that predate
+            # multiple targets keep drawing one
+            "target": ({"lat": tgts[0]["lat"], "lon": tgts[0]["lon"]}
+                       if tgts[0] else None),
             "home": {"lat": hm[0], "lon": hm[1]} if hm else None,
         })
         self._send(200, body, "application/json")
@@ -1233,15 +2337,18 @@ class Handler(BaseHTTPRequestHandler):
             m = config["map"]
             body = json.dumps({
                 "zoom": int(m["zoom"]),
+                "detail_zoom": clamp_detail(m.get("detail_zoom", DETAIL_DEFAULT)),
+                "elevation": dem_on(m),        # lock-free: config_lock is held here
                 "center_lat": m["center_lat"] or None,
                 "center_lon": m["center_lon"] or None,
             })
         self._send(200, body, "application/json")
 
     def serve_settings_post(self):
-        """Update zoom and/or basemap from a JSON body, then persist config.
+        """Update zoom, detail zoom and/or basemap from a JSON body, then persist.
 
-        Sends 400 on malformed JSON; unknown basemaps are ignored.
+        Sends 400 on malformed JSON; unknown basemaps are ignored and detail_zoom
+        is clamped to the selectable range.
         """
         try:
             data = self._json_body()
@@ -1251,29 +2358,61 @@ class Handler(BaseHTTPRequestHandler):
             m = config["map"]
             if "zoom" in data:
                 m["zoom"] = str(int(data["zoom"]))
+            if "detail_zoom" in data:
+                m["detail_zoom"] = str(clamp_detail(data["detail_zoom"]))
+            if "elevation" in data:
+                m["elevation"] = "1" if data["elevation"] else "0"
             if data.get("basemap") in BASEMAPS:
+                # the simple control: one source for every stored level
                 m["basemap"] = data["basemap"]
+                m["sources"] = ""
+            if isinstance(data.get("sources"), list):
+                n = len(zoom_set(clamp_detail(m.get("detail_zoom", DETAIL_DEFAULT))))
+                srcs = parse_sources(",".join(str(s) for s in data["sources"]),
+                                     m.get("basemap", "Satellite"), n)
+                m["sources"] = ",".join(srcs)
+                # keep `basemap` meaningful for a uniform mix (and for old readers)
+                if len(set(srcs)) == 1:
+                    m["basemap"] = srcs[0]
+                    m["sources"] = ""
         save_config()
         self._send(200, b"{}", "application/json")
 
     def serve_target_post(self):
-        """Set or clear the target point from a JSON {lat, lon} body.
+        """Set the target slots from JSON, then persist them to landmarks.db.
 
-        Null lat/lon clears the target. Sends 400 on bad JSON or coordinates;
-        persists the target to landmarks.db (waypoints) on success.
+        Preferred body: {"targets": [ {name,lat,lon} | null, ... ]} -- shorter
+        lists leave the remaining slots untouched, so the panel can send just the
+        slot it edited. The legacy {"lat","lon"} body still works and writes slot
+        0 (null lat/lon clears it). Sends 400 on bad JSON or coordinates.
         """
         try:
             d = self._json_body()
         except ValueError:
             return self._send(400, b"bad json")
-        if d.get("lat") is None or d.get("lon") is None:
-            geo["target"] = None
+
+        slots = list(geo["targets"])
+        if isinstance(d.get("targets"), list):
+            for i, t in enumerate(d["targets"][:TARGET_SLOTS]):
+                if not isinstance(t, dict) or t.get("lat") is None or t.get("lon") is None:
+                    slots[i] = None
+                    continue
+                try:
+                    slots[i] = {"lat": float(t["lat"]), "lon": float(t["lon"]),
+                                "name": clip_name(t.get("name", ""))}
+                except (ValueError, TypeError):
+                    return self._send(400, b"bad lat/lon")
+        elif d.get("lat") is None or d.get("lon") is None:
+            slots[0] = None
         else:
             try:
-                geo["target"] = (float(d["lat"]), float(d["lon"]))
+                slots[0] = {"lat": float(d["lat"]), "lon": float(d["lon"]),
+                            "name": str(d.get("name", ""))[:31]}
             except (ValueError, TypeError):
                 return self._send(400, b"bad lat/lon")
-        save_target_to_db(geo["target"])
+
+        geo["targets"] = slots
+        save_targets_to_db(slots)
         self._send(200, b"{}", "application/json")
 
     def serve_poi_selection_post(self):
@@ -1298,21 +2437,36 @@ class Handler(BaseHTTPRequestHandler):
     def serve_download_post(self):
         """Start an offline download for the bbox in a JSON body.
 
-        Body needs north/south/east/west. Sends 409 if the area exceeds
-        MAX_TILES or a download is already running, else 200 with the count.
+        Body needs north/south/east/west and accepts an optional map name. Sends
+        409 if the area exceeds MAX_TILES or a download is already running, else
+        200 with the count and collision-free pack id.
         """
         try:
             d = self._json_body()
+            if not isinstance(d, dict):
+                raise TypeError
             north, south = float(d["north"]), float(d["south"])
             east, west = float(d["east"]), float(d["west"])
-        except (ValueError, KeyError):
+        except (ValueError, TypeError, KeyError):
             return self._send(400, b"need north, south, east, west")
-        total = plan_total(north, south, east, west)
+        with config_lock:
+            m = config["map"]
+            detail = clamp_detail(m.get("detail_zoom", DETAIL_DEFAULT))
+            zs = zoom_set(detail)
+            srcs = parse_sources(m.get("sources", ""),
+                                 m.get("basemap", "Satellite"), len(zs))
+        total = plan_total(north, south, east, west, zs)
         if total > MAX_TILES:
             return self._send(409, json.dumps({"error": f"area too large ({total} tiles) — zoom in", "total": total}), "application/json")
-        if not start_download(current_basemap(), north, south, east, west):
+        pack = start_download(d.get("name"), zs, srcs, north, south, east, west)
+        if pack is False:
             return self._send(409, json.dumps({"error": "busy"}), "application/json")
-        self._send(200, json.dumps({"started": True, "total": total}), "application/json")
+        if pack is None:
+            with dl_lock:
+                error = dl_status.get("msg") or "cannot create map file"
+            return self._send(500, json.dumps({"error": error}), "application/json")
+        self._send(200, json.dumps({"started": True, "total": total, "pack": pack}),
+                   "application/json")
 
     def serve_sse(self):
         """Stream live position updates to the client as Server-Sent Events.
