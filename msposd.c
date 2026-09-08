@@ -54,7 +54,7 @@ extern char* recording_dir;
 // libevent base main loop
 struct event_base *base = NULL;
 
-int serial_fd = 0;
+int serial_fd = -1;
 int in_sock = 0;
 int MSPUDPPort = 0;
 int MSP_PollRate = 20;
@@ -1182,7 +1182,7 @@ static void poll_msp(evutil_socket_t sock, short event, void *arg) {
 
 static int handle_data(const char *port_name, int baudrate, const char *out_addr) {
 	struct event *sig_int = NULL, *in_ev = NULL, *temp_tmr = NULL, *msp_tmr = NULL;
-	struct event *sig_term;
+	struct event *sig_term = NULL;
 	int ret = EXIT_SUCCESS;
 
 	// Read from UDP
@@ -1216,6 +1216,10 @@ static int handle_data(const char *port_name, int baudrate, const char *out_addr
 		evutil_make_socket_nonblocking(serial_fd);
 		printf("Listening UART on %s...\n", port_name);
 	}
+
+	// In UDP mode there is no UART; do not apply raw termios settings to stdin.
+	if (serial_fd < 0)
+		goto uart_configured;
 
 	struct termios options;
 	tcgetattr(serial_fd, &options);
@@ -1253,6 +1257,8 @@ static int handle_data(const char *port_name, int baudrate, const char *out_addr
 		msp_set_vtx_config(serial_fd);
 	}
 
+uart_configured:
+
 	if (strlen(out_addr) > 1) {
 		out_sock = socket(AF_INET, SOCK_DGRAM, 0);
 
@@ -1280,7 +1286,7 @@ static int handle_data(const char *port_name, int baudrate, const char *out_addr
 	// Test inject a simple packet to test malvink communication Camera to Ground
 	signal(SIGUSR1, sendtestmsg);
 
-	if (serial_fd > 0 && !enable_simple_uart) { // if UART opened and we need to read it via events
+	if (serial_fd >= 0 && !enable_simple_uart) { // if UART opened and we need to read it via events
 		serial_bev = bufferevent_socket_new(base, serial_fd, 0);
 
 		// Trigger the read callback only whenever there is at least 16 bytes of data in the buffer.
@@ -1355,7 +1361,7 @@ static int handle_data(const char *port_name, int baudrate, const char *out_addr
 
 	// MSP_PollRate
 	if (ParseMSP && msp_tmr == NULL &&
-		serial_fd > 0) { // Only if we are on Cam, on ground no need to poll
+		serial_fd >= 0) { // Only if we are on Cam, on ground no need to poll
 		msp_tmr = event_new(base, -1, EV_PERSIST, poll_msp, &serial_fd);
 		// Set poll interval to 50 milliseconds if pollrate is 20
 		struct timeval interval = {
@@ -1390,13 +1396,15 @@ err:
 
 	if (sig_int)
 		event_free(sig_int);
+	if (sig_term)
+		event_free(sig_term);
+
+	CloseMSP();
 
 	if (base)
 		event_base_free(base);
 
 	libevent_global_shutdown();
-
-	CloseMSP();
 
 	return ret;
 }

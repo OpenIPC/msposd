@@ -619,9 +619,10 @@ void FlushDrawing() {
     if (x11_event == NULL && base != NULL) {
         // Attach X11 display's file descriptor to the existing msposd
         // event_base
-        struct event *x11_event =
+        x11_event =
             event_new(base, ConnectionNumber(display), EV_READ | EV_PERSIST, event_callback, NULL);
-        event_add(x11_event, NULL);
+        if (x11_event)
+            event_add(x11_event, NULL);
 
         grab_hotkey(XK_Up,   Mod1Mask);   // Alt + Up   (AHI tilt)
         grab_hotkey(XK_Down, Mod1Mask);   // Alt + Down (AHI tilt)
@@ -684,15 +685,54 @@ void FlushDrawing() {
 
 void Close() {
 	// Clean up resources
-	cairo_destroy(cr);
-	cairo_destroy(cr_back);
-	cairo_surface_destroy(image_surface);
-	cairo_surface_destroy(surface);
-	cairo_surface_destroy(surface_back);
+	if (image_surface) {
+		cairo_surface_destroy(image_surface);
+		image_surface = NULL;
+	}
+#if defined(_x86)
+	if (x11_event) {
+		event_del(x11_event);
+		event_free(x11_event);
+		x11_event = NULL;
+	}
+
+	if (!shm_image) {
+		if (cr) {
+			cairo_destroy(cr);
+			cr = NULL;
+		}
+		if (surface) {
+			cairo_surface_destroy(surface);
+			surface = NULL;
+		}
+	} else {
+		cr = NULL;
+		surface = NULL;
+	}
+#else
+	if (cr) {
+		cairo_destroy(cr);
+		cr = NULL;
+	}
+	if (surface) {
+		cairo_surface_destroy(surface);
+		surface = NULL;
+	}
+#endif
+	if (cr_back) {
+		cairo_destroy(cr_back);
+		cr_back = NULL;
+	}
+	if (surface_back) {
+		cairo_surface_destroy(surface_back);
+		surface_back = NULL;
+	}
+
 #if defined(_x86)
 	// Clean up XShm triple-buffer resources
 	if (shm_image) {
-		XShmDetach(display, &shm_seg);
+		if (display)
+			XShmDetach(display, &shm_seg);
 		XDestroyImage(shm_image);
 		shm_image = NULL;
 	}
@@ -723,12 +763,13 @@ void Close() {
 		shm_sysv_id = -1;
 	}
 	
-	XDestroyWindow(display, window);
-	XCloseDisplay(display);
-
-	// Cleanup
-	event_free(x11_event);
-	event_base_free(base);
+	if (display) {
+		if (window)
+			XDestroyWindow(display, window);
+		XCloseDisplay(display);
+		display = NULL;
+		window = 0;
+	}
 #endif
 }
 

@@ -14,6 +14,24 @@ typedef enum {
 	MSP_DISPLAYPORT_INFO_MSG // custom type added for sending status text
 } msp_displayport_cmd_e;
 
+// Values sent in the fourth byte of MSP_DISPLAYPORT_DRAW_SYSTEM by
+// Betaflight. The display device, rather than the flight controller, owns
+// the data presented by these elements.
+typedef enum {
+	MSP_DISPLAYPORT_SYS_GOGGLE_VOLTAGE,
+	MSP_DISPLAYPORT_SYS_VTX_VOLTAGE,
+	MSP_DISPLAYPORT_SYS_BITRATE,
+	MSP_DISPLAYPORT_SYS_DELAY,
+	MSP_DISPLAYPORT_SYS_DISTANCE,
+	MSP_DISPLAYPORT_SYS_LQ,
+	MSP_DISPLAYPORT_SYS_GOGGLE_DVR,
+	MSP_DISPLAYPORT_SYS_VTX_DVR,
+	MSP_DISPLAYPORT_SYS_WARNINGS,
+	MSP_DISPLAYPORT_SYS_VTX_TEMP,
+	MSP_DISPLAYPORT_SYS_FAN_SPEED,
+	MSP_DISPLAYPORT_SYS_COUNT,
+} msp_displayport_system_element_e;
+
 typedef enum {
 	MSP_SD_OPTION_30_16,
 	MSP_HD_OPTION_50_18,

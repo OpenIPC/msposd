@@ -466,6 +466,139 @@ static void format_agl_placeholder(char text[6], uint64_t now_ms)
 }
 #endif
 
+// Betaflight MSP DisplayPort system-element rendering.
+#define BETAFLIGHT_SYM_TEMPERATURE 0x7A
+#define MAX_SYSTEM_ELEMENT_TEXT 30
+
+typedef bool (*system_element_formatter_t)(char *buffer, size_t buffer_size);
+
+static int GetBoardTempForOSD() {
+#if __SIGMASTAR__
+	return GetTempSigmaStar();
+#elif defined(__GOKE__)
+	return GetTempGoke();
+#else
+	return last_board_temp;
+#endif
+}
+
+static bool GetVtxTemperature(int *temperature) {
+	int board_temp = GetBoardTempForOSD();
+	int tx_temp = GetTXTemp();
+
+	bool has_board_temp = board_temp > 0;
+	bool has_tx_temp = tx_temp > 0;
+	if (!has_board_temp && !has_tx_temp)
+		return false;
+
+	if (!has_board_temp)
+		board_temp = 0;
+	if (!has_tx_temp)
+		tx_temp = 0;
+
+	int max_temp = board_temp > tx_temp ? board_temp : tx_temp;
+	if (max_temp > 999)
+		max_temp = 999;
+	*temperature = max_temp;
+	return true;
+}
+
+static bool FormatVtxTemperature(char *buffer, size_t buffer_size) {
+	int temperature;
+	if (!GetVtxTemperature(&temperature))
+		return false;
+
+	snprintf(buffer, buffer_size, "%c% 3d", BETAFLIGHT_SYM_TEMPERATURE, temperature);
+	return true;
+}
+
+static bool GetVideoBitrateMbps(float *megabits) {
+#if __SIGMASTAR__
+	static const char *const command =
+#ifdef __INFINITY6C__
+		"cat /proc/mi_modules/mi_venc/mi_venc0 | grep Fps_1s -A 1 | awk 'NR==2 {print $7, $8}'";
+#else
+		"cat /proc/mi_modules/mi_venc/mi_venc0 | grep Fps10s -A 1 | awk 'NR==2 {print $9, $10}'";
+#endif
+	static uint64_t last_read_time;
+	static float cached_megabits;
+
+	if (cached_megabits > 0 && get_time_ms() - last_read_time < 1000) {
+		*megabits = cached_megabits;
+		return true;
+	}
+
+	FILE *stat = popen(command, "r");
+	if (stat == NULL)
+		return false;
+
+	unsigned int bitrate_kbps;
+	bool success = fscanf(stat, "%*f %u", &bitrate_kbps) == 1 && bitrate_kbps > 0;
+	pclose(stat);
+	if (!success)
+		return false;
+
+	cached_megabits = bitrate_kbps / 1000.0f;
+	last_read_time = get_time_ms();
+	*megabits = cached_megabits;
+	return true;
+#else
+	(void)megabits;
+	return false;
+#endif
+}
+
+static bool FormatBitrate(char *buffer, size_t buffer_size) {
+	float megabits;
+	if (!GetVideoBitrateMbps(&megabits))
+		return false;
+
+	snprintf(buffer, buffer_size, "%02.1fM", megabits);
+	return true;
+}
+
+static const system_element_formatter_t system_element_renderers[MSP_DISPLAYPORT_SYS_COUNT] = {
+	[MSP_DISPLAYPORT_SYS_BITRATE] = FormatBitrate,
+	[MSP_DISPLAYPORT_SYS_VTX_TEMP] = FormatVtxTemperature,
+};
+
+static bool FormatSystemElement(uint8_t element, char *buffer, size_t buffer_size) {
+	if (element >= MSP_DISPLAYPORT_SYS_COUNT)
+		return false;
+
+	system_element_formatter_t formatter = system_element_renderers[element];
+#if defined(_x86) || defined(__ROCKCHIP__)
+	(void)formatter;
+	(void)buffer;
+	(void)buffer_size;
+	return false;
+#else
+	return formatter && formatter(buffer, buffer_size);
+#endif
+}
+
+static bool InjectSystemElement(msp_msg_t *msp_message) {
+	if (msp_message->size < 4 || msp_message->payload[0] != MSP_DISPLAYPORT_DRAW_SYSTEM)
+		return false;
+
+	char text[MAX_SYSTEM_ELEMENT_TEXT + 1];
+	if (!FormatSystemElement(msp_message->payload[3], text, sizeof(text)))
+		return false;
+
+	size_t text_len = strlen(text);
+	if (text_len >= MAX_SYSTEM_ELEMENT_TEXT)
+		return false;
+
+	msp_message->payload[0] = MSP_DISPLAYPORT_DRAW_STRING;
+	msp_message->payload[3] = 0; // draw string attributes
+	memcpy(&msp_message->payload[4], text, text_len);
+	msp_message->payload[4 + text_len] = '\0';
+	msp_message->size = 4 + text_len;
+
+	return true;
+}
+
+
 /**
  * Replace supported placeholders in an MSP DisplayPort string.
  *
@@ -590,6 +723,9 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 		msp_message->cmd == MSP_CMD_DISPLAYPORT &&
 		msp_message->payload[0] == MSP_DISPLAYPORT_DRAW_STRING)
 		InjectChars(&msp_message->payload[0]);
+	if (msp_message->cmd == MSP_CMD_DISPLAYPORT && msp_message->direction == MSP_INBOUND &&
+		msp_message->payload[0] == MSP_DISPLAYPORT_DRAW_SYSTEM)
+		InjectSystemElement(msp_message);
 
 	// if (out_sock>0){//No need to cache MSP if we won't send it later
 	uint16_t size = msp_data_from_msg(message_buffer, msp_message);
