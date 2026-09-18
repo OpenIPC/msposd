@@ -18,9 +18,11 @@ Copy the pack to the ground station and it works offline.
 ## Quick start
 
 ```bash
-./fetch-leaflet.sh     # once, needs internet — vendors leaflet.js/css into web/
 ./run-map.sh           # opens preflight in your default browser
 ```
+
+Leaflet 1.9.4 is vendored in `web/` and committed, so no download step is needed.
+To upgrade it, run `./fetch-leaflet.sh` (needs internet) and commit the result.
 
 Scroll to your area, press **Download visible area**, and you have a pack. Add `--GTK`
 to use the built-in WebKit window instead of a browser.

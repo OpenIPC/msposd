@@ -17,6 +17,11 @@ import os
 
 GS = os.path.abspath(os.path.join(SPECPATH, os.pardir))   # the gs/ directory
 
+# Leaflet is committed under web/; fail early instead of shipping a viewer that 404s.
+for _f in ("leaflet.js", "leaflet.css"):
+    if not os.path.isfile(os.path.join(GS, "web", _f)):
+        raise SystemExit(f"missing {_f} in gs/web/ - run gs/fetch-leaflet.sh")
+
 a = Analysis(
     [os.path.join(GS, "mapserver.py")],
     pathex=[GS],                                   # so `import tiles_info` resolves

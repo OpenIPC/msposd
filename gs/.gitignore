@@ -2,6 +2,3 @@
 maps/
 __pycache__/
 state.ini
-web/images/
-web/leaflet.css
-web/leaflet.js

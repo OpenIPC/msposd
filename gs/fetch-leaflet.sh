@@ -1,5 +1,5 @@
 #!/bin/bash
-# Vendor Leaflet into web/ for fully-offline use. Run once while online.
+# Re-vendor Leaflet into web/ (files are committed; run only to upgrade the version).
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 VER="1.9.4"

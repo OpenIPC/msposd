@@ -392,6 +392,12 @@ STATIC_WHITELIST = {
     "leaflet.js": "application/javascript",
     "leaflet.css": "text/css",
     "icons/plane.svg": "image/svg+xml",
+    # Referenced by leaflet.css (marker + layer-control icons).
+    "images/marker-icon.png": "image/png",
+    "images/marker-icon-2x.png": "image/png",
+    "images/marker-shadow.png": "image/png",
+    "images/layers.png": "image/png",
+    "images/layers-2x.png": "image/png",
 }
 
 # ---------------------------------------------------------------------------
@@ -1971,11 +1977,12 @@ class Handler(BaseHTTPRequestHandler):
         """Run the request loop, swallowing client-abort socket errors.
 
         The browser cancels in-flight tile loads while panning/zooming; this
-        absorbs the resulting broken-pipe/reset instead of logging a traceback.
+        absorbs the resulting broken-pipe/reset (ConnectionAbortedError on
+        Windows, WinError 10053) instead of logging a traceback.
         """
         try:
             super().handle()
-        except (BrokenPipeError, ConnectionResetError):
+        except ConnectionError:
             pass
 
     def _send(self, code, body=b"", ctype="text/plain", extra=None):
@@ -2105,9 +2112,11 @@ class Handler(BaseHTTPRequestHandler):
             data = None
         # 2) live proxy when online (unless the user is testing offline coverage)
         if data is None and not offline and BROWSE_MIN <= z <= BROWSE_MAX and is_online():
+            src_name = source_for(z)
             try:
-                data = fetch_tile(source_for(z), z, x, y)
-            except Exception:
+                data = fetch_tile(src_name, z, x, y)
+            except Exception as e:
+                print(f"[mapserver] tile proxy {src_name} {z}/{x}/{y} failed: {e!r}")
                 data = None
         if data is None:
             return self._send(204)
@@ -2494,7 +2503,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.flush()
                     last_beat = now
                 time.sleep(0.2)
-        except (BrokenPipeError, ConnectionResetError):
+        except ConnectionError:
             pass
 
 
