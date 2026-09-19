@@ -26,9 +26,15 @@ the primary in-flight map is rendered natively by `msposd`.
 
 Output: `dist/msposd-preflight` (`.exe` on Windows) — one self-contained file.
 
-Requirements: Python 3.9+ and `pip` on the build machine. `pyinstaller` is
-installed automatically by the scripts. You must build **on each target OS**
-(a macOS app needs a Mac, etc.) — or use CI below.
+Requirements: Python 3.9+ and `pip` on the build machine (3.12+ for the Windows
+build, matching CI). `pyinstaller` is installed automatically by the scripts. You
+must build **on each target OS** (a macOS app needs a Mac, etc.) — or use CI below.
+
+The Windows build also installs and bundles `certifi`. `mapserver.py` uses its root
+bundle for HTTPS on Windows only, because the Windows certificate store on many client
+PCs holds an expired Let's Encrypt cross-certificate that makes Python reject
+OpenTopoMap with "certificate has expired". Linux and macOS builds keep the platform
+default trust store.
 
 PyInstaller is not a cross-compiler. `build.sh` run on Linux, including under WSL,
 uses the Linux bootloader and produces an ELF executable. That file cannot run on

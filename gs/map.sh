@@ -118,9 +118,11 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# config.ini is gitignored, so a fresh checkout has none: fall back to the
+# server's own default port (DEFAULTS in mapserver.py) instead of failing.
 PORT="$(python3 - "$HERE/config.ini" <<'PY'
 import sys, configparser
-c = configparser.ConfigParser(); c.read(sys.argv[1]); print(c["server"]["port"])
+c = configparser.ConfigParser(); c.read(sys.argv[1]); print(c.get("server", "port", fallback="8088"))
 PY
 )"
 # Per-launch cache-buster: forces a fresh viewer fetch when we really launch a new
