@@ -1,17 +1,17 @@
 # Offline Moving Map — Ground Station
 
-Prepare a map of your flying area on any PC, then fly with it drawn on the OSD — no
-internet at the field.
+Prepare a map of your flying area on any PC in advance, then fly with it drawn on the
+OSD. No internet connection is needed at the field.
 
-The work splits in two:
+The workflow has two parts:
 
-- **Preflight** (this folder): a local web app where you browse the world, download the
-  area you want, choose how it looks, and mark waypoints. Everything lands in a **map
-  pack** — a tile file plus a points database.
-- **In flight**: `msposd` draws that pack directly into the OSD as a moving map, with
-  your aircraft, home and waypoints on it. No browser involved.
+- **Preflight** (this folder): a local web app for browsing the world map, downloading
+  the area you need, choosing its appearance and placing waypoints. The result is a
+  **map pack**: a tile file plus a small database of points.
+- **In flight**: `msposd` renders that pack straight into the OSD as a moving map,
+  showing your aircraft, home position and waypoints. No browser is involved.
 
-Copy the pack to the ground station and it works offline.
+Copy the pack to the ground station once, and it keeps working fully offline.
 
 ---
 

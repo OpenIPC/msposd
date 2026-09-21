@@ -777,7 +777,7 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 		last_heading = *(int16_t *)&msp_message->payload[4];
 		stat_msp_msg_attitude++;
 		if (last_MSP_ATTITUDE>0)
-			stat_attitudeDelay = get_time_ms() - last_MSP_ATTITUDE;		
+			stat_attitudeDelay += get_time_ms() - last_MSP_ATTITUDE;		
 
 		if (strncmp(current_fc_identifier, "ARDU", 4) == 0)
 			if (abs(last_roll) < 900) // ARDU Pilot needs this fix to revert vertical AHI Direction
@@ -788,7 +788,7 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 			//If AHI is enabled, wee need to flush faster to make it responsive. 	
 			// Immediately send AHI message if we draw custom Artificial horizon 
 			if ((AHI_Enabled>0)  // we favour low-latency over efficiency 
-				&& (get_time_ms() - LastPcktSent) > (MinTimeBetweenScreenRefresh/5)) {
+				/* && (get_time_ms() - LastPcktSent) > (MinTimeBetweenScreenRefresh/5)*/) {
 				trace_fragment(false);
 				stat_UDP_MSPframes++;
 				sendto(out_sock, frame_buffer, fb_cursor, 0, (struct sockaddr *)&sin_out,
@@ -887,7 +887,7 @@ static void rx_msp_callback(msp_msg_t *msp_message) {
 				// Try to aggregate several MSP packets into one UDP packets, but only if we favour efficiency over low-latency
 				//If AHI is enabled, wee need to flush faster to make it responsive. 
 				if ((!DrawOSD) &&  
-					(get_time_ms() - LastPcktSent) < MinTimeBetweenScreenRefresh * ((AHI_Enabled>0)?1:2) ) {// 
+					(get_time_ms() - LastPcktSent) < MinTimeBetweenScreenRefresh * 2 /*((AHI_Enabled>0)?1:2)*/) {// 
 				} // Do not send the frame but keep it in the buffer
 				else {
 					//trace_fragment();
@@ -2385,6 +2385,12 @@ static bool ReplaceWidgets_Slow(int *x, int *y) {
 }
 
 
+/**
+ * Renders the OSD frame: text glyphs, AHI, map and overlays, then pushes it to the display.
+ * Rate limited by MinTimeBetweenScreenRefresh, except for attitude-driven redraws on GS builds.
+ * @param OnlyAHI true when called for a fresh attitude sample; draws the last completed
+ *        character map and, on GS builds, bypasses the refresh throttle for minimum latency.
+ */
 static void draw_screenBMP2(bool OnlyAHI) {
 	uint64_t step2 = 0;
 	if (cntr++ < 0) // skip in the beginning to show to font preview
@@ -2394,7 +2400,12 @@ static void draw_screenBMP2(bool OnlyAHI) {
 													   // so often, lets keep low CPU load
 		return;
 
-	if ((get_time_ms() - LastDrawn) <
+#if defined(_x86) || defined(__ROCKCHIP__)
+	bool throttle = !OnlyAHI; // GS: every attitude sample is drawn as soon as it arrives
+#else
+	bool throttle = true; // Air unit: keep the CPU load limit for all redraws
+#endif
+	if (throttle && (get_time_ms() - LastDrawn) <
 		MinTimeBetweenScreenRefresh) { // Set some delay to keep CPU load low
 		stat_skipped_frames++;
 		return;
