@@ -52,6 +52,7 @@ extern "C" {
 
 #elif defined(__HI3516CV6XX__)
 #include "ss_mpi_region.h"
+#include "ss_mpi_venc.h"
 
 #define PIXEL_FORMAT_4444 OT_PIXEL_FORMAT_ARGB_4444
 #define PIXEL_FORMAT_1555 OT_PIXEL_FORMAT_ARGB_1555

@@ -50,13 +50,35 @@ int InitRGN_SigmaStar(){
 }
 
 #ifdef __HI3516CV6XX__
-static const ot_mpp_chn rgn_chn_ot = {.mod_id = OT_ID_VENC, .dev_id = 0, .chn_id = 0};
+static ot_mpp_chn rgn_chn_ot = {.mod_id = OT_ID_VENC, .dev_id = 0, .chn_id = 0};
+
+// The encoder's VENC channel isn't fixed (waybeam uses 1 with the os02k10
+// plugin), and attaching to an unused channel succeeds silently. Use
+// MSPOSD_VENC_CHN if set, else the first H.264/H.265 channel, else 0.
+static int find_venc_chn_ot(void) {
+	const char *env = getenv("MSPOSD_VENC_CHN");
+	if (env && *env)
+		return atoi(env);
+
+	ot_venc_chn_attr attr;
+	for (int chn = 0; chn < OT_VENC_MAX_CHN_NUM; chn++) {
+		if (ss_mpi_venc_get_chn_attr(chn, &attr) != TD_SUCCESS)
+			continue;
+		if (attr.venc_attr.type == OT_PT_H264 || attr.venc_attr.type == OT_PT_H265)
+			return chn;
+	}
+	fprintf(stderr, "[%s:%d] No H.264/H.265 VENC channel found, using 0\n", __func__, __LINE__);
+	return 0;
+}
 
 // Same flow as the HI_MPI version below, on the V5 (ot_/ss_mpi_) region API.
 static int create_region_ot(ot_rgn_handle handle, int x, int y, int width, int height) {
 	ot_rgn_attr stRegion, stRegionCurrent;
 	ot_rgn_chn_attr stChnAttr, stChnAttrCurrent;
 	td_s32 s32Ret;
+
+	rgn_chn_ot.chn_id = find_venc_chn_ot();
+	printf("Attaching OSD region %d to VENC channel %d\n", handle, rgn_chn_ot.chn_id);
 
 	// Region position must be 2-pixel aligned
 	x &= ~1;
