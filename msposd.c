@@ -483,9 +483,38 @@ int GetTempSigmaStar() {
 	return last_board_temp;
 }
 
+#ifdef __HI3516CV6XX__
+// CV610 T-sensor, read the way the vendor's ar_ldyhs_sky does
+// (fpv_sys_get_cpu_temp_x100): 10-bit code at 0x1102A008.
+#define CV6XX_TSENSOR_BASE 0x1102A000
+#define CV6XX_TSENSOR_DATA 0x8
+
+static int GetTempCv6xx() {
+	static volatile uint32_t *tsensor = NULL;
+
+	if (!tsensor) {
+		int mem_fd = open("/dev/mem", O_RDWR | O_SYNC);
+		if (mem_fd < 0)
+			return -100;
+		void *map = mmap(NULL, 0x1000, PROT_READ, MAP_SHARED, mem_fd, CV6XX_TSENSOR_BASE);
+		close(mem_fd);
+		if (map == MAP_FAILED)
+			return -100;
+		tsensor = map;
+	}
+
+	int code = tsensor[CV6XX_TSENSOR_DATA / 4] & 0x3ff;
+	last_board_temp = (int)((code - 127) * 165.0 / 784.0 - 40.0);
+	return last_board_temp;
+}
+#endif
+
 static char GokeTempFile[28] = "/tmp/board_temperature.msg";
 /** To make this work you need temp exported via the temp_reader tool for Goke */
 int GetTempGoke() {
+#ifdef __HI3516CV6XX__
+	return GetTempCv6xx();
+#endif
 	char buffer[6];
 	int temp = 0;
 	FILE *file = fopen(GokeTempFile, "r");
