@@ -86,8 +86,20 @@ static int create_region_ot(ot_rgn_handle handle, int x, int y, int width, int h
 
 	memset(&stRegion, 0, sizeof(stRegion));
 	stRegion.type = OT_RGN_OVERLAY;
-	stRegion.attr.overlay.pixel_format = OT_PIXEL_FORMAT_ARGB_1555;
-	stRegion.attr.overlay.bg_color = 0x7fff;
+	if (PIXEL_FORMAT_DEFAULT == PIXEL_FORMAT_I4) {
+		// CLUT entries are ARGB8888; msposd's palette is the one the I4
+		// renderer already draws with (index 15 = transparent).
+		stRegion.attr.overlay.pixel_format = OT_PIXEL_FORMAT_ARGB_CLUT4;
+		stRegion.attr.overlay.bg_color = 15;
+		for (int i = 0; i < OT_RGN_CLUT_NUM; i++) {
+			MI_RGN_PaletteElement_t *e = &g_stPaletteTable.astElement[i];
+			stRegion.attr.overlay.clut[i] =
+				(e->u8Alpha << 24) | (e->u8Red << 16) | (e->u8Green << 8) | e->u8Blue;
+		}
+	} else {
+		stRegion.attr.overlay.pixel_format = OT_PIXEL_FORMAT_ARGB_1555;
+		stRegion.attr.overlay.bg_color = 0x7fff;
+	}
 	stRegion.attr.overlay.size.width = width;
 	stRegion.attr.overlay.size.height = height;
 	stRegion.attr.overlay.canvas_num = 2;
@@ -103,7 +115,8 @@ static int create_region_ot(ot_rgn_handle handle, int x, int y, int width, int h
 			return -1;
 		}
 	} else if (stRegionCurrent.attr.overlay.size.height != height ||
-			   stRegionCurrent.attr.overlay.size.width != width) {
+			   stRegionCurrent.attr.overlay.size.width != width ||
+			   stRegionCurrent.attr.overlay.pixel_format != stRegion.attr.overlay.pixel_format) {
 		fprintf(stderr, "[%s:%d] Region parameters are different, recreating ... \n", __func__,
 			__LINE__);
 		ss_mpi_rgn_detach_from_chn(handle, &rgn_chn_ot);
@@ -467,7 +480,34 @@ int set_bitmap(int handle, BITMAP *bitmap) {
 #ifdef __SIGMASTAR__
 	s32Ret = MI_RGN_SetBitMap(DEV handle, (MI_RGN_Bitmap_t *)(bitmap));
 #elif defined(__HI3516CV6XX__)
-	s32Ret = ss_mpi_rgn_set_bmp(handle, (const ot_bmp *)(bitmap));
+	// Every push swaps the region's canvas under the running encoder; skip
+	// it when the frame is unchanged (e.g. a static OSD with no FC).
+	static void *last_data = NULL;
+	static size_t last_size = 0;
+	size_t size = bitmap->u32Height *
+				  getRowStride(bitmap->u32Width, bitmap->enPixelFormat == PIXEL_FORMAT_I4 ? 4 : 16);
+	if (last_data && last_size == size && !memcmp(last_data, bitmap->pData, size))
+		return 0;
+
+	ot_bmp bmp = {
+		.pixel_format = bitmap->enPixelFormat == PIXEL_FORMAT_I4 ? OT_PIXEL_FORMAT_ARGB_CLUT4
+																 : bitmap->enPixelFormat,
+		.width = bitmap->u32Width,
+		.height = bitmap->u32Height,
+		.data = bitmap->pData,
+	};
+	s32Ret = ss_mpi_rgn_set_bmp(handle, &bmp);
+
+	// Only remember frames that actually reached the region
+	if (!s32Ret) {
+		if (last_size != size) {
+			free(last_data);
+			last_data = malloc(size);
+			last_size = last_data ? size : 0;
+		}
+		if (last_data)
+			memcpy(last_data, bitmap->pData, size);
+	}
 #elif __GOKE__
 	s32Ret = HI_MPI_RGN_SetBitMap(handle, (BITMAP_S *)(bitmap));
 #endif

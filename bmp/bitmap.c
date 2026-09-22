@@ -1130,8 +1130,8 @@ void convertBitmap1555ToI4(uint16_t *srcBitmap, uint32_t width, uint32_t height,
 
 				// No Fucking idea why this is different for x86 and Sigmastar, BUT
 				// !!! SigmaStar I4 format needs it reversit 4bit pairs.   0x0A,
-				// 0x0B needs to be 0XBA
-#ifdef __SIGMASTAR__
+				// 0x0B needs to be 0XBA. Same on the CV6xx's CLUT4.
+#if defined(__SIGMASTAR__) || defined(__HI3516CV6XX__)
 			if (u32X % 2) { // this is the secret of distorted image !!!
 #else
 			if (u32X % 2 == 0) {
@@ -1155,7 +1155,7 @@ void setPixelI4(
 	uint32_t byteIndex = y * rowStride + (x / 2);
 
 	// Determine if it's the high nibble or low nibble
-#ifdef __SIGMASTAR__
+#if defined(__SIGMASTAR__) || defined(__HI3516CV6XX__)
 	if (x % 2 == 1) {
 #else
 	if (x % 2 == 0) {

@@ -2763,6 +2763,12 @@ static void InitMSPHook() {
 #endif	
 
 #endif
+#ifdef __HI3516CV6XX__
+	// CLUT4: VENC reads the whole overlay for every encoded frame, and a
+	// full-screen ARGB1555 one (~4 MB at 1080p) visibly glitches the video.
+	PIXEL_FORMAT_DEFAULT = PIXEL_FORMAT_I4; // I4 format, 4 bits per pixel
+	PIXEL_FORMAT_BitsPerPixel = 4;
+#endif
 #if defined(_x86) || defined(__ROCKCHIP__)
 	// Enable this to simulate I4 Bitmap Processing of SigmaStar ON THE DESKOP !
 	if (false){
