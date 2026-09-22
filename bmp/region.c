@@ -49,9 +49,87 @@ int InitRGN_SigmaStar(){
 #endif	
 }
 
+#ifdef __HI3516CV6XX__
+static const ot_mpp_chn rgn_chn_ot = {.mod_id = OT_ID_VENC, .dev_id = 0, .chn_id = 0};
+
+// Same flow as the HI_MPI version below, on the V5 (ot_/ss_mpi_) region API.
+static int create_region_ot(ot_rgn_handle handle, int x, int y, int width, int height) {
+	ot_rgn_attr stRegion, stRegionCurrent;
+	ot_rgn_chn_attr stChnAttr, stChnAttrCurrent;
+	td_s32 s32Ret;
+
+	// Region position must be 2-pixel aligned
+	x &= ~1;
+	y &= ~1;
+
+	memset(&stRegion, 0, sizeof(stRegion));
+	stRegion.type = OT_RGN_OVERLAY;
+	stRegion.attr.overlay.pixel_format = OT_PIXEL_FORMAT_ARGB_1555;
+	stRegion.attr.overlay.bg_color = 0x7fff;
+	stRegion.attr.overlay.size.width = width;
+	stRegion.attr.overlay.size.height = height;
+	stRegion.attr.overlay.canvas_num = 2;
+
+	s32Ret = ss_mpi_rgn_get_attr(handle, &stRegionCurrent);
+	if (s32Ret) {
+		if (verbose)
+			fprintf(stderr, "[%s:%d]RGN_GetAttr failed with %#x , creating region %d...\n",
+				__func__, __LINE__, s32Ret, handle);
+		s32Ret = ss_mpi_rgn_create(handle, &stRegion);
+		if (s32Ret) {
+			fprintf(stderr, "[%s:%d]RGN_Create failed with %#x!\n", __func__, __LINE__, s32Ret);
+			return -1;
+		}
+	} else if (stRegionCurrent.attr.overlay.size.height != height ||
+			   stRegionCurrent.attr.overlay.size.width != width) {
+		fprintf(stderr, "[%s:%d] Region parameters are different, recreating ... \n", __func__,
+			__LINE__);
+		ss_mpi_rgn_detach_from_chn(handle, &rgn_chn_ot);
+		ss_mpi_rgn_destroy(handle);
+		s32Ret = ss_mpi_rgn_create(handle, &stRegion);
+		if (s32Ret) {
+			fprintf(stderr, "[%s:%d]RGN_Create failed with %#x!\n", __func__, __LINE__, s32Ret);
+			return -1;
+		}
+	}
+
+	s32Ret = ss_mpi_rgn_get_chn_display_attr(handle, &rgn_chn_ot, &stChnAttrCurrent);
+	if (s32Ret) {
+		if (verbose)
+			fprintf(stderr, "[%s:%d]RGN_GetDisplayAttr failed with %#x %d, attaching...\n",
+				__func__, __LINE__, s32Ret, handle);
+	} else if (stChnAttrCurrent.attr.overlay_chn.point.x != x ||
+			   stChnAttrCurrent.attr.overlay_chn.point.y != y) {
+		if (verbose)
+			fprintf(stderr, "[%s:%d] Position has changed, detaching handle %d...\n", __func__,
+				__LINE__, handle);
+		ss_mpi_rgn_detach_from_chn(handle, &rgn_chn_ot);
+	}
+
+	memset(&stChnAttr, 0, sizeof(stChnAttr));
+	stChnAttr.is_show = TD_TRUE;
+	stChnAttr.type = OT_RGN_OVERLAY;
+	stChnAttr.attr.overlay_chn.point.x = x;
+	stChnAttr.attr.overlay_chn.point.y = y;
+	stChnAttr.attr.overlay_chn.fg_alpha = OT_RGN_OVERLAY_VENC_MAX_ALPHA;
+	stChnAttr.attr.overlay_chn.bg_alpha = 0;
+	// Layer 0 is taken by waybeam's debug OSD
+	stChnAttr.attr.overlay_chn.layer = 1;
+	stChnAttr.attr.overlay_chn.qp_info.enable = TD_FALSE;
+	stChnAttr.attr.overlay_chn.dst = OT_RGN_ATTACH_JPEG_MAIN;
+
+	s32Ret = ss_mpi_rgn_attach_to_chn(handle, &rgn_chn_ot, &stChnAttr);
+	if (s32Ret && verbose)
+		fprintf(stderr, "[%s:%d]RGN_AttachToChn returned %#x\n", __func__, __LINE__, s32Ret);
+	return 0;
+}
+#endif
+
 int create_region(int *handle, int x, int y, int width, int height) {
 	int s32Ret = -1;
-#if !defined(_x86) && !defined(__ROCKCHIP__)
+#ifdef __HI3516CV6XX__
+	s32Ret = create_region_ot(*handle, x, y, width, height);
+#elif !defined(_x86) && !defined(__ROCKCHIP__)
 #ifdef __SIGMASTAR__
 	MI_RGN_ChnPort_t stChn;
 
@@ -366,6 +444,8 @@ int set_bitmap(int handle, BITMAP *bitmap) {
 #if !defined(_x86) && !defined(__ROCKCHIP__)
 #ifdef __SIGMASTAR__
 	s32Ret = MI_RGN_SetBitMap(DEV handle, (MI_RGN_Bitmap_t *)(bitmap));
+#elif defined(__HI3516CV6XX__)
+	s32Ret = ss_mpi_rgn_set_bmp(handle, (const ot_bmp *)(bitmap));
 #elif __GOKE__
 	s32Ret = HI_MPI_RGN_SetBitMap(handle, (BITMAP_S *)(bitmap));
 #endif
@@ -451,6 +531,12 @@ int unload_region(int *handle) {
 
 	MI_RGN_DetachFromChn(DEV *handle, &stChn);
 	s32Ret = MI_RGN_Destroy(DEV *handle);
+	if (s32Ret)
+		fprintf(stderr, "[%s:%d]RGN_Destroy failed with %#x %d!\n", __func__, __LINE__, s32Ret,
+			*handle);
+#elif defined(__HI3516CV6XX__)
+	ss_mpi_rgn_detach_from_chn(*handle, &rgn_chn_ot);
+	s32Ret = ss_mpi_rgn_destroy(*handle);
 	if (s32Ret)
 		fprintf(stderr, "[%s:%d]RGN_Destroy failed with %#x %d!\n", __func__, __LINE__, s32Ret,
 			*handle);

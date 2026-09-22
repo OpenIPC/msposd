@@ -50,6 +50,15 @@ extern "C" {
 #define PIXEL_FORMAT_8888 PIX_FMT_ARGB
 #define PIXEL_FORMAT_I4 E_MI_RGN_PIXEL_FORMAT_I4
 
+#elif defined(__HI3516CV6XX__)
+#include "ss_mpi_region.h"
+
+#define PIXEL_FORMAT_4444 OT_PIXEL_FORMAT_ARGB_4444
+#define PIXEL_FORMAT_1555 OT_PIXEL_FORMAT_ARGB_1555
+#define PIXEL_FORMAT_2BPP OT_PIXEL_FORMAT_ARGB_2BPP
+#define PIXEL_FORMAT_8888 OT_PIXEL_FORMAT_ARGB_8888
+#define PIXEL_FORMAT_I4 3 // Not supported, ARGB1555 is used
+
 #elif __HI3536__
 #include "hi_common.h"
 #include "hi_math.h"

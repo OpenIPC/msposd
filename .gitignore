@@ -5,11 +5,14 @@ toolchain/
 majestic.yaml
 /msposd
 firmware/
+openhisilicon/
 release/
 aarch64/
 disk.raw
 msposd_goke
 msposd_hisi
+msposd_hi3536
+msposd_hi3516cv6xx
 msposd_star6b0
 msposd_star6e
 msposd_star6c
