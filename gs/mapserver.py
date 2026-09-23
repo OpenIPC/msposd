@@ -34,6 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, urljoin
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+APP_VERSION = "1.0"  # mspmaptool release version; bump with each published release
 
 # Standalone (PyInstaller) awareness. When frozen into a single binary, bundled
 # read-only assets (web/) are unpacked to sys._MEIPASS, while writable data
@@ -2564,6 +2565,7 @@ def main():
     import webbrowser
 
     ap = argparse.ArgumentParser(description="Offline preflight map server")
+    ap.add_argument("--version", action="version", version=f"mspmaptool {APP_VERSION}")
     ap.add_argument("--port", type=int, default=int(config["server"]["port"]),
                     help="HTTP port (default from config.ini)")
     ap.add_argument("--open-browser", dest="open_browser", action="store_true",
@@ -2640,7 +2642,7 @@ def main():
     # call httpd.shutdown() from a side thread so serve_forever() exits cleanly.
     signal.signal(signal.SIGTERM,
                   lambda *_: threading.Thread(target=httpd.shutdown, daemon=True).start())
-    print(f"[mapserver] http://127.0.0.1:{port}  (web_root={WEB_ROOT})")
+    print(f"[mapserver] mspmaptool {APP_VERSION}  http://127.0.0.1:{port}  (web_root={WEB_ROOT})")
     print(f"[mapserver] per-basemap tile caches in {MAPS_DIR}")
 
     if args.open_browser:

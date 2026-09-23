@@ -5,6 +5,7 @@ on:
       - main
     tags:
       - '*'
+      - '!mspmaptool*'   # map tool releases are published by hand, not firmware
   pull_request:
     branches:
       - main
