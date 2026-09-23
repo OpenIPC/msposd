@@ -3031,6 +3031,10 @@ static void CloseMSP() {
 		if (deinit)
 			printf("[%s:%d]RGN_DeInit failed with %#x!\n", __func__, __LINE__, s32Ret);
 	}
+#elif defined(__HI3516CV6XX__)
+	// Otherwise the last canvas stays on the video until the encoder restarts
+	if (DrawOSD)
+		s32Ret = unload_region(&osds[FULL_OVERLAY_ID].hand);
 #endif
 #if defined(_x86) || defined(__ROCKCHIP__)
 	Close();

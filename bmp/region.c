@@ -96,6 +96,10 @@ static int create_region_ot(ot_rgn_handle handle, int x, int y, int width, int h
 			stRegion.attr.overlay.clut[i] =
 				(e->u8Alpha << 24) | (e->u8Red << 16) | (e->u8Green << 8) | e->u8Blue;
 		}
+		// Index 0 is never drawn (the palette search starts at 1), but a fresh
+		// canvas and every zero-filled buffer is all index 0 -- opaque black
+		// in msposd's palette, which blanked the whole video.
+		stRegion.attr.overlay.clut[0] = 0;
 	} else {
 		stRegion.attr.overlay.pixel_format = OT_PIXEL_FORMAT_ARGB_1555;
 		stRegion.attr.overlay.bg_color = 0x7fff;
