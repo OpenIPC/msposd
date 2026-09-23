@@ -24,6 +24,16 @@
   .zoombadge { background: rgba(0,0,0,0.65); color: #fff; border: 1px solid #555;
     border-radius: 4px; font: bold 12px/1 sans-serif; padding: 5px 0; width: 30px;
     text-align: center; box-shadow: none; }
+  /* "Locate me" — fresh-install only. Pinned to the top centre of the window
+     (outside the Leaflet control bars, whose fixed button width would clip it). */
+  .locatebtn { position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    z-index: 1200; }
+  .locatebtn button { cursor: pointer; white-space: nowrap; color: #fff;
+    font: bold 15px/1 sans-serif; padding: 10px 20px; border-radius: 6px;
+    border: 2px solid rgba(255,255,255,0.9); background: #2f6fb0;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.55); }
+  .locatebtn button:hover { background: #3f86cf; }
+  .locatebtn.busy button { background: #555; cursor: default; }
   /* terrain height under the pointer (preflight, only when a DEM is stored) */
   .elevbox { background: rgba(0,0,0,0.65); color: #fff; border: 1px solid #555;
     border-radius: 4px; font: 12px/1.35 sans-serif; padding: 4px 8px;
@@ -178,6 +188,7 @@
   .packdelete { flex: 0 0 auto; border: 0; background: transparent; color: #ff9a9a;
     cursor: pointer; font: bold 12px/1 sans-serif; padding: 2px 3px; }
   .packdelete:hover { color: #fff; background: rgba(255,77,79,0.45); border-radius: 3px; }
+  .packdelete:disabled { color: #777; cursor: default; background: transparent; }
   .packline { margin-left: 18px; color: #bbb; font-size: 10px; line-height: 1.3; }
   .packempty { color: #bbb; font-size: 11px; padding: 4px 1px; }
   /* advanced download options — same disclosure idiom as the POI panel */
@@ -320,12 +331,18 @@ let lastHere = null;
 let lastCourse = 0;
 let lastFitCenterPx = null;
 
+// Fallback view used until /state supplies a saved center (fresh install, no
+// downloads yet): the geographic centre of Bulgaria (Uzana, Gabrovo), zoomed out
+// far enough to show the whole country.
+const DEFAULT_CENTER = [42.74, 25.42];
+const DEFAULT_ZOOM = 7;
+
 const map = L.map("map", {
   zoomControl: PREFLIGHT, attributionControl: false,
   dragging: PREFLIGHT, scrollWheelZoom: PREFLIGHT,
   doubleClickZoom: PREFLIGHT, boxZoom: PREFLIGHT, keyboard: PREFLIGHT,
   minZoom: 2, maxZoom: 18,
-}).setView([42.2, 27.8], 13);
+}).setView(DEFAULT_CENTER, DEFAULT_ZOOM);
 
 // Distance ruler / scale bar (metric). In center mode #map rotates and is offset,
 // so the scale would tilt and slide off-screen — move its element to the body so it
@@ -357,6 +374,58 @@ if (PREFLIGHT) {
   };
   elevCtl.addTo(map);
 }
+// "Locate me": offered only on a fresh install, while the map still sits on the
+// built-in default centre because no downloaded area was there to restore. Nothing
+// is queried until the user clicks — the browser then asks for permission itself.
+const LOCATE_ZOOM = 11;
+let locateBtnEl = null;
+if (PREFLIGHT) {
+  locateBtnEl = document.createElement("div");
+  locateBtnEl.className = "locatebtn";
+  locateBtnEl.style.display = "none";
+  locateBtnEl.innerHTML =
+    '<button type="button" title="Centre the map on your current location">' +
+    '\u{1F4CD} Locate me</button>';
+  locateBtnEl.firstChild.addEventListener("click", locateMe);
+  document.body.appendChild(locateBtnEl);
+}
+/** Set the Locate button's label and busy styling. No-op when the button is absent. */
+function locateLabel(text, busy) {
+  if (!locateBtnEl) return;
+  locateBtnEl.className = "locatebtn" + (busy ? " busy" : "");
+  locateBtnEl.firstChild.textContent = text;
+}
+/** True while the map still shows the built-in default view (nothing was restored).
+ *  Leaflet round-trips the centre through pixel coordinates, so compare loosely. */
+function atDefaultView() {
+  const c = map.getCenter();
+  return Math.abs(c.lat - DEFAULT_CENTER[0]) < 0.01 &&
+         Math.abs(c.lng - DEFAULT_CENTER[1]) < 0.01;
+}
+/** Show the Locate button if the map is still on the default centre. */
+function offerLocate() {
+  if (locateBtnEl && atDefaultView()) locateBtnEl.style.display = "";
+}
+/** Hide the Locate button; called once the map centre is no longer the default. */
+function hideLocate() {
+  if (locateBtnEl) locateBtnEl.style.display = "none";
+}
+/** Ask the browser for the user's position and centre the map on it. */
+function locateMe() {
+  if (!navigator.geolocation) { locateLabel("\u{1F4CD} unavailable", true); return; }
+  locateLabel("\u{1F4CD} locating\u2026", true);
+  navigator.geolocation.getCurrentPosition(function (pos) {
+    map.setView([pos.coords.latitude, pos.coords.longitude], LOCATE_ZOOM,
+                { animate: false });
+    hideLocate();
+  }, function () {
+    locateLabel("\u{1F4CD} no location", true);
+    setTimeout(function () { locateLabel("\u{1F4CD} Locate me", false); }, 3000);
+  }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 600000 });
+}
+// Once the map is anywhere but the default centre the offer is stale — drop it.
+if (PREFLIGHT) map.on("moveend", function () { if (!atDefaultView()) hideLocate(); });
+
 // mousemove fires far faster than a DB lookup is worth, so the pointer position is
 // only sampled here; ELEV_MS below does the fetching.
 const ELEV_MS = 150;
@@ -1079,6 +1148,7 @@ if (PREFLIGHT) {
 }
 function pollDownload() {
   fetch("download").then(r => r.json()).then(s => {
+    setDownloadingPack(s.state === "running" ? (s.pack || "") : "");
     if (s.state === "running") {
       setDownloadProgress(s.done || 0, s.total || 0, s.phase);
       setTimeout(pollDownload, 500);
@@ -1221,6 +1291,16 @@ const packCaret = PREFLIGHT ? document.getElementById("packcaret") : null;
 const packBody = PREFLIGHT ? document.getElementById("packbody") : null;
 const packList = PREFLIGHT ? document.getElementById("packlist") : null;
 const packSummary = PREFLIGHT ? document.getElementById("packsummary") : null;
+// Pack currently being written by a download: the server refuses to delete it,
+// so its delete button is disabled rather than failing on click.
+let DL_PACK = "";
+/** Record which pack a download is writing and redraw the list when it changes.
+ * @param {string} id Pack id being downloaded, or "" when nothing is running. */
+function setDownloadingPack(id) {
+  if (id === DL_PACK) return;
+  DL_PACK = id;
+  renderDownloadedPacks();
+}
 
 /** Select a downloaded pack for coverage and offline viewing.
  * @param {string} id Safe pack id returned by the server.
@@ -1261,7 +1341,11 @@ function deleteDownloadedPack(pack) {
       dlStatus.textContent = `deleted ${filename}`;
       refreshDownloadedPacks();
     })
-    .catch(error => { dlStatus.textContent = error.message; });
+    .catch(error => {
+      // A running download rewrites dlStatus twice a second, so a refusal there
+      // would vanish before it could be read — say it in a dialog instead.
+      window.alert(`Could not delete ${filename}:\n\n${error.message}`);
+    });
 }
 
 /** Render every downloaded pack and its stored metadata into the selector. */
@@ -1301,7 +1385,11 @@ function renderDownloadedPacks() {
     if (pack.compatible) name.onclick = () => selectDownloadedPack(pack.id, true);
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button"; deleteBtn.className = "packdelete";
-    deleteBtn.title = `Delete ${pack.name}.mbtiles`; deleteBtn.textContent = "×";
+    deleteBtn.textContent = "×";
+    deleteBtn.disabled = pack.id === DL_PACK;
+    deleteBtn.title = deleteBtn.disabled
+      ? `${pack.name} is still downloading — wait for it to finish`
+      : `Delete ${pack.name}.mbtiles`;
     deleteBtn.onclick = () => deleteDownloadedPack(pack);
     title.append(radio, name, deleteBtn); item.appendChild(title);
 
@@ -1635,6 +1723,10 @@ function refreshStatus() {
     if (s.detail_max) DETAIL_MAX = s.detail_max;
     if (s.detail_zoom) DETAIL_ZOOM = s.detail_zoom;
     if (detailSel && detailSel.value !== String(DETAIL_ZOOM)) buildDetailOptions();
+    // Catches a download started elsewhere (or still running after a reload),
+    // which pollDownload does not track in this tab.
+    if (PREFLIGHT) setDownloadingPack(
+      (s.download && s.download.state === "running" && s.download.pack) || "");
     if (PREFLIGHT && s.zoom) FIXED_ZOOM = s.zoom;
     if (!PREFLIGHT) FIXED_ZOOM = HIGHEST_ZOOM;
     updateZoomBtns();
@@ -1687,6 +1779,8 @@ function refreshStatus() {
         else map.setZoom(FIXED_ZOOM, { animate: false });
       } else if (s.center) {
         map.setView([s.center[0], s.center[1]], FIXED_ZOOM, { animate: false });
+      } else {
+        offerLocate();   // fresh install: still on the built-in default centre
       }
       refreshCacheSummary();
       refreshDownloadedPacks();

@@ -24,7 +24,7 @@ the primary in-flight map is rendered natively by `msposd`.
 - **Linux / macOS:** `./gs/pack/build.sh`
 - **Windows:** `gs\pack\build.bat`
 
-Output: `dist/msposd-preflight` (`.exe` on Windows) — one self-contained file.
+Output: `gs/dist/mspmaptool_linux`, `gs/dist/mspmaptool_macos` or `gs/dist/mspmaptool_windows.exe` — one self-contained file.
 
 Requirements: Python 3.9+ and `pip` on the build machine (3.12+ for the Windows
 build, matching CI). `pyinstaller` is installed automatically by the scripts. You
@@ -44,7 +44,7 @@ Windows and adding an `.exe` suffix does not change its format. For Windows, run
 You can confirm a local result before distributing it:
 
 ```bash
-file dist/msposd-preflight
+file gs/dist/mspmaptool_linux
 # ... ELF 64-bit ...       (Linux build)
 ```
 
@@ -55,9 +55,9 @@ matrix runner. Trigger it manually (workflow_dispatch) or by pushing a
 
 ## Run
 ```bash
-./dist/msposd-preflight          # starts server, opens your browser
-./dist/msposd-preflight --port 9000
-./dist/msposd-preflight --no-browser   # server only
+./gs/dist/mspmaptool_linux          # starts server, opens your browser
+./gs/dist/mspmaptool_linux --port 9000
+./gs/dist/mspmaptool_linux --no-browser   # server only
 ```
 Close the console window or press Ctrl+C to stop.
 
@@ -67,17 +67,17 @@ The one-file Linux build needs no installer or Python runtime. On the same Linux
 machine, copy it into any writable directory and preserve or restore its executable bit:
 
 ```bash
-mkdir -p ~/Apps/msposd-preflight
-cp dist/msposd-preflight ~/Apps/msposd-preflight/
-chmod +x ~/Apps/msposd-preflight/msposd-preflight
-~/Apps/msposd-preflight/msposd-preflight
+mkdir -p ~/Apps/mspmaptool
+cp gs/dist/mspmaptool_linux ~/Apps/mspmaptool/
+chmod +x ~/Apps/mspmaptool/mspmaptool_linux
+~/Apps/mspmaptool/mspmaptool_linux
 ```
 
 The executable's directory becomes its data directory. A fresh location starts with
 default settings and creates data as needed; an established installation may contain:
 
 ```text
-msposd-preflight
+mspmaptool_linux
 config.ini
 state.ini
 maps/

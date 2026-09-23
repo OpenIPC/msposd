@@ -9,7 +9,7 @@
 #   ./map.sh --kill                    # kill existing map/webkit/server and exit
 #
 # Preflight opens in the system browser by default, matching the packaged
-# dist/msposd-preflight app. In-flight the map is drawn by the native in-OSD
+# mspmaptool app (gs/dist/). In-flight the map is drawn by the native in-OSD
 # renderer (osd/util/map_render.c), so the WebKit preview/full overlay modes and
 # --GTK preflight are kept for compatibility rather than as the primary path.
 #
@@ -240,7 +240,7 @@ case "$MODE" in
   preflight)
     if [ "$USE_BROWSER" -eq 1 ]; then
       # Default: open preflight in the system browser, same as the packaged
-      # dist/msposd-preflight app. Pass --GTK to use the WebKit window instead.
+      # mspmaptool app (gs/dist/). Pass --GTK to use the WebKit window instead.
       URL="${BASE}?mode=preflight&v=${CB}"
       echo "opening $URL in the system browser"
       python3 -c "import webbrowser,sys; webbrowser.open(sys.argv[1])" "$URL" || true

@@ -10,13 +10,17 @@
 # Writable data (config.ini, maps/, state.ini, landmarks.db) is created next to
 # the executable at runtime; only the read-only web/ assets are bundled here.
 #
-# Build (from anywhere):   pyinstaller --clean --noconfirm gs/pack/mapserver.spec
-# Output:                  dist/msposd-preflight[.exe]
+# Build: gs/pack/build.sh (Linux/macOS) or gs\pack\build.bat (Windows), which run
+#   pyinstaller --clean --noconfirm --distpath gs/dist --workpath gs/build gs/pack/mapserver.spec
+# Output: gs/dist/mspmaptool_linux | mspmaptool_macos | mspmaptool_windows.exe
 
 import os
 import sys
 
 GS = os.path.abspath(os.path.join(SPECPATH, os.pardir))   # the gs/ directory
+
+# OS suffix in the file name, so the release assets of all builds can sit side by side.
+OS_NAME = {"win32": "windows", "darwin": "macos"}.get(sys.platform, "linux")
 
 # mapserver.py imports certifi only on Windows (inside a function), so name it
 # explicitly there; PyInstaller's certifi hook then bundles cacert.pem.
@@ -49,7 +53,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="msposd-preflight",
+    name=f"mspmaptool_{OS_NAME}",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

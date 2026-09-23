@@ -23,12 +23,12 @@ file to `.exe` will produce Windows' “not a valid app” error. Use native Win
 ./gs/pack/build.sh      # Linux / macOS
 gs\pack\build.bat       # Windows
 ```
-Output: **`dist/msposd-preflight`** (`.exe` on Windows) — one file.
+Output: **`gs/dist/mspmaptool_linux`** (`mspmaptool_macos` on macOS, `mspmaptool_windows.exe` on Windows) — one file.
 
 On Linux, verify the artifact type before publishing it:
 
 ```bash
-file dist/msposd-preflight
+file gs/dist/mspmaptool_linux
 # ... ELF 64-bit ...
 ```
 
@@ -43,9 +43,9 @@ Download the three binaries from the run's **Artifacts**.
 
 ## Run / verify
 ```bash
-./dist/msposd-preflight               # starts server, opens the browser
-./dist/msposd-preflight --port 9000   # custom port
-./dist/msposd-preflight --no-browser  # server only
+./gs/dist/mspmaptool_linux               # starts server, opens the browser
+./gs/dist/mspmaptool_linux --port 9000   # custom port
+./gs/dist/mspmaptool_linux --no-browser  # server only
 ```
 Ctrl+C (or closing the console) stops it.
 
@@ -55,10 +55,10 @@ No installation step is required. The binary can be copied to another writable f
 on the same Linux system:
 
 ```bash
-mkdir -p ~/Apps/msposd-preflight
-cp dist/msposd-preflight ~/Apps/msposd-preflight/
-chmod +x ~/Apps/msposd-preflight/msposd-preflight
-~/Apps/msposd-preflight/msposd-preflight
+mkdir -p ~/Apps/mspmaptool
+cp gs/dist/mspmaptool_linux ~/Apps/mspmaptool/
+chmod +x ~/Apps/mspmaptool/mspmaptool_linux
+~/Apps/mspmaptool/mspmaptool_linux
 ```
 
 Its new containing directory becomes the writable application directory. Copy the old

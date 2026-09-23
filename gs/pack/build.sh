@@ -3,7 +3,7 @@
 # Windows: use build.bat. CI builds all three (see .github/workflows/preflight-pack.yml).
 #
 #   ./gs/pack/build.sh
-# Produces: dist/msposd-preflight  (a single self-contained executable)
+# Produces: gs/dist/mspmaptool_linux (mspmaptool_macos on macOS), a single self-contained executable
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -13,11 +13,11 @@ cd "$REPO"
 PY="${PYTHON:-python3}"
 "$PY" -m pip install --quiet --upgrade pyinstaller
 
-"$PY" -m PyInstaller --clean --noconfirm "$HERE/mapserver.spec"
+"$PY" -m PyInstaller --clean --noconfirm --distpath gs/dist --workpath gs/build "$HERE/mapserver.spec"
 
 echo
 echo "Built:"
-ls -la "$REPO/dist/" | sed 's/^/  /'
+ls -la "$REPO/gs/dist/" | sed 's/^/  /'
 echo
 echo "Run it (starts the server + opens your browser):"
-echo "  ./dist/msposd-preflight"
+echo "  ./gs/dist/mspmaptool_linux    (mspmaptool_macos on macOS)"

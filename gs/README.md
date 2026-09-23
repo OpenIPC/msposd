@@ -1,5 +1,7 @@
 # Offline Moving Map — Ground Station
 
+<a href="../pics/msp_map_1.png"><img src="../pics/msp_map_1.png" alt="In-flight OSD with the offline topo map, aircraft, home and AGL overlaid on the video" width="480"/></a>
+
 Prepare a map of your flying area on any PC in advance, then fly with it drawn on the
 OSD. No internet connection is needed at the field.
 
@@ -15,21 +17,41 @@ Copy the pack to the ground station once, and it keeps working fully offline.
 
 ---
 
-## Quick start
+## Download
+
+The preflight map tool is available as a single ready-to-run file; no Python or other
+install needed. It starts a local server and opens the map in your default browser.
+
+| OS | File |
+|---|---|
+| Windows 10/11 | [mspmaptool_windows.exe](https://github.com/OpenIPC/msposd/releases/download/mspmaptool/mspmaptool_windows.exe) |
+| Linux (x86-64) | [mspmaptool_linux](https://github.com/OpenIPC/msposd/releases/download/mspmaptool/mspmaptool_linux) |
+
+Release notes and version: [mspmaptool release](https://github.com/OpenIPC/msposd/releases/tag/mspmaptool).
+
+- **Windows:** run the `.exe`. It is not code-signed, so SmartScreen may warn; choose
+  *More info* then *Run anyway*.
+- **Linux:** `chmod +x mspmaptool_linux && ./mspmaptool_linux`
+
+Keep the file in its own folder: `maps/` is created next to it on first run, and
+`config.ini` once you download or change a setting. Leave the console window open while you use the map; Ctrl+C or
+closing it stops the server. To build it yourself see [Standalone app](#standalone-app).
+
+## Map tool on Linux
 
 ```bash
 ./run-map.sh           # opens preflight in your default browser
 ```
 
 Leaflet 1.9.4 is vendored in `web/` and committed, so no download step is needed.
-To upgrade it, run `./fetch-leaflet.sh` (needs internet) and commit the result.
+To upgrade it, set `VER` in `fetch-leaflet.sh`, run it (needs internet) and commit the result.
 
 Scroll to your area, press **Download visible area**, and you have a pack. Add `--GTK`
-to use the built-in WebKit window instead of a browser.
+to use the WebKitGTK `mapwin` window instead (needs WebKitGTK and PyGObject).
 
-No Python on the target machine? See [Standalone app](#standalone-app).
+No Python on the target machine? Use the [ready-made download](#download).
 
-### Windows
+### Map tool on Windows
 
 Preflight needs only Python 3.9+ (python.org or Microsoft Store). From a normal
 Command Prompt or PowerShell:
@@ -40,9 +62,10 @@ gs\run-map.bat --port 9000     # extra arguments go to mapserver.py
 ```
 
 Leave the window open while you use the map; Ctrl+C stops the server. Starting it a
-second time just reopens the browser on the running server. `run-map.sh` also works from
-Git Bash. `config.ini`, `state.ini` and `maps\` are created in `gs\` on first use, the same
-layout as on Linux, so exported packs are interchangeable.
+second time just reopens the browser on the running server. Use `run-map.bat` on Windows;
+`run-map.sh` under Git Bash lacks the certifi install and Ctrl+C handling. Data lives in
+`gs\` (`maps\`, `config.ini`), the same layout as on Linux, so exported packs are
+interchangeable.
 
 On first run the launcher installs the `certifi` package if it is missing. Python on
 Windows otherwise trusts only the Windows certificate store, which on many PCs still holds
@@ -63,13 +86,15 @@ port (it reserves ranges for Hyper-V and WinNAT), the server says so; pick anoth
 ### Download an area, at the detail you choose
 
 The **Detail** dropdown sets how sharp the map will be, labelled with the ground
-resolution one screen pixel covers:
+resolution one screen pixel covers (quoted at ~43° latitude; coarser nearer the equator,
+finer further north):
 
 | | z12 ~29m | z13 ~14m | z14 ~7.2m | **z15 ~3.6m** | z16 ~1.8m | z17 ~0.9m | z18 ~0.45m |
 |---|---|---|---|---|---|---|---|
 
 Each step up quadruples the tiles a given area needs, so sharper means smaller. Within
-the download limit that is roughly **95 km across at z15** and **12 km at z18**. z15 is
+the download limit a square area is roughly **95 km across at z15** and **12 km at z18**
+(at ~43°; about a third wider at the equator). z15 is
 the default and a good balance for most flying.
 
 Three levels are stored around your choice (the detail level plus two coarser ones), so
@@ -129,11 +154,11 @@ downloads. You are responsible for the chosen provider's terms and attribution.
 **Download elevation data** (ticked by default) stores the ground height for the same
 area alongside the tiles, as a ~28 m grid of metres above sea level. It adds about
 **1 MB** to a typical area — negligible next to the imagery — and is skipped
-automatically if you ask for an area larger than ~144 km across.
+automatically if the area is larger than about 225 km across (1000 elevation tiles).
 
 Once an area is downloaded, **move the pointer over the map** and the height under it
-appears bottom-right with the coordinates. The box only shows when the pack actually has
-elevation for that area, and reads `no data` outside it rather than a misleading `0 m`.
+appears bottom-right with the coordinates. The box shows once any elevation has been downloaded,
+and reads `no data` outside that area rather than a misleading `0 m`.
 
 From a terminal:
 
@@ -192,7 +217,7 @@ their name and distance, e.g. `Barn 1.2km`.
 The panel summarises the selected pack under the download button:
 
 ```
-OpenTopoMap+Satellite · PNG+JPEG
+OpenTopoMap_Satellite · PNG+JPEG
 44 MB · 3549 tiles (z13 20 · z15 225 · z17 3304) · 12831 POIs
 coverage ≈ 27 × 14 km at z17
 elevation 8 tiles · 1.0 MB · -4…359 m
@@ -225,7 +250,7 @@ the browser and does not change `config.ini` or the in-flight `msposd.ini` pack.
 From a terminal:
 
 ```bash
-python3 tiles_info.py                          # every pack: format, size, per-zoom counts, km covered
+python3 tiles_info.py                          # every pack: format (of the first tile), size, per-zoom counts, km covered
 python3 tiles_info.py --basemap Satellite      # just one
 python3 tiles_info.py --lat 43.14 --lon 27.93  # is this point covered?
 ```
@@ -252,7 +277,7 @@ still between moves so it stays readable.
 
 For 3 seconds after you show the map, its filename appears across the top and a compact
 key guide appears down the left side: `G Hide`, `F Mode`, `H Type`, `P POIs`,
-`−/+ Zoom`. Switching packs shows the new filename without reopening the key guide.
+`-/+ Zoom`. Switching packs shows the new filename without reopening the key guide.
 
 ### Where you are pointing vs where you are going
 
@@ -271,13 +296,13 @@ with `track_vector` (0 to switch off), `track_vector_len`, `track_vector_min_spe
 
 Active on **x86 ground stations only**, and grabbed globally — `msposd` does not need
 focus. Map keys exist only while `[map] enabled=1`; with the feature off they pass
-straight through to the desktop.
+straight through to the desktop. `p` and `Alt`+`↑`/`↓` are always grabbed.
 
 | Key | Action |
 | --- | ------ |
 | `g` | show / hide the map |
 | `f` | follow mode: plane → center → north → fit |
-| `h` | load the next `.mbtiles` pack in the folder, keeping your zoom |
+| `h` | load the next `.mbtiles` pack in the folder, keeping your zoom (map shown only) |
 | `=` · `+` · keypad `+` | zoom in (through the stored levels) |
 | `-` · keypad `-` | zoom out |
 | `p` | POI markers on / off |
@@ -286,7 +311,7 @@ straight through to the desktop.
 
 Follow modes: **plane** offsets the aircraft so more map shows ahead of it; **center**
 rotates the map with your course; **north** keeps north up with the aircraft centred;
-**fit** frames aircraft and home together.
+**fit** frames aircraft, home and waypoints together; zoom keys are ignored in it.
 
 `h` cycles alphabetically through the packs in the map folder, carrying your zoom over
 to the nearest level the next pack stores — so you can flip between, say, a wide
@@ -328,9 +353,9 @@ python3 sim_msp.py --arm           # terminal 2 — orbits a fake plane, arms af
 ```
 
 The viewer shows the aircraft, its heading vector, waypoints and a house icon for home
-as soon as MSP arrives on `udp://127.0.0.1:14560`. Add `--crab 25` to fly the nose 25°
-off the track and see the OSD map's drift vector work. In real use, feed it from the
-ground-side msposd instead:
+as soon as MSP arrives on `udp://127.0.0.1:14560`. `--crab 25` flies the nose 25° off the
+track; the drift vector itself is drawn only by msposd's OSD map, not by this viewer.
+In real use, feed it from the ground-side msposd instead:
 
 ```bash
 msposd --master <gs-msp-source> --osd -r 50 --ahi 3 --matrix 11 --out 127.0.0.1:14560
@@ -344,8 +369,8 @@ For machines without Python, preflight packages into a **single self-contained b
 that starts the server and opens your default browser — nothing else to install.
 
 ```bash
-./gs/pack/build.sh        # Linux / macOS      -> dist/msposd-preflight
-gs\pack\build.bat         # Windows            -> dist\msposd-preflight.exe
+./gs/pack/build.sh        # Linux / macOS      -> gs/dist/mspmaptool_linux (mspmaptool_macos)
+gs\pack\build.bat         # Windows            -> gs\dist\mspmaptool_windows.exe
 ```
 
 PyInstaller output is native to the OS that runs the build. In particular,
@@ -371,7 +396,8 @@ false-positive on PyInstaller one-file builds.
 | `mapserver.py` | the preflight server: MSP parsing + HTTP + tile downloads |
 | `web/viewer.html` | the map UI (all modes) |
 | `mapwin` | minimal WebKitGTK window host for the overlay modes and `--GTK` |
-| `map.sh` / `run-map.sh` | launchers (Linux / Git Bash) |
+| `map.sh` / `run-map.sh` | launchers (Linux) |
+| `fetch-leaflet.sh` | re-vendor Leaflet (`web/leaflet.js`, `leaflet.css`, `images/`) |
 | `run-map.bat` | Windows launcher, preflight only |
 | `sim_msp.py` | fake telemetry for desk testing |
 | `tiles_info.py` | inspect packs from the command line |

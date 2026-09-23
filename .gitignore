@@ -22,6 +22,8 @@ serial_monitor.c
 # PyInstaller output (gs/pack standalone build)
 /build/
 /dist/
+gs/build/
+gs/dist/
 *.spec.bak
 
 

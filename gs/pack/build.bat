@@ -1,7 +1,7 @@
 @echo off
 REM Build the standalone preflight map binary for Windows.
 REM   gs\pack\build.bat
-REM Produces: dist\msposd-preflight.exe
+REM Produces: gs\dist\mspmaptool_windows.exe
 REM
 REM Needs Python 3.12+ (same as CI): its OpenSSL 3 verifies current Let's
 REM Encrypt chains. certifi is bundled so HTTPS tile sources verify on any
@@ -30,9 +30,9 @@ if errorlevel 1 (
   exit /b 1
 )
 %PY% -m pip install --quiet --upgrade pyinstaller certifi || goto :err
-%PY% -m PyInstaller --clean --noconfirm "%HERE%mapserver.spec" || goto :err
+%PY% -m PyInstaller --clean --noconfirm --distpath gs\dist --workpath gs\build "%HERE%mapserver.spec" || goto :err
 echo.
-echo Built dist\msposd-preflight.exe
+echo Built gs\dist\mspmaptool_windows.exe
 echo Run it to start the server and open your browser.
 popd
 exit /b 0
