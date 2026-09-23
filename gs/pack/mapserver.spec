@@ -14,8 +14,15 @@
 # Output:                  dist/msposd-preflight[.exe]
 
 import os
+import sys
 
 GS = os.path.abspath(os.path.join(SPECPATH, os.pardir))   # the gs/ directory
+
+# mapserver.py imports certifi only on Windows (inside a function), so name it
+# explicitly there; PyInstaller's certifi hook then bundles cacert.pem.
+HIDDEN = ["tiles_info"]                        # imported lazily inside mapserver.py
+if sys.platform == "win32":
+    HIDDEN.append("certifi")
 
 # Leaflet is committed under web/; fail early instead of shipping a viewer that 404s.
 for _f in ("leaflet.js", "leaflet.css"):
@@ -27,7 +34,7 @@ a = Analysis(
     pathex=[GS],                                   # so `import tiles_info` resolves
     binaries=[],
     datas=[(os.path.join(GS, "web"), "web")],      # -> _MEIPASS/web (RES_DIR/web)
-    hiddenimports=["tiles_info"],                  # imported lazily inside mapserver.py
+    hiddenimports=HIDDEN,
     hookspath=[],
     runtime_hooks=[],
     excludes=["tkinter", "gi", "PIL", "numpy"],    # keep the binary lean

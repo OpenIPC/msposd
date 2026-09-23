@@ -181,6 +181,32 @@ def _fmt_tile(template, z, x, y):
 USER_AGENT = "msposd-gs-map/0.1 (+https://github.com/OpenIPC/msposd)"
 
 
+def _make_ssl_context():
+    """Build the TLS context used for every outbound HTTPS request.
+
+    On Windows, Python's OpenSSL takes its trust roots from the Windows
+    certificate store, which on many machines still holds an expired
+    cross-signed ISRG Root X2. OpenSSL 1.1.1 (Python <= 3.11) then rejects
+    Let's Encrypt chains such as OpenTopoMap's with "certificate has expired",
+    although browsers on the same PC accept them. certifi ships a complete,
+    current root bundle that does not depend on the client's store, so prefer
+    it there. Linux/macOS keep the platform default; a missing certifi also
+    falls back to the default rather than failing.
+    """
+    if sys.platform == "win32":
+        try:
+            import certifi
+            return ssl.create_default_context(cafile=certifi.where())
+        except ImportError:
+            print("[mapserver] certifi not installed: HTTPS tile sources using "
+                  "Let's Encrypt (OpenTopoMap) may fail on Windows. "
+                  "Fix: python -m pip install certifi")
+    return ssl.create_default_context()
+
+
+SSL_CONTEXT = _make_ssl_context()
+
+
 def tile_ctype(data):
     """Guess a tile's MIME type from its magic bytes.
 
@@ -701,7 +727,7 @@ def online_check_loop():
         ok = False
         try:
             req = urllib.request.Request(probe, headers={"User-Agent": USER_AGENT})
-            with urllib.request.urlopen(req, timeout=5) as r:
+            with urllib.request.urlopen(req, timeout=5, context=SSL_CONTEXT) as r:
                 r.read(1)
             ok = True
         except Exception:
@@ -842,7 +868,7 @@ def _tile_conn(scheme, host):
     conn = pool.get((scheme, host))
     if conn is None:
         conn = (http.client.HTTPSConnection(host, timeout=_TILE_TIMEOUT,
-                                            context=ssl.create_default_context())
+                                            context=SSL_CONTEXT)
                 if scheme == "https"
                 else http.client.HTTPConnection(host, timeout=_TILE_TIMEOUT))
         pool[(scheme, host)] = conn
@@ -1761,7 +1787,7 @@ def fetch_landmarks(north, south, east, west):
         headers={"User-Agent": USER_AGENT,
                  "Content-Type": "application/x-www-form-urlencoded"},
     )
-    with urllib.request.urlopen(req, timeout=90) as r:
+    with urllib.request.urlopen(req, timeout=90, context=SSL_CONTEXT) as r:
         return json.loads(r.read())
 
 
@@ -2560,21 +2586,45 @@ def main():
     #     take the port from it, so tell the user how to clear it.
     # Bind before starting the UDP/online threads so a re-launch never fights over
     # the MSP socket either.
+    server_cls = ThreadingHTTPServer
+    _WIN_EACCES = None
+    if sys.platform == "win32":
+        # HTTPServer sets SO_REUSEADDR, which on Windows lets a second process
+        # bind a port that is already being listened on: a re-launch would then
+        # silently start a second server (and a second MSP listener) instead of
+        # hitting EADDRINUSE. Drop the flag on Windows only; Linux keeps it for
+        # the fast restart it provides there.
+        class _WinHTTPServer(ThreadingHTTPServer):
+            allow_reuse_address = False
+        server_cls = _WinHTTPServer
+        # Windows reports a reserved/excluded port (Hyper-V, WinNAT, "netsh
+        # interface ipv4 show excludedportrange") as WSAEACCES, not in-use.
+        _WIN_EACCES = getattr(errno, "WSAEACCES", None)
     try:
-        httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+        httpd = server_cls(("127.0.0.1", port), Handler)
     except OSError as e:
-        if e.errno != errno.EADDRINUSE:
+        if e.errno != errno.EADDRINUSE and not (_WIN_EACCES is not None and e.errno == _WIN_EACCES):
             raise
         if server_responds(port):
             print(f"[mapserver] already running on 127.0.0.1:{port}; reopening browser")
             if args.open_browser:
                 webbrowser.open(url)
             return
+        if e.errno == _WIN_EACCES:
+            print(f"[mapserver] ERROR: Windows does not allow binding port {port} "
+                  "(reserved or excluded port range).")
+            print("[mapserver] Pick another port, e.g. --port 8090, or set "
+                  "[server] port in config.ini.")
+            sys.exit(1)
         print(f"[mapserver] ERROR: port {port} is in use but no server is responding.")
         print("[mapserver] A previous instance is probably suspended (Ctrl+Z) or hung.")
         print("[mapserver] Clear it, then relaunch:")
-        print("[mapserver]   - if you background/suspended it: run 'fg' then press Ctrl+C, or 'kill %1'")
-        print(f"[mapserver]   - otherwise free the port, e.g.: fuser -k {port}/tcp   (Linux)")
+        if sys.platform == "win32":
+            print(f"[mapserver]   - find it:  netstat -ano | findstr :{port}")
+            print("[mapserver]   - stop it:  taskkill /PID <pid> /F")
+        else:
+            print("[mapserver]   - if you background/suspended it: run 'fg' then press Ctrl+C, or 'kill %1'")
+            print(f"[mapserver]   - otherwise free the port, e.g.: fuser -k {port}/tcp   (Linux)")
         print("[mapserver] Tip: stop this server with Ctrl+C, not Ctrl+Z (Ctrl+Z only freezes it).")
         sys.exit(1)
 

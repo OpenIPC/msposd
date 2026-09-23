@@ -9,6 +9,8 @@ inside `maps/`.
 
 ## Prerequisites
 - Python **3.9+** and `pip` on the build machine (`pyinstaller` is installed automatically).
+  The Windows build needs **3.12+** like CI, and bundles `certifi` so HTTPS tile sources
+  verify on every client PC regardless of its certificate store.
 - Build **on each target OS** — a Windows `.exe` needs Windows, a macOS build needs a Mac.
 
 PyInstaller bundles a bootloader for the host OS; it does not cross-compile. Running

@@ -29,6 +29,33 @@ to use the built-in WebKit window instead of a browser.
 
 No Python on the target machine? See [Standalone app](#standalone-app).
 
+### Windows
+
+Preflight needs only Python 3.9+ (python.org or Microsoft Store). From a normal
+Command Prompt or PowerShell:
+
+```bat
+gs\run-map.bat                 # starts the server, opens the default browser
+gs\run-map.bat --port 9000     # extra arguments go to mapserver.py
+```
+
+Leave the window open while you use the map; Ctrl+C stops the server. Starting it a
+second time just reopens the browser on the running server. `run-map.sh` also works from
+Git Bash. `config.ini`, `state.ini` and `maps\` are created in `gs\` on first use, the same
+layout as on Linux, so exported packs are interchangeable.
+
+On first run the launcher installs the `certifi` package if it is missing. Python on
+Windows otherwise trusts only the Windows certificate store, which on many PCs still holds
+an expired Let's Encrypt cross-certificate; OpenTopoMap then fails TLS verification with
+"certificate has expired" and the map shows *offline* while browsers work fine. With
+certifi's own root bundle every basemap verifies on any Windows machine. The standalone
+`.exe` has it built in.
+
+Only preflight runs on Windows. The preview/full overlay windows and `--GTK` need the
+WebKitGTK `mapwin` host and X11 tools, so they remain Linux-only. If Windows refuses the
+port (it reserves ranges for Hyper-V and WinNAT), the server says so; pick another with
+`--port` or `[server] port` in `config.ini`.
+
 ---
 
 ## Preflight — what you can do
@@ -344,7 +371,8 @@ false-positive on PyInstaller one-file builds.
 | `mapserver.py` | the preflight server: MSP parsing + HTTP + tile downloads |
 | `web/viewer.html` | the map UI (all modes) |
 | `mapwin` | minimal WebKitGTK window host for the overlay modes and `--GTK` |
-| `map.sh` / `run-map.sh` | launchers |
+| `map.sh` / `run-map.sh` | launchers (Linux / Git Bash) |
+| `run-map.bat` | Windows launcher, preflight only |
 | `sim_msp.py` | fake telemetry for desk testing |
 | `tiles_info.py` | inspect packs from the command line |
 | `maps/<pack>.mbtiles` | offline tiles — one new file per download |
