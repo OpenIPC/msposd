@@ -138,6 +138,8 @@ This keywords can be added using the PilotName/CraftName fields(INAV/BF/Ardu), o
  - ```!TMP!``` Camera board temp  
  - ```!TMW!``` WiFi module temperature (only 8812EU2/8733BU chipsets supported)  
  - ```!RC!``` Sticks Position widget (Ground Side only)  
+ - ```!AGL!``` GPS-calibrated height above terrain in metres (Ground Side only);
+   displays ```----m``` while unavailable
 
 ### Usage Example:
 

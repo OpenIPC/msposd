@@ -1,0 +1,46 @@
+name: preflight-pack
+
+# Build the standalone preflight map app (gs/mapserver.py + web/) into a single
+# self-contained binary for Linux, macOS and Windows. Run manually or by pushing
+# a `preflight-v*` tag; grab the binaries from the run's Artifacts.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "preflight-v*"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: mspmaptool_linux
+          - os: macos-latest
+            artifact: mspmaptool_macos
+          - os: windows-latest
+            artifact: mspmaptool_windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # certifi: bundled root CAs so the Windows binary verifies Let's Encrypt
+      # tile sources (OpenTopoMap) regardless of the client's certificate store.
+      - name: Install PyInstaller
+        run: python -m pip install --upgrade pyinstaller certifi
+
+      - name: Build
+        run: python -m PyInstaller --clean --noconfirm --distpath gs/dist --workpath gs/build gs/pack/mapserver.spec
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: gs/dist/mspmaptool_*
+          if-no-files-found: error

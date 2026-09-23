@@ -13,9 +13,48 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <unistd.h>
+#include <libgen.h>
+#include <stdbool.h>
 
-#define INI_FILENAME "msposd.ini"
-#define INI_TMPFILE  "msposd.ini.tmp"
+extern bool verbose;
+
+const char *exe_dir(void) {
+    static char dir[512] = "";
+    if (!dir[0]) {
+        char exe[512] = "";
+        ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+        if (n > 0) { exe[n] = '\0'; snprintf(dir, sizeof(dir), "%s", dirname(exe)); }
+        else snprintf(dir, sizeof(dir), ".");
+    }
+    return dir;
+}
+
+static const char *ini_path(void) {
+    static char path[512] = "";
+    static bool reported = false;
+    if (!path[0])
+        snprintf(path, sizeof(path), "%s/msposd.ini", exe_dir());
+    if (verbose && !reported) {
+        reported = true;
+        FILE *f = fopen(path, "r");
+        if (f) { fclose(f); printf("[ini] using %s\n", path); }
+        else printf("[ini] not found: %s\n", path);
+    }
+    return path;
+}
+
+#define INI_FILENAME ini_path()
+
+/* Absolute path to the ground-station runtime state (home/target), resolved
+ * next to the binary so it matches mapserver's APP_DIR/state.ini regardless of
+ * the working directory msposd is launched from. */
+const char *gs_state_path(void) {
+    static char path[512] = "";
+    if (!path[0])
+        snprintf(path, sizeof(path), "%s/gs/state.ini", exe_dir());
+    return path;
+}
 
 #ifndef INI_MAX_LINE
 #define INI_MAX_LINE 1024
@@ -94,8 +133,17 @@ static int streq(const char *a, const char *b) {
 }
 
 /* Reads string value into out buffer. Returns 1 if found, 0 if not found. */
-static int IniReadString(const char *section, const char *param, char *out, size_t outsz) {
-    FILE *f = fopen(INI_FILENAME, "rb");
+static int build_tmp_path(const char *filename, char *tmp_path, size_t tmp_path_size) {
+    int written;
+
+    if (!filename || !tmp_path || tmp_path_size == 0) return 0;
+    written = snprintf(tmp_path, tmp_path_size, "%s.tmp", filename);
+    return written > 0 && (size_t)written < tmp_path_size;
+}
+
+static int IniReadStringPath(const char *filename, const char *section, const char *param,
+                             char *out, size_t outsz) {
+    FILE *f = fopen(filename, "rb");
     if (!f) return 0;
 
     char line[INI_MAX_LINE];
@@ -139,9 +187,16 @@ static int IniReadString(const char *section, const char *param, char *out, size
   Writes/updates a key=value within [section].
   Returns 1 on success, 0 on failure.
 */
-static int IniWriteString(const char *section, const char *param, const char *value) {
-    FILE *in = fopen(INI_FILENAME, "rb");
-    FILE *out = fopen(INI_TMPFILE, "wb");
+static int IniWriteStringPath(const char *filename, const char *section, const char *param,
+                              const char *value) {
+    char tmp_path[INI_MAX_LINE];
+    FILE *in;
+    FILE *out;
+
+    if (!build_tmp_path(filename, tmp_path, sizeof(tmp_path))) return 0;
+
+    in = fopen(filename, "rb");
+    out = fopen(tmp_path, "wb");
     if (!out) {
         if (in) fclose(in);
         return 0;
@@ -158,8 +213,8 @@ static int IniWriteString(const char *section, const char *param, const char *va
         // No existing file: just create it
         fprintf(out, "[%s]\n%s=%s\n", section, param, value);
         fclose(out);
-        remove(INI_FILENAME);
-        rename(INI_TMPFILE, INI_FILENAME);
+        remove(filename);
+        rename(tmp_path, filename);
         return 1;
     }
 
@@ -231,10 +286,10 @@ static int IniWriteString(const char *section, const char *param, const char *va
     fclose(out);
 
     // Replace original
-    remove(INI_FILENAME);
-    if (rename(INI_TMPFILE, INI_FILENAME) != 0) {
+    remove(filename);
+    if (rename(tmp_path, filename) != 0) {
         // cleanup temp if rename fails
-        remove(INI_TMPFILE);
+        remove(tmp_path);
         return 0;
     }
 
@@ -248,7 +303,7 @@ static int IniWriteString(const char *section, const char *param, const char *va
 
 int WriteIniString(const char *SectionName, const char *ParamName, const char *ParamValue) {
     if (!SectionName || !ParamName || !ParamValue) return 0;
-    return IniWriteString(SectionName, ParamName, ParamValue);
+    return IniWriteStringPath(INI_FILENAME, SectionName, ParamName, ParamValue);
 }
 
 int WriteIniInt(const char *SectionName, const char *ParamName, int ParamValue) {
@@ -257,11 +312,24 @@ int WriteIniInt(const char *SectionName, const char *ParamName, int ParamValue) 
     return WriteIniString(SectionName, ParamName, buf);
 }
 
+int WriteIniStringPath(const char *IniPath, const char *SectionName, const char *ParamName,
+                       const char *ParamValue) {
+    if (!IniPath || !SectionName || !ParamName || !ParamValue) return 0;
+    return IniWriteStringPath(IniPath, SectionName, ParamName, ParamValue);
+}
+
+int WriteIniIntPath(const char *IniPath, const char *SectionName, const char *ParamName,
+                    int ParamValue) {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%d", ParamValue);
+    return WriteIniStringPath(IniPath, SectionName, ParamName, buf);
+}
+
 /* C version: pass pointer */
 int ReadIniInt(const char *SectionName, const char *ParamName, int *ParamValue) {
     if (!SectionName || !ParamName || !ParamValue) return 0;
     char buf[INI_MAX_LINE];
-    if (!IniReadString(SectionName, ParamName, buf, sizeof(buf))) return 0;
+    if (!IniReadStringPath(INI_FILENAME, SectionName, ParamName, buf, sizeof(buf))) return 0;
     *ParamValue = atoi(buf);
     return 1;
 }
@@ -269,5 +337,20 @@ int ReadIniInt(const char *SectionName, const char *ParamName, int *ParamValue) 
 /* C version: provide output buffer and its size */
 int ReadIniString(const char *SectionName, const char *ParamName, char *ParamValue, size_t ParamValueSize) {
     if (!SectionName || !ParamName || !ParamValue || ParamValueSize == 0) return 0;
-    return IniReadString(SectionName, ParamName, ParamValue, ParamValueSize);
+    return IniReadStringPath(INI_FILENAME, SectionName, ParamName, ParamValue, ParamValueSize);
+}
+
+/* Path variants: read from an arbitrary ini file instead of INI_FILENAME. */
+int ReadIniStringPath(const char *IniPath, const char *SectionName, const char *ParamName,
+                      char *ParamValue, size_t ParamValueSize) {
+    if (!IniPath || !SectionName || !ParamName || !ParamValue || ParamValueSize == 0) return 0;
+    return IniReadStringPath(IniPath, SectionName, ParamName, ParamValue, ParamValueSize);
+}
+
+int ReadIniIntPath(const char *IniPath, const char *SectionName, const char *ParamName, int *ParamValue) {
+    if (!IniPath || !SectionName || !ParamName || !ParamValue) return 0;
+    char buf[INI_MAX_LINE];
+    if (!IniReadStringPath(IniPath, SectionName, ParamName, buf, sizeof(buf))) return 0;
+    *ParamValue = atoi(buf);
+    return 1;
 }

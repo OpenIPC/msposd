@@ -1,0 +1,549 @@
+#!/usr/bin/env python3
+"""Minimal WebKitGTK window host for the GS map (lightweight, ARM-friendly).
+
+Manages only the window; all map logic lives in viewer.html. Used by all
+map.sh modes: decorated/maximized for preflight, borderless for overlays.
+
+  mapwin --url http://127.0.0.1:8088/viewer.html?mode=preview&follow=plane \
+         --geometry 960x540+960+540 --borderless
+  mapwin --url ... --fullscreen
+
+Press 'm' to toggle the semi-transparent resize/move border overlay.
+Last window size and position are saved per-title and restored on relaunch.
+
+GS overlay stacking (video < map < OSD) is a 3-part contract — see also
+wfb-stabilizer/render_direct.py and gs/map.sh:
+  * The taskbar is hidden only while the fullscreen video is the *active*
+    window (Xfwm compositor behaviour). render_direct.py keeps it active.
+  * So the map must never take focus (map.sh/mapwin decline it); instead its
+    keys arrive via a global grab (GlobalHotkeys) and its border drag via the
+    OSD being made mouse-transparent during move mode (OsdInputShape).
+"""
+
+import argparse
+import os
+import re
+import signal
+import sys
+import threading
+
+import gi
+gi.require_version("Gtk", "3.0")
+gi.require_version("WebKit2", "4.1")
+from gi.repository import Gtk, Gdk, WebKit2, GLib  # noqa: E402
+import cairo
+
+# python-xlib is used only to toggle the msposd OSD's mouse-transparency while
+# move-map mode is active (see OsdInputShape). Optional: without it the border
+# still works whenever the OSD does not cover the map.
+try:
+    from Xlib import display as _xdisplay, X as _X
+    from Xlib.ext import shape as _xshape
+    _HAVE_XLIB = True
+except Exception:
+    _HAVE_XLIB = False
+
+
+BORDER = 8  # resize handle width in pixels
+
+_EDGE_CURSORS = {
+    Gdk.WindowEdge.NORTH_WEST: Gdk.CursorType.TOP_LEFT_CORNER,
+    Gdk.WindowEdge.NORTH_EAST: Gdk.CursorType.TOP_RIGHT_CORNER,
+    Gdk.WindowEdge.SOUTH_WEST: Gdk.CursorType.BOTTOM_LEFT_CORNER,
+    Gdk.WindowEdge.SOUTH_EAST: Gdk.CursorType.BOTTOM_RIGHT_CORNER,
+    Gdk.WindowEdge.NORTH:      Gdk.CursorType.TOP_SIDE,
+    Gdk.WindowEdge.SOUTH:      Gdk.CursorType.BOTTOM_SIDE,
+    Gdk.WindowEdge.WEST:       Gdk.CursorType.LEFT_SIDE,
+    Gdk.WindowEdge.EAST:       Gdk.CursorType.RIGHT_SIDE,
+}
+
+
+def _geo_path(title):
+    d = os.path.expanduser("~/.config/msposd")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, f"{title}.geometry")
+
+
+def load_geometry(title):
+    try:
+        with open(_geo_path(title)) as f:
+            return parse_geometry(f.read().strip())
+    except OSError:
+        return None
+
+
+def save_geometry(title, geo_str):
+    """Write a 'WxH+X+Y' geometry string to the per-title config file.
+
+    Takes a precomputed string instead of reading the window, because
+    get_position() returns 0,0 once the window is being torn down, which would
+    clobber the saved value. Callers capture geometry while the window is mapped.
+    """
+    try:
+        with open(_geo_path(title), "w") as f:
+            f.write(geo_str)
+    except OSError:
+        pass
+
+
+class GlobalHotkeys:
+    """Passive global grab of several keys on the X root window.
+
+    The map must react to its keys ('m', and zoom/follow keys) even when it is
+    NOT the focused window: the fullscreen video has to stay the active window
+    (that is what keeps the taskbar covered), so the map cannot rely on keyboard
+    focus. A passive XGrabKey on the root window delivers the key to us
+    regardless of focus — the same technique msposd uses for its 'p' hotkey.
+    Events from a passive grab go only to the grabbing client, so the focused
+    window never sees the keypress.
+
+    NOTE: this intercepts these keys system-wide while the map overlay runs.
+    """
+
+    def __init__(self, keysym_names, on_action):
+        # keysym_names: {X keysym name -> action string}
+        self._keysym_names = keysym_names
+        self._on_action = on_action   # called on the GTK loop with the action
+
+    def start(self):
+        if not _HAVE_XLIB:
+            return
+        try:
+            from Xlib import XK
+            dpy = _xdisplay.Display()
+            dpy.set_error_handler(lambda *_a: 0)   # grab conflicts must not kill us
+            root = dpy.screen().root
+            code_to_action = {}
+            for name, action in self._keysym_names.items():
+                code = dpy.keysym_to_keycode(XK.string_to_keysym(name))
+                if not code:
+                    continue
+                # AnyModifier: fire regardless of Caps/Num lock state.
+                root.grab_key(code, _X.AnyModifier, False,
+                              _X.GrabModeAsync, _X.GrabModeAsync)
+                code_to_action[code] = action
+            dpy.sync()
+
+            def dispatch(action):
+                self._on_action(action)
+                return False   # one-shot idle callback
+
+            def loop():
+                while True:
+                    ev = dpy.next_event()
+                    if ev.type == _X.KeyPress and ev.detail in code_to_action:
+                        GLib.idle_add(dispatch, code_to_action[ev.detail])
+
+            threading.Thread(target=loop, daemon=True).start()
+        except Exception as e:
+            print(f"global hotkey grab failed: {e}", file=sys.stderr)
+
+
+class OsdInputShape:
+    """Toggle mouse-transparency of the msposd OSD while move-map mode is on.
+
+    The OSD is a fullscreen, visually-transparent override_redirect window
+    stacked above the map. Being mouse-opaque, it swallows the clicks meant for
+    the resize/move border. While 'm' mode is active we empty the OSD's X Shape
+    *input* region so pointer events fall through to the map/border below; on
+    exit we reset the region so the OSD is mouse-opaque again (this keeps the
+    active-fullscreen video covering the taskbar the rest of the time).
+    """
+
+    def __init__(self):
+        self._dpy = None
+        self._osd = None   # Xlib window currently made click-through
+
+    def _display(self):
+        if self._dpy is None:
+            self._dpy = _xdisplay.Display()
+            self._dpy.set_error_handler(lambda *_a: 0)  # stale OSD id must not kill us
+        return self._dpy
+
+    def _find_osd(self):
+        """Locate the OSD: a fullscreen override_redirect window at 0,0."""
+        d = self._display()
+        scr = d.screen()
+        sw, sh = scr.width_in_pixels, scr.height_in_pixels
+        for c in scr.root.query_tree().children:
+            try:
+                a, g = c.get_attributes(), c.get_geometry()
+            except Exception:
+                continue
+            if a.override_redirect and g.x == 0 and g.y == 0 \
+                    and g.width >= sw - 2 and g.height >= sh - 2:
+                return c
+        return None
+
+    def clickthrough(self):
+        """Make the OSD ignore the mouse (empty input region)."""
+        if not _HAVE_XLIB:
+            return
+        try:
+            osd = self._find_osd()
+            if osd is None:
+                return
+            osd.shape_rectangles(_xshape.SO.Set, _xshape.SK.Input, _X.YXBanded, 0, 0, [])
+            self._display().sync()
+            self._osd = osd
+        except Exception as e:
+            print(f"OSD clickthrough failed: {e}", file=sys.stderr)
+
+    def restore(self):
+        """Make the OSD mouse-opaque again (reset input region to the window)."""
+        if not _HAVE_XLIB or self._osd is None:
+            return
+        try:
+            self._osd.shape_mask(_xshape.SO.Set, _xshape.SK.Input, 0, 0, _X.NONE)
+            self._display().sync()
+        except Exception as e:
+            print(f"OSD shape restore failed: {e}", file=sys.stderr)
+        finally:
+            self._osd = None
+
+
+class BorderWindow:
+    """Separate transparent top-level window that draws the resize/move border.
+
+    WebKit2GTK creates a native X11 sub-window for rendering that sits above
+    any Gtk.Overlay child, making overlay-based borders invisible. A separate
+    top-level window with keep_above=True is guaranteed to float above it.
+
+    When visible ('m' mode on):
+      border edges/corners → begin_resize_drag on the main window + resize cursor
+      centre area          → begin_move_drag on the main window  + FLEUR cursor
+    When hidden, the main window and WebView behave normally.
+    """
+
+    def __init__(self, main_win):
+        self._main = main_win
+        self._win = None
+        self._active = False  # True when user has toggled 'm' on
+        self._osd_shape = OsdInputShape()  # OSD mouse-transparency during 'm' mode
+
+    def _build(self):
+        bw = Gtk.Window()
+        bw.set_decorated(False)
+        bw.set_keep_above(True)
+        bw.set_accept_focus(False)
+        bw.set_skip_taskbar_hint(True)
+        bw.set_skip_pager_hint(True)
+        # set_resizable(False) is intentionally omitted: it caps the WM size hint
+        # to the window's natural size (near 0), which makes resize() ineffective.
+        # The window is undecorated so users cannot resize it directly anyway.
+        bw.connect("delete-event", lambda *_: True)
+
+        visual = self._main.get_screen().get_rgba_visual()
+        if visual:
+            bw.set_visual(visual)
+
+        # Transparent window background so the RGBA clear shows through.
+        bw.set_app_paintable(True)
+        css = Gtk.CssProvider()
+        css.load_from_data(b"window { background: transparent; }")
+        bw.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+        # DrawingArea as the only child: more reliable RGBA surface than drawing
+        # directly on the Gtk.Window, and gives us a proper GdkWindow for events.
+        da = Gtk.DrawingArea()
+        da.set_app_paintable(True)
+        if visual:
+            da.set_visual(visual)
+        da.add_events(
+            Gdk.EventMask.BUTTON_PRESS_MASK |
+            Gdk.EventMask.POINTER_MOTION_MASK
+        )
+        da.connect("draw", self._draw)
+        da.connect("button-press-event", self._press)
+        da.connect("motion-notify-event", self._motion)
+        bw.add(da)
+        return bw
+
+    def _draw(self, widget, cr):
+        w = widget.get_allocated_width()
+        h = widget.get_allocated_height()
+        b = BORDER
+        cr.set_operator(cairo.OPERATOR_CLEAR)
+        cr.paint()
+        cr.set_operator(cairo.OPERATOR_OVER)
+        cr.set_source_rgba(0.2, 0.6, 1.0, 0.6)
+        cr.rectangle(0, 0, w, h)
+        cr.rectangle(b, b, w - 2 * b, h - 2 * b)
+        cr.set_fill_rule(cairo.FILL_RULE_EVEN_ODD)
+        cr.fill()
+
+    def _edge_at(self, x, y):
+        w, h = self._win.get_size()
+        b = BORDER
+        l, r = x < b, x > w - b
+        t, bot = y < b, y > h - b
+        if t and l:   return Gdk.WindowEdge.NORTH_WEST
+        if t and r:   return Gdk.WindowEdge.NORTH_EAST
+        if bot and l: return Gdk.WindowEdge.SOUTH_WEST
+        if bot and r: return Gdk.WindowEdge.SOUTH_EAST
+        if t:   return Gdk.WindowEdge.NORTH
+        if bot: return Gdk.WindowEdge.SOUTH
+        if l:   return Gdk.WindowEdge.WEST
+        if r:   return Gdk.WindowEdge.EAST
+        return None  # centre — drag moves the whole window
+
+    def _press(self, _w, ev):
+        if ev.button != 1:
+            return False
+        edge = self._edge_at(ev.x, ev.y)
+        gdk = self._main.get_window()
+        if edge is not None:
+            gdk.begin_resize_drag(edge, ev.button, int(ev.x_root), int(ev.y_root), ev.time)
+        else:
+            gdk.begin_move_drag(ev.button, int(ev.x_root), int(ev.y_root), ev.time)
+        return True
+
+    def _motion(self, widget, ev):
+        edge = self._edge_at(ev.x, ev.y)
+        ct = _EDGE_CURSORS.get(edge, Gdk.CursorType.FLEUR)
+        gdk = widget.get_window()
+        if gdk:
+            gdk.set_cursor(Gdk.Cursor.new_for_display(widget.get_display(), ct))
+
+    def sync(self):
+        """Keep border window geometry in lock-step with the main window."""
+        if self._win and self._win.get_visible():
+            x, y = self._main.get_position()
+            w, h = self._main.get_size()
+            self._win.move(x, y)
+            self._win.resize(w, h)
+
+    def _show(self):
+        x, y = self._main.get_position()
+        w, h = self._main.get_size()
+        if not self._win:
+            self._win = self._build()
+            # set_default_size works before the first map; resize() does not.
+            self._win.set_default_size(w, h)
+        self._win.move(x, y)
+        self._win.show_all()
+
+    def toggle(self):
+        self._active = not self._active
+        if self._active and self._main.get_visible():
+            # Move mode on: let mouse events pass through the OSD to the border.
+            self._osd_shape.clickthrough()
+            self._show()
+        elif not self._active:
+            if self._win:
+                self._win.hide()
+            # Move mode off: OSD becomes mouse-opaque again. render_direct.py
+            # keeps the fullscreen video active, so the taskbar stays covered;
+            # the next 'm' reaches us via the global grab, not keyboard focus.
+            self._osd_shape.restore()
+
+    def on_main_map(self):
+        """Called when the main window is mapped (e.g. via xdotool windowmap)."""
+        if self._active:
+            self._osd_shape.clickthrough()
+            self._show()
+
+    def on_main_unmap(self):
+        """Called when the main window is unmapped (e.g. via xdotool windowunmap)."""
+        self._active = False
+        if self._win:
+            self._win.hide()
+        self._osd_shape.restore()
+
+
+def parse_geometry(s):
+    m = re.fullmatch(r"(\d+)x(\d+)(?:\+(-?\d+)\+(-?\d+))?", s or "")
+    if not m:
+        return None
+    w, h, x, y = m.groups()
+    return int(w), int(h), (int(x) if x is not None else None), (int(y) if y is not None else None)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--url", required=True)
+    ap.add_argument("--title", help="window title for reuse/toggle helpers")
+    ap.add_argument("--geometry", help="WxH+X+Y")
+    ap.add_argument("--fullscreen", action="store_true")
+    ap.add_argument("--maximized", action="store_true", help="decorated, maximized window")
+    ap.add_argument("--borderless", action="store_true", help="undecorated window")
+    ap.add_argument("--topmost", action="store_true", help="keep window above others")
+    ap.add_argument("--transparent", action="store_true", help="transparent background")
+    args = ap.parse_args()
+
+    title = args.title or "msposd-map"
+
+    win = Gtk.Window()
+    win.set_title(title)
+    win.set_accept_focus(True)
+
+    # Ephemeral context = no on-disk cache, so the window always loads the current
+    # viewer.html/JS instead of a stale copy cached from a previous launch.
+    ctx = WebKit2.WebContext.new_ephemeral()
+    ctx.set_cache_model(WebKit2.CacheModel.DOCUMENT_VIEWER)
+    view = WebKit2.WebView.new_with_context(ctx)
+    view.set_can_focus(True)
+    if args.transparent:
+        win.set_app_paintable(True)
+        screen = win.get_screen()
+        visual = screen.get_rgba_visual()
+        if visual:
+            win.set_visual(visual)
+        view.set_background_color(Gdk.RGBA(0, 0, 0, 0))
+
+    win.add(view)
+    border = BorderWindow(win)
+
+    if args.borderless:
+        win.set_decorated(False)
+        win.set_skip_taskbar_hint(True)
+    if args.topmost:
+        win.set_keep_above(True)
+        # Overlay: don't grab the input focus when mapped, so the fullscreen video
+        # stays active and keeps covering the taskbar. The map gets its keys via
+        # the global grab instead of focus.
+        win.set_focus_on_map(False)
+
+    # Geometry: restore last saved size/position (keyed by window title).
+    # --geometry is the fallback used only when nothing has been saved yet.
+    # Fullscreen/maximised modes are excluded — their geometry is just the
+    # screen size, which is not a useful saved default.
+    can_persist = not args.fullscreen and not args.maximized
+    geo = None
+    if can_persist:
+        geo = load_geometry(title) or (parse_geometry(args.geometry) if args.geometry else None)
+        if geo:
+            w, h, x, y = geo
+            win.set_default_size(w, h)
+            win.resize(w, h)
+            if x is not None:
+                win.move(x, y)
+        else:
+            win.set_default_size(1000, 700)
+
+        # Last known-good geometry, captured only while the window is mapped.
+        # Written to disk on a debounce after moves/resizes and again at quit.
+        _last_geo = [None]
+        _save_tid = [0]
+
+        def _capture_geo():
+            if not win.get_mapped():
+                return
+            x, y = win.get_position()
+            w, h = win.get_size()
+            if w > 1 and h > 1:
+                _last_geo[0] = f"{w}x{h}+{x}+{y}"
+
+        def _flush_save():
+            _save_tid[0] = 0
+            if _last_geo[0]:
+                save_geometry(title, _last_geo[0])
+            return False
+
+        def on_configure(_w, _ev):
+            _capture_geo()
+            if _save_tid[0]:
+                GLib.source_remove(_save_tid[0])
+            _save_tid[0] = GLib.timeout_add(500, _flush_save)
+
+        win.connect("configure-event", on_configure)
+
+    # Keep the border window in sync whenever the main window moves or resizes.
+    win.connect("configure-event", lambda _w, _ev: border.sync())
+    # Mirror map/unmap (used by map.sh --toggle via xdotool windowmap/unmap).
+    # Use the X-event variants: the plain "map"/"unmap" widget signals do NOT
+    # fire for an external xdotool windowmap/windowunmap — only the *-event ones do.
+    win.connect("map-event", lambda _w, _e: border.on_main_map() or False)
+    win.connect("unmap-event", lambda _w, _e: border.on_main_unmap() or False)
+
+    def _quit():
+        """Capture final geometry (while still mapped) and save before exiting."""
+        if can_persist:
+            _capture_geo()
+            if _last_geo[0]:
+                save_geometry(title, _last_geo[0])
+        # Never exit with the OSD left mouse-transparent (move mode active).
+        border._osd_shape.restore()
+        Gtk.main_quit()
+
+    win.connect("destroy", lambda _w: _quit())
+
+    view.load_uri(args.url)
+    win.show_all()
+    if args.fullscreen:
+        win.fullscreen()
+    elif args.maximized:
+        win.maximize()
+
+    # Re-apply saved position after mapping: some WMs override the pre-show
+    # move() hint with their own initial placement policy.
+    if can_persist and geo and geo[2] is not None:
+        GLib.idle_add(lambda: win.move(geo[2], geo[3]) or False)
+
+    # The overlay map deliberately never self-focuses: the fullscreen video must
+    # stay the active window (that keeps the taskbar covered). 'm' and the map's
+    # view keys are delivered by the global grab below, not keyboard focus.
+
+    # Esc closes; 'm'/'M' toggles the resize/move border overlay.
+    # Connected to both win and view: WebKit2GTK may give X11 focus to its own
+    # sub-window, causing win's key-press-event to be bypassed. The view handler
+    # catches it in that case. Return True prevents double-dispatch.
+    def on_key(_w, ev):
+        if ev.keyval == Gdk.KEY_Escape:
+            _quit()
+            return True
+        if ev.keyval in (Gdk.KEY_m, Gdk.KEY_M):
+            border.toggle()
+            return True
+        return False
+    win.connect("key-press-event", on_key)
+    view.connect("key-press-event", on_key)
+
+    # Overlay modes (--topmost) get their keys via a passive global grab, so they
+    # work while the video is the active window (taskbar covered) and the map has
+    # no keyboard focus. 'm' toggles move mode here; the map's own view keys
+    # (+/- zoom, Enter cycle-follow) are forwarded into the page as synthetic
+    # keydown events, since viewer.html listens on window "keydown". Not used for
+    # preflight, where the user may need to type these keys into config fields.
+    # on_key above stays as the focused-window fallback.
+    _JS_FOR_ACTION = {"zoomin": "+", "zoomout": "-", "follow": "Enter"}
+
+    def on_hotkey(action):
+        if action == "toggle":
+            if win.get_visible():
+                border.toggle()
+            return
+        key = _JS_FOR_ACTION.get(action)
+        if key is not None:
+            # Dispatch to viewer.html's window "keydown" handler.
+            view.run_javascript(
+                'window.dispatchEvent(new KeyboardEvent("keydown", {key: "%s"}));' % key,
+                None, None, None)
+
+    if args.topmost:
+        GlobalHotkeys({
+            "m":           "toggle",
+            "plus":        "zoomin",   # main-row '+' (shifted) and keypad below
+            "equal":       "zoomin",   # unshifted '=' key, same as viewer.html
+            "KP_Add":      "zoomin",
+            "minus":       "zoomout",
+            "KP_Subtract": "zoomout",
+            "Return":      "follow",
+            "KP_Enter":    "follow",
+        }, on_hotkey).start()
+
+    # Map SIGTERM/SIGINT onto GTK's clean shutdown path (via the GLib main loop)
+    # so WebKit tears down its WebProcess/NetworkProcess children instead of
+    # leaving them orphaned. Plain signal handlers don't fire while Gtk.main()
+    # is blocked in C; a GLib unix-signal source is delivered as a loop event.
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGTERM, _quit)
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, _quit)
+
+    Gtk.main()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(0)

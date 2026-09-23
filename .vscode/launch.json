@@ -9,7 +9,7 @@
             "program": "${workspaceFolder}/msposd",            
             "args": [                
                 "--master",
-                "127.0.0.1:14550",
+                "127.0.0.1:14560",
                 "--baudrate",
                 "115200",
                 "--osd",
@@ -54,7 +54,9 @@
             "args": [                
                 "-m",
                 "/tmp/inav_pty",                
-                "-d",               
+                "-d",
+                "--out",
+                "127.0.0.1:14560",
                 "-r",
                 "1030",                
                 "--ahi",

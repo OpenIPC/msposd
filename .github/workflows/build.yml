@@ -5,6 +5,7 @@ on:
       - main
     tags:
       - '*'
+      - '!mspmaptool*'   # map tool releases are published by hand, not firmware
   pull_request:
     branches:
       - main
@@ -20,7 +21,7 @@ jobs:
       - name: Build
         run: |
           sudo apt-get update
-          DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC sudo apt-get -y install git make wget gcc libevent-dev libcsfml-dev file g++ cpio unzip rsync bc bzip2 libcairo-dev
+          DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC sudo apt-get -y install git make wget gcc libevent-dev libcsfml-dev file g++ cpio unzip rsync bc bzip2 libcairo-dev libsqlite3-dev
           ./build.sh goke
           ./build.sh hisi
           ./build.sh star6b0

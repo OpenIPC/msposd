@@ -1,0 +1,4 @@
+.ffkiosk/
+maps/
+__pycache__/
+state.ini

@@ -36,7 +36,7 @@ if [ ! -f $output/tmp/prepare_chroot.done ]; then
     echo 'deb [signed-by=/usr/share/keyrings/radxa-archive-keyring.gpg] https://radxa-repo.github.io/bullseye rockchip-bullseye main' > /etc/apt/sources.list.d/80-rockchip.list
 
     apt-get update
-    apt-get install -y git gcc make pkg-config libspdlog-dev libevent-dev libcairo-dev
+    apt-get install -y git gcc make pkg-config libspdlog-dev libevent-dev libcairo-dev libsqlite3-dev
     apt clean
     touch /tmp/prepare_chroot.done
 EOL
