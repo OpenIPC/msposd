@@ -2968,12 +2968,6 @@ static void InitMSPHook() {
 #endif	
 
 #endif
-#ifdef __HI3516CV6XX__
-	// CLUT4: VENC reads the whole overlay for every encoded frame, and a
-	// full-screen ARGB1555 one (~4 MB at 1080p) visibly glitches the video.
-	PIXEL_FORMAT_DEFAULT = PIXEL_FORMAT_I4; // I4 format, 4 bits per pixel
-	PIXEL_FORMAT_BitsPerPixel = 4;
-#endif
 #if defined(_x86) || defined(__ROCKCHIP__)
 	AGL_enabled = terrain_elevation_available();
 	if (AGL_enabled)
@@ -3239,10 +3233,6 @@ static void CloseMSP() {
 		if (deinit)
 			printf("[%s:%d]RGN_DeInit failed with %#x!\n", __func__, __LINE__, s32Ret);
 	}
-#elif defined(__HI3516CV6XX__)
-	// Otherwise the last canvas stays on the video until the encoder restarts
-	if (DrawOSD)
-		s32Ret = unload_region(&osds[FULL_OVERLAY_ID].hand);
 #endif
 #if defined(_x86) || defined(__ROCKCHIP__)
 	Close();

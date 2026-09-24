@@ -6,7 +6,6 @@ CFLAGS += -Wno-address-of-packed-member -DVERSION_STRING="\"$(VERSION_STRING)\""
 SRCS := compat.c msposd.c bmp/bitmap.c bmp/region.c bmp/lib/schrift.c bmp/text.c osd/net/network.c osd/msp/msp.c osd/msp/msp_displayport.c libpng/lodepng.c osd/util/interface.c osd/util/settings.c osd/util/ini_parser.c osd/msp/vtxmenu.c osd/util/subtitle.c osd/util/simple_ini.c
 GS_SRCS := osd/util/terrain_elevation.c osd/util/terrain_agl.c
 OUTPUT ?= $(PWD)
-OPENHISILICON ?= $(PWD)/openhisilicon
 BUILD = $(CC) $(SRCS) -I $(SDK)/include -I$(TOOLCHAIN)/usr/include -I$(PWD) -L$(DRV) $(CFLAGS) $(LIB) -levent_core -Os -s $(CFLAGS) -o $(OUTPUT)
 
 VERSION := $(shell git describe --always --dirty)
@@ -21,7 +20,7 @@ version.h:
 all: version.h
 
 clean:
-	rm -f *.o msposd msposd_goke msposd_hisi msposd_hi3536 msposd_hi3516cv6xx msposd_star6b0 msposd_star6e msposd_rockchip
+	rm -f *.o msposd msposd_goke msposd_hisi msposd_star6b0 msposd_star6e msposd_rockchip
 
 goke: version.h
 	$(eval SDK = ./sdk/gk7205v300)
@@ -39,14 +38,6 @@ hi3536: version.h
 	$(eval SDK = ./sdk/hi3536dv100)
 	$(eval CFLAGS += -D__GOKE__ -D__HI3536__)
 	$(eval LIB = -lm -ldnvqe -lmpi -ljpeg -lupvqe -lVoiceEngine)
-	$(BUILD)
-
-# Hi3516CV6xx (CV610/CV608, V5 "ot_"/"ss_mpi_" API). Headers come from the
-# openhisilicon tree (OPENHISILICON), libraries from the osdrv package (DRV).
-hi3516cv6xx: version.h
-	$(eval SDK = $(OPENHISILICON))
-	$(eval CFLAGS += -D__GOKE__ -D__HI3516CV6XX__ -I$(OPENHISILICON)/kernel/include/hi3516cv6xx)
-	$(eval LIB = -lm -lss_mpi -lss_mpi_sysmem -lsecurec)
 	$(BUILD)
 
 star6b0: version.h

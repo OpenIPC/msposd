@@ -49,126 +49,9 @@ int InitRGN_SigmaStar(){
 #endif	
 }
 
-#ifdef __HI3516CV6XX__
-static ot_mpp_chn rgn_chn_ot = {.mod_id = OT_ID_VENC, .dev_id = 0, .chn_id = 0};
-
-// The encoder's VENC channel isn't fixed (waybeam uses 1 with the os02k10
-// plugin), and attaching to an unused channel succeeds silently. Use
-// MSPOSD_VENC_CHN if set, else the first H.264/H.265 channel, else 0.
-static int find_venc_chn_ot(void) {
-	const char *env = getenv("MSPOSD_VENC_CHN");
-	if (env && *env)
-		return atoi(env);
-
-	ot_venc_chn_attr attr;
-	for (int chn = 0; chn < OT_VENC_MAX_CHN_NUM; chn++) {
-		if (ss_mpi_venc_get_chn_attr(chn, &attr) != TD_SUCCESS)
-			continue;
-		if (attr.venc_attr.type == OT_PT_H264 || attr.venc_attr.type == OT_PT_H265)
-			return chn;
-	}
-	fprintf(stderr, "[%s:%d] No H.264/H.265 VENC channel found, using 0\n", __func__, __LINE__);
-	return 0;
-}
-
-// Same flow as the HI_MPI version below, on the V5 (ot_/ss_mpi_) region API.
-static int create_region_ot(ot_rgn_handle handle, int x, int y, int width, int height) {
-	ot_rgn_attr stRegion, stRegionCurrent;
-	ot_rgn_chn_attr stChnAttr, stChnAttrCurrent;
-	td_s32 s32Ret;
-
-	rgn_chn_ot.chn_id = find_venc_chn_ot();
-	printf("Attaching OSD region %d to VENC channel %d\n", handle, rgn_chn_ot.chn_id);
-
-	// Region position must be 2-pixel aligned
-	x &= ~1;
-	y &= ~1;
-
-	memset(&stRegion, 0, sizeof(stRegion));
-	stRegion.type = OT_RGN_OVERLAY;
-	if (PIXEL_FORMAT_DEFAULT == PIXEL_FORMAT_I4) {
-		// CLUT entries are ARGB8888; msposd's palette is the one the I4
-		// renderer already draws with (index 15 = transparent).
-		stRegion.attr.overlay.pixel_format = OT_PIXEL_FORMAT_ARGB_CLUT4;
-		stRegion.attr.overlay.bg_color = 15;
-		for (int i = 0; i < OT_RGN_CLUT_NUM; i++) {
-			MI_RGN_PaletteElement_t *e = &g_stPaletteTable.astElement[i];
-			stRegion.attr.overlay.clut[i] =
-				(e->u8Alpha << 24) | (e->u8Red << 16) | (e->u8Green << 8) | e->u8Blue;
-		}
-		// Index 0 is never drawn (the palette search starts at 1), but a fresh
-		// canvas and every zero-filled buffer is all index 0 -- opaque black
-		// in msposd's palette, which blanked the whole video.
-		stRegion.attr.overlay.clut[0] = 0;
-	} else {
-		stRegion.attr.overlay.pixel_format = OT_PIXEL_FORMAT_ARGB_1555;
-		stRegion.attr.overlay.bg_color = 0x7fff;
-	}
-	stRegion.attr.overlay.size.width = width;
-	stRegion.attr.overlay.size.height = height;
-	stRegion.attr.overlay.canvas_num = 2;
-
-	s32Ret = ss_mpi_rgn_get_attr(handle, &stRegionCurrent);
-	if (s32Ret) {
-		if (verbose)
-			fprintf(stderr, "[%s:%d]RGN_GetAttr failed with %#x , creating region %d...\n",
-				__func__, __LINE__, s32Ret, handle);
-		s32Ret = ss_mpi_rgn_create(handle, &stRegion);
-		if (s32Ret) {
-			fprintf(stderr, "[%s:%d]RGN_Create failed with %#x!\n", __func__, __LINE__, s32Ret);
-			return -1;
-		}
-	} else if (stRegionCurrent.attr.overlay.size.height != height ||
-			   stRegionCurrent.attr.overlay.size.width != width ||
-			   stRegionCurrent.attr.overlay.pixel_format != stRegion.attr.overlay.pixel_format) {
-		fprintf(stderr, "[%s:%d] Region parameters are different, recreating ... \n", __func__,
-			__LINE__);
-		ss_mpi_rgn_detach_from_chn(handle, &rgn_chn_ot);
-		ss_mpi_rgn_destroy(handle);
-		s32Ret = ss_mpi_rgn_create(handle, &stRegion);
-		if (s32Ret) {
-			fprintf(stderr, "[%s:%d]RGN_Create failed with %#x!\n", __func__, __LINE__, s32Ret);
-			return -1;
-		}
-	}
-
-	s32Ret = ss_mpi_rgn_get_chn_display_attr(handle, &rgn_chn_ot, &stChnAttrCurrent);
-	if (s32Ret) {
-		if (verbose)
-			fprintf(stderr, "[%s:%d]RGN_GetDisplayAttr failed with %#x %d, attaching...\n",
-				__func__, __LINE__, s32Ret, handle);
-	} else if (stChnAttrCurrent.attr.overlay_chn.point.x != x ||
-			   stChnAttrCurrent.attr.overlay_chn.point.y != y) {
-		if (verbose)
-			fprintf(stderr, "[%s:%d] Position has changed, detaching handle %d...\n", __func__,
-				__LINE__, handle);
-		ss_mpi_rgn_detach_from_chn(handle, &rgn_chn_ot);
-	}
-
-	memset(&stChnAttr, 0, sizeof(stChnAttr));
-	stChnAttr.is_show = TD_TRUE;
-	stChnAttr.type = OT_RGN_OVERLAY;
-	stChnAttr.attr.overlay_chn.point.x = x;
-	stChnAttr.attr.overlay_chn.point.y = y;
-	stChnAttr.attr.overlay_chn.fg_alpha = OT_RGN_OVERLAY_VENC_MAX_ALPHA;
-	stChnAttr.attr.overlay_chn.bg_alpha = 0;
-	// Layer 0 is taken by waybeam's debug OSD
-	stChnAttr.attr.overlay_chn.layer = 1;
-	stChnAttr.attr.overlay_chn.qp_info.enable = TD_FALSE;
-	stChnAttr.attr.overlay_chn.dst = OT_RGN_ATTACH_JPEG_MAIN;
-
-	s32Ret = ss_mpi_rgn_attach_to_chn(handle, &rgn_chn_ot, &stChnAttr);
-	if (s32Ret && verbose)
-		fprintf(stderr, "[%s:%d]RGN_AttachToChn returned %#x\n", __func__, __LINE__, s32Ret);
-	return 0;
-}
-#endif
-
 int create_region(int *handle, int x, int y, int width, int height) {
 	int s32Ret = -1;
-#ifdef __HI3516CV6XX__
-	s32Ret = create_region_ot(*handle, x, y, width, height);
-#elif !defined(_x86) && !defined(__ROCKCHIP__)
+#if !defined(_x86) && !defined(__ROCKCHIP__)
 #ifdef __SIGMASTAR__
 	MI_RGN_ChnPort_t stChn;
 
@@ -483,35 +366,6 @@ int set_bitmap(int handle, BITMAP *bitmap) {
 #if !defined(_x86) && !defined(__ROCKCHIP__)
 #ifdef __SIGMASTAR__
 	s32Ret = MI_RGN_SetBitMap(DEV handle, (MI_RGN_Bitmap_t *)(bitmap));
-#elif defined(__HI3516CV6XX__)
-	// Every push swaps the region's canvas under the running encoder; skip
-	// it when the frame is unchanged (e.g. a static OSD with no FC).
-	static void *last_data = NULL;
-	static size_t last_size = 0;
-	size_t size = bitmap->u32Height *
-				  getRowStride(bitmap->u32Width, bitmap->enPixelFormat == PIXEL_FORMAT_I4 ? 4 : 16);
-	if (last_data && last_size == size && !memcmp(last_data, bitmap->pData, size))
-		return 0;
-
-	ot_bmp bmp = {
-		.pixel_format = bitmap->enPixelFormat == PIXEL_FORMAT_I4 ? OT_PIXEL_FORMAT_ARGB_CLUT4
-																 : bitmap->enPixelFormat,
-		.width = bitmap->u32Width,
-		.height = bitmap->u32Height,
-		.data = bitmap->pData,
-	};
-	s32Ret = ss_mpi_rgn_set_bmp(handle, &bmp);
-
-	// Only remember frames that actually reached the region
-	if (!s32Ret) {
-		if (last_size != size) {
-			free(last_data);
-			last_data = malloc(size);
-			last_size = last_data ? size : 0;
-		}
-		if (last_data)
-			memcpy(last_data, bitmap->pData, size);
-	}
 #elif __GOKE__
 	s32Ret = HI_MPI_RGN_SetBitMap(handle, (BITMAP_S *)(bitmap));
 #endif
@@ -597,12 +451,6 @@ int unload_region(int *handle) {
 
 	MI_RGN_DetachFromChn(DEV *handle, &stChn);
 	s32Ret = MI_RGN_Destroy(DEV *handle);
-	if (s32Ret)
-		fprintf(stderr, "[%s:%d]RGN_Destroy failed with %#x %d!\n", __func__, __LINE__, s32Ret,
-			*handle);
-#elif defined(__HI3516CV6XX__)
-	ss_mpi_rgn_detach_from_chn(*handle, &rgn_chn_ot);
-	s32Ret = ss_mpi_rgn_destroy(*handle);
 	if (s32Ret)
 		fprintf(stderr, "[%s:%d]RGN_Destroy failed with %#x %d!\n", __func__, __LINE__, s32Ret,
 			*handle);

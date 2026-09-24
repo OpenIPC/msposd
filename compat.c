@@ -27,9 +27,7 @@ void backtrace(void) {}
 void backtrace_symbols(void) {}
 #endif
 
-// The CV6xx vendor libraries are built against musl (64-bit off_t), so the
-// 32-bit offset mmap shim below would break their memory mappings.
-#if !defined(_x86) && !defined(__ROCKCHIP__) && !defined(__HI3516CV6XX__)
+#if !defined(_x86) && !defined(__ROCKCHIP__)
 int __fgetc_unlocked(FILE *stream) { return fgetc(stream); }
 
 size_t _stdlib_mb_cur_max(void) { return 0; }
