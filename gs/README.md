@@ -141,8 +141,16 @@ The section opens by itself whenever a mix is active, so a collapsed panel can n
 imply a single source that is not the whole story. With an empty name, the first such
 mix becomes `OpenTopoMap_Satellite.mbtiles`; another becomes a timestamped sibling.
 
-**Keyed providers:** get a free key at thunderforest.com and put it in the *gitignored*
-`config.ini` under `[server] tile_key = <your-key>`. No secret is committed.
+**Unlocking Thunderforest:** create a free account at
+[thunderforest.com](https://www.thunderforest.com), confirm your email and log in — the
+dashboard shows your **API Key**. Put it in `gs/config.ini` (gitignored, so it is never
+committed) under the `[server]` section, then restart `mapserver.py`. The standalone
+`msposd-preflight` binary reads the `config.ini` next to the executable instead:
+
+```ini
+[server]
+tile_key = <your-api-key>
+```
 
 **Do not** point this at volunteer OSM servers (`tile.openstreetmap.org`, or the
 community `openstreetmap.fr` servers behind CyclOSM / Humanitarian) — they throttle or
