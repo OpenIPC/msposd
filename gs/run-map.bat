@@ -29,5 +29,6 @@ REM as OpenTopoMap fail TLS verification on many Windows machines.
   %PY% -m pip install --quiet certifi
 )
 
+if exist "%HERE%.venv-hybrid\Scripts\python.exe" set PY="%HERE%.venv-hybrid\Scripts\python.exe"
 %PY% "%HERE%mapserver.py" --open-browser %*
 exit /b %errorlevel%

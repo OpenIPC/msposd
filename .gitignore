@@ -29,3 +29,9 @@ gs/dist/
 
 .claude/
 AGENTS.md
+
+# Downloaded hybrid tools and local working data
+gs/assets/bin/
+gs/hybrid-cache/
+gs/.venv-hybrid/
+__pycache__/

@@ -30,6 +30,7 @@ if errorlevel 1 (
   exit /b 1
 )
 %PY% -m pip install --quiet --upgrade pyinstaller certifi || goto :err
+%PY% -m pip install -r gs\requirements-hybrid.txt || goto :err
 %PY% -m PyInstaller --clean --noconfirm --distpath gs\dist --workpath gs\build "%HERE%mapserver.spec" || goto :err
 echo.
 echo Built gs\dist\mspmaptool_windows.exe

@@ -192,7 +192,11 @@ ensure_server() {
   if server_running; then
     return
   fi
-  nohup python3 "$HERE/mapserver.py" >"$SERVER_LOG" 2>&1 &
+  local server_python=python3
+  if [[ -x "$HERE/.venv-hybrid/bin/python" ]]; then
+    server_python="$HERE/.venv-hybrid/bin/python"
+  fi
+  nohup "$server_python" "$HERE/mapserver.py" >"$SERVER_LOG" 2>&1 &
   sleep 1
 }
 

@@ -24,7 +24,8 @@ OS_NAME = {"win32": "windows", "darwin": "macos"}.get(sys.platform, "linux")
 
 # mapserver.py imports certifi only on Windows (inside a function), so name it
 # explicitly there; PyInstaller's certifi hook then bundles cacert.pem.
-HIDDEN = ["tiles_info"]                        # imported lazily inside mapserver.py
+HIDDEN = ["tiles_info", "hybrid_service", "hybrid_render", "protomaps_source",
+          "pmtiles.reader", "pmtiles.tile"]       # imported lazily inside mapserver.py
 if sys.platform == "win32":
     HIDDEN.append("certifi")
 
@@ -36,12 +37,13 @@ for _f in ("leaflet.js", "leaflet.css"):
 a = Analysis(
     [os.path.join(GS, "mapserver.py")],
     pathex=[GS],                                   # so `import tiles_info` resolves
-    binaries=[],
-    datas=[(os.path.join(GS, "web"), "web")],      # -> _MEIPASS/web (RES_DIR/web)
+    binaries=[],                                   # pmtiles CLI is downloaded on first use
+    datas=[(os.path.join(GS, "web"), "web"),       # -> _MEIPASS/web (RES_DIR/web)
+           (os.path.join(GS, "assets", "fonts"), "assets/fonts")],
     hiddenimports=HIDDEN,
     hookspath=[],
     runtime_hooks=[],
-    excludes=["tkinter", "gi", "PIL", "numpy"],    # keep the binary lean
+    excludes=["tkinter", "gi"],    # keep the binary lean
     noarchive=False,
 )
 pyz = PYZ(a.pure, a.zipped_data)

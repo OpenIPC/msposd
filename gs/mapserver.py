@@ -13,6 +13,7 @@ See documentation/offline-map-overlay-spec.md.
 """
 
 import http.client
+import importlib.util
 import json
 import math
 import os
@@ -29,6 +30,7 @@ import time
 import urllib.request
 import zipfile
 import zlib
+from pathlib import Path
 from configparser import ConfigParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, urljoin
@@ -87,7 +89,41 @@ def zooms():
 # _fmt_tile). The Esri layers serve JPEG and the OSM-derived ones PNG; both render in the
 # browser and on the OSD (see BASEMAP_FORMAT / OSD_TILE_FORMATS below).
 # You are responsible for each provider's usage terms and attribution.
+HYBRID = "Satellite Hybrid"
+HYBRID_DEFAULTS = dict(roads=True, road_names=True, villages=True, cities=False, buildings=True,
+                       hillshade=False, contours=True,
+                       contour_alpha=30,        # contour opacity in percent
+                       shade_relief=5,          # hillshade height exaggeration at z13
+                       shade_dark=45)           # hillshade shadow opacity in percent
+HYBRID_RANGES = {'contour_alpha': (1, 100), 'shade_relief': (1, 20), 'shade_dark': (1, 100)}
+HYBRID_CREDIT = ("Imagery: Esri, Maxar, Earthstar Geographics and contributors; "
+                 "© OpenStreetMap contributors; terrain: Mapzen Terrain Tiles on AWS Open Data")
+
+
+def valid_style_value(key, value):
+    """Return whether value is acceptable for hybrid style key: a bool, or an int within HYBRID_RANGES."""
+    if key in HYBRID_RANGES:
+        low, high = HYBRID_RANGES[key]
+        return isinstance(value, int) and not isinstance(value, bool) and low <= value <= high
+    return key in HYBRID_DEFAULTS and isinstance(value, bool)
+
+
+def hybrid_style(raw):
+    """Return validated hybrid style settings from stored JSON text raw.
+
+    Malformed JSON, unknown keys and invalid values fall back to HYBRID_DEFAULTS.
+    """
+    try:
+        data = json.loads(raw or '{}')
+    except ValueError:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    return {k: data[k] if valid_style_value(k, data.get(k)) else v for k, v in HYBRID_DEFAULTS.items()}
+
+
 BASEMAPS = {
+    HYBRID: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     "Satellite": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     "Streets": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
     "Topo": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
@@ -102,6 +138,7 @@ BASEMAPS = {
 
 # Tile format each basemap serves (verified against the live endpoints).
 BASEMAP_FORMAT = {
+    HYBRID: "JPEG",
     "Satellite": "JPEG",
     "Streets": "JPEG",
     "Topo": "JPEG",
@@ -128,6 +165,9 @@ def basemap_issues(tile_key):
             issues[name] = "needs key"
         elif fmt not in OSD_TILE_FORMATS:
             issues[name] = f"{fmt or '?'} — not on OSD"
+    # The pmtiles extractor is downloaded on first remote use, so only Python modules are required.
+    if any(importlib.util.find_spec(name) is None for name in ('PIL', 'pmtiles')):
+        issues[HYBRID] = "install hybrid components"
     return issues
 
 DEFAULTS = {
@@ -141,6 +181,8 @@ DEFAULTS = {
         "tile_delay_ms": "60",
         # API key for keyed basemaps (fills {key} in the tile URL, e.g. Thunderforest)
         "tile_key": "",
+        # Optional local Protomaps v4 archive or mirror; empty resolves the current build.
+        "protomaps_source": "",
     },
     "map": {
         "zoom": "15",
@@ -149,6 +191,8 @@ DEFAULTS = {
         # per-zoom sources, one per stored level, coarse -> detail. Empty means
         # "use `basemap` for every level" (the simple, single-source case).
         "sources": "",
+        "hybrid_style": json.dumps(HYBRID_DEFAULTS),
+        "hybrid_satellite_pack": "",
         "basemap": "Satellite",
         # download terrain elevation for the same area (separate maps/elevation.db)
         "elevation": "1",
@@ -1061,7 +1105,8 @@ def cache_summary(basemap):
             "bounds": ({"n": top["n"], "w": top["w"], "s": top["s"], "e": top["e"]}
                        if top else None),
             "map_type": "+".join(source_names) if source_names else None,
-            "source_levels": source_levels}
+            "source_levels": source_levels, "attribution": metadata.get("attribution", ""),
+            "complete": metadata.get("complete", "1") == "1"}
 
 
 def downloaded_pack_summaries():
@@ -1083,7 +1128,7 @@ def downloaded_pack_summaries():
             continue
         try:
             summary = cache_summary(stem)
-            summary["compatible"] = bool(summary["total"] and summary["fmt"] and
+            summary["compatible"] = bool(summary.get("complete", True) and summary["total"] and summary["fmt"] and
                                          all(fmt in OSD_TILE_FORMATS
                                              for fmt in summary["fmt"].split("+")))
         except (OSError, sqlite3.Error, TypeError, ValueError, OverflowError) as exc:
@@ -1593,12 +1638,105 @@ def set_dl(**kw):
         dl_status.update(kw)
 
 
-def download_worker(basemap, zs, srcs, north, south, east, west):
+_hybrid_service = None
+_hybrid_init_lock = threading.Lock()
+
+
+def hybrid_service():
+    """Return the lazily loaded shared hybrid renderer; raise if components are missing."""
+    global _hybrid_service
+    with _hybrid_init_lock:
+        if _hybrid_service is None:
+            from hybrid_service import HybridService
+            _hybrid_service = HybridService(os.path.join(APP_DIR, 'hybrid-cache'), RES_DIR,
+                                            os.path.join(APP_DIR, 'assets', 'bin'), fetch_terrain)
+        return _hybrid_service
+
+
+def fetch_terrain(z, x, y):
+    """Return terrarium elevation PNG bytes for XYZ tile z/x/y; raise when offline or on failure."""
+    if not is_online():
+        raise OSError('Terrain tile unavailable offline')
+    return _tile_get(_fmt_tile(DEM_URL, z, x, y))
+
+
+def pack_metadata(pack):
+    """Return metadata for pack id, or an empty dictionary for old/unavailable packs."""
+    path = mbtiles_for(pack)
+    if not os.path.isfile(path):
+        return {}
+    try:
+        conn = sqlite3.connect(Path(path).as_uri() + '?mode=ro', uri=True)
+        try:
+            return dict(conn.execute('SELECT name,value FROM metadata'))
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return {}
+
+
+def hybrid_options():
+    """Return a validated snapshot of hybrid settings and optional satellite input identity."""
+    with config_lock:
+        m = config['map']
+        style = hybrid_style(m.get('hybrid_style', ''))
+        pack = m.get('hybrid_satellite_pack', '')
+        source = config['server'].get('protomaps_source', '')
+    stamp = ''
+    if pack:
+        if not resolve_pack(pack):
+            raise ValueError('Satellite input pack is unavailable')
+        meta = pack_metadata(pack)
+        levels = meta.get('sources', '')
+        pure = (levels and all(v.partition(':')[2] == 'Satellite' for v in levels.split(',')))
+        if not pure and not (pack == 'Satellite' and not levels):
+            raise ValueError('Choose a pure Satellite pack with known provenance')
+        stat = os.stat(mbtiles_for(pack))
+        stamp = f'{stat.st_size}:{stat.st_mtime_ns}'
+    return dict(style=style, satellite_pack=pack, satellite_identity=stamp, source=source)
+
+
+def hybrid_satellite(options):
+    """Return an imagery callback bound to frozen options; reuses raw tiles before network."""
+    pack = options['satellite_pack']
+    def get_tile(z, x, y):
+        """Return raw satellite bytes at z/x/y, or None when offline coverage is absent."""
+        if pack:
+            stat = os.stat(mbtiles_for(pack))
+            if f'{stat.st_size}:{stat.st_mtime_ns}' != options['satellite_identity']:
+                raise ValueError('Satellite source pack changed; prepare again')
+            data = read_tile(pack, z, x, y)
+            if data is not None:
+                return data
+        if not is_online():
+            return None
+        data = fetch_tile('Satellite', z, x, y)
+        get_tile.download_bytes += len(data)
+        return data
+    get_tile.download_bytes = 0
+    return get_tile
+
+
+def tile_order(xs, ys):
+    """Yield (x, y) over tile ranges xs and ys, one aligned 4 x 4 block at a time.
+
+    Blocks match protomaps_source.GROUP, so each hybrid render group is visited once
+    and its cached overlay is never evicted before all of its tiles are stored.
+    """
+    for gx in range(xs.start // 4 * 4, xs.stop, 4):
+        for gy in range(ys.start // 4 * 4, ys.stop, 4):
+            for x in range(max(gx, xs.start), min(gx + 4, xs.stop)):
+                for y in range(max(gy, ys.start), min(gy + 4, ys.stop)):
+                    yield x, y
+
+
+def download_worker(basemap, zs, srcs, north, south, east, west, hybrid=None):
     """Download a bbox's tiles (all stored zooms) into the pack, then POIs.
 
     basemap: Unique pack id to write. zs: snapshotted stored zoom levels.
     srcs: snapshotted tile sources aligned with zs.
     north/south/east/west: bbox edges in degrees.
+    hybrid: Optional frozen hybrid settings.
     Runs in a thread; reports progress via set_dl and refuses areas over
     MAX_TILES. Also stores center in config and fetches Overpass landmarks.
 
@@ -1614,7 +1752,16 @@ def download_worker(basemap, zs, srcs, north, south, east, west):
            msg=f"downloading {basemap}", pack=basemap)
     delay = int(config["server"]["tile_delay_ms"]) / 1000.0
     done = failed = 0
+    hybrid_session = None
     try:
+        if hybrid is not None:
+            set_dl(phase='vectors', done=0, total=0, msg='Preparing roads and buildings…')
+            hybrid_session = hybrid_service().prepare(
+                hybrid, (north, south, east, west),
+                [z for z, src in zip(zs, srcs) if src == HYBRID],
+                hybrid_satellite(hybrid), lambda message: set_dl(msg=message))
+            set_dl(phase='compose', done=0, total=total,
+                   vector_bytes=os.path.getsize(hybrid_session.vectors[0].path), msg='Composing satellite hybrid…')
         with db_lock:
             conn = open_mbtiles(basemap, write=True)
             # Record the mix this pack was built from, so the tool can tell when a
@@ -1622,42 +1769,64 @@ def download_worker(basemap, zs, srcs, north, south, east, west):
             conn.execute("DELETE FROM metadata WHERE name='sources'")
             conn.execute("INSERT INTO metadata VALUES('sources',?)",
                          (",".join(f"{z}:{s}" for z, s in zip(zs, srcs)),))
+            if hybrid_session is not None:
+                from hybrid_render import STYLE_VERSION
+                metadata = {
+                    'hybrid': json.dumps({'style': hybrid['style'],
+                                          'satellite_pack': hybrid['satellite_pack']}, sort_keys=True),
+                    'protomaps_build': hybrid_session.vectors[0].identity,
+                    'hybrid_style_version': str(STYLE_VERSION), 'attribution': HYBRID_CREDIT,
+                    'complete': '0',
+                    'bounds': f'{west},{south},{east},{north}',
+                    'minzoom': str(min(zs)), 'maxzoom': str(max(zs)),
+                }
+                formats = {BASEMAP_FORMAT.get(s) for s in srcs}
+                if len(formats) == 1 and formats <= {'JPEG', 'PNG'}:
+                    metadata['format'] = {'JPEG': 'jpg', 'PNG': 'png'}[formats.pop()]
+                conn.executemany('INSERT INTO metadata VALUES(?,?)', metadata.items())
             conn.commit()
         try:
             for z, z_src in zip(zs, srcs):
                 xs, ys = bbox_tile_ranges(north, south, east, west, z)
                 ymax = (1 << z) - 1
-                for x in xs:
-                    for y in ys:
-                        ymbt = ymax - y
-                        with db_lock:
-                            have = conn.execute(
-                                "SELECT 1 FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?",
-                                (z, x, ymbt),
-                            ).fetchone()
-                        if not have:
-                            data = None
-                            for _ in range(3):          # retry transient fetch errors
-                                try:
-                                    data = fetch_tile(z_src, z, x, y)
-                                    break
-                                except Exception:
-                                    time.sleep(0.3)
-                            if data is not None:
-                                with db_lock:
-                                    conn.execute(
-                                        "INSERT OR REPLACE INTO tiles VALUES(?,?,?,?)",
-                                        (z, x, ymbt, data),
-                                    )
-                                time.sleep(delay)
-                            else:
-                                failed += 1
-                        done += 1
-                        if done % 10 == 0:
+                for x, y in tile_order(xs, ys):
+                    ymbt = ymax - y
+                    with db_lock:
+                        have = conn.execute(
+                            "SELECT 1 FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?",
+                            (z, x, ymbt),
+                        ).fetchone()
+                    if not have:
+                        data = None
+                        for _ in range(3):          # retry transient fetch errors
+                            try:
+                                data = (hybrid_session.tile(z, x, y) if z_src == HYBRID
+                                        else fetch_tile(z_src, z, x, y))
+                                break
+                            except Exception:
+                                time.sleep(0.3)
+                        if data is not None:
                             with db_lock:
-                                conn.commit()
-                            set_dl(done=done, failed=failed)
+                                conn.execute(
+                                    "INSERT OR REPLACE INTO tiles VALUES(?,?,?,?)",
+                                    (z, x, ymbt, data),
+                                )
+                            time.sleep(delay)
+                        else:
+                            failed += 1
+                    done += 1
+                    if done % 10 == 0:
+                        with db_lock:
+                            conn.commit()
+                        set_dl(done=done, failed=failed,
+                               pack_bytes=os.path.getsize(mbtiles_for(basemap)),
+                               imagery_download_bytes=(hybrid_session.satellite.download_bytes
+                                                       if hybrid_session else 0))
             with db_lock:
+                if hybrid_session is not None:
+                    # Failed tiles are gaps, as in other packs; only an interrupted job stays incomplete.
+                    conn.execute("UPDATE metadata SET value='1' WHERE name='complete'")
+                    conn.execute("INSERT INTO metadata VALUES('failed_tiles',?)", (str(failed),))
                 conn.commit()
         finally:
             with db_lock:
@@ -1941,12 +2110,13 @@ def save_poi_selection(items):
             conn.close()
 
 
-def start_download(name, zs, srcs, north, south, east, west):
+def start_download(name, zs, srcs, north, south, east, west, hybrid=None):
     """Reserve a unique pack and spawn its download worker unless busy.
 
     name: Optional requested map name. zs: stored zoom snapshot.
     srcs: source snapshot used for the fallback filename and downloaded tiles.
     north/south/east/west: bbox edges in degrees.
+    hybrid: Validated hybrid_options() snapshot, or None without hybrid levels.
     Returns: Reserved pack id, False when busy, or None on filesystem failure.
     """
     with dl_lock:
@@ -1972,11 +2142,12 @@ def start_download(name, zs, srcs, north, south, east, west):
                 return None
         dl_status.update(state="running", phase="starting", done=0, total=0, failed=0,
                          msg=f"starting {basemap}", pack=basemap,
-                         lm_count=None, dem_count=None)
+                         lm_count=None, dem_count=None, vector_bytes=0, pack_bytes=0, imagery_download_bytes=0,
+                         satellite_pack=hybrid['satellite_pack'] if hybrid else '')
     try:
         threading.Thread(
             target=download_worker,
-            args=(basemap, zs, srcs, north, south, east, west), daemon=True
+            args=(basemap, zs, srcs, north, south, east, west, hybrid), daemon=True
         ).start()
     except RuntimeError as exc:
         try:
@@ -2047,6 +2218,13 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path in ("/", "/viewer.html"):
             return self.serve_static("viewer.html")
+        if path == '/hybrid/preview':
+            key = parse_qs(urlparse(self.path).query).get('id', [''])[0]
+            try:
+                state = hybrid_service().status(key)
+            except (ImportError, OSError) as exc:
+                state = {'state': 'error', 'message': str(exc)}
+            return self._send(200, json.dumps(state), 'application/json')
         if path == "/pos":
             return self.serve_sse()
         if path == "/status":
@@ -2079,6 +2257,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         """Route POST requests (settings, target, download, poi-selection)."""
         path = urlparse(self.path).path
+        if path == '/hybrid/preview':
+            return self.serve_hybrid_preview()
         if path == "/settings":
             return self.serve_settings_post()
         if path == "/target":
@@ -2114,6 +2294,26 @@ class Handler(BaseHTTPRequestHandler):
         # viewer.html across mapwin restarts and code changes don't take effect.
         self._send(200, body, ctype, {"Cache-Control": "no-store"})
 
+    def serve_hybrid_preview(self):
+        """Ensure preview vectors for JSON viewport bounds and zoom; send session id and state."""
+        try:
+            data = self._json_body()
+            bounds = tuple(float(data[k]) for k in ('north', 'south', 'east', 'west'))
+            n, s, e, w = bounds
+            z = int(data['zoom'])
+            if not (all(math.isfinite(v) for v in bounds) and -85.051129 <= s < n <= 85.051129
+                    and -180 <= w < e <= 180 and BROWSE_MIN <= z <= BROWSE_MAX):
+                raise ValueError('Invalid preview bounds or zoom')
+            if source_for(z) != HYBRID:
+                raise ValueError('Satellite Hybrid is not used at this zoom')
+            if plan_total(n, s, e, w, [z]) > 256:
+                raise ValueError('Preview too large; reduce the browser window or zoom in')
+            options = hybrid_options()
+            result = hybrid_service().preview(options, bounds, z, hybrid_satellite(options))
+            self._send(200, json.dumps(result), 'application/json')
+        except (ValueError, TypeError, KeyError, RuntimeError, OSError, ImportError) as exc:
+            self._send(400, json.dumps({'error': str(exc)}), 'application/json')
+
     def serve_tile(self, path):
         """Serve a /tiles/{z}/{x}/{y} tile: offline cache first, else live proxy.
 
@@ -2132,6 +2332,15 @@ class Handler(BaseHTTPRequestHandler):
         src = q.get("src", [None])[0]
         offline = q.get("offline", [None])[0]      # "test offline" -> cache only, no proxy
         pack = resolve_pack(src) or pack_id()
+        hybrid_key = q.get('hybrid', [''])[0]
+        if not offline and source_for(z) == HYBRID:
+            try:
+                data = hybrid_service().tile(hybrid_key, z, x, y) if hybrid_key else None
+            except Exception as exc:
+                return self._send(503, str(exc).encode(), 'text/plain')
+            if data is None:
+                return self._send(204)
+            return self._send(200, data, 'image/jpeg', {'Cache-Control': 'no-store'})
         # 1) offline cache for this pack
         try:
             data = read_tile(pack, z, x, y)
@@ -2180,7 +2389,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, json.dumps({"error": "map pack not found"}),
                               "application/json")
         with dl_lock:
-            if dl_status["state"] == "running" and dl_status.get("pack") == name:
+            if dl_status["state"] == "running" and name in (dl_status.get("pack"), dl_status.get("satellite_pack")):
                 return self._send(409, json.dumps({"error": "map is still downloading"}),
                                   "application/json")
         try:
@@ -2252,6 +2461,13 @@ class Handler(BaseHTTPRequestHandler):
         if not os.path.exists(mb):
             return self._send(404, b"nothing downloaded for this basemap yet")
 
+        with dl_lock:
+            if dl_status['state'] == 'running' and dl_status.get('pack') == basemap:
+                return self._send(409, b'Map is still downloading')
+        metadata = pack_metadata(basemap)
+        if metadata.get('complete') == '0':
+            return self._send(409, b'Hybrid pack is incomplete; prepare a new pack before export')
+
         # Build the zip in a temp file (ZIP_STORED: tiles/db are already compact,
         # so skip the CPU of deflating ~100 MB), then stream it out.
         safe = os.path.splitext(os.path.basename(mb))[0]
@@ -2260,6 +2476,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
                 zf.write(mb, os.path.basename(mb))
+                if metadata.get('attribution'):
+                    zf.writestr('ATTRIBUTION.txt', metadata['attribution'] +
+                                '\nhttps://www.openstreetmap.org/copyright\n' +
+                                'Vector data: ' + metadata.get('protomaps_build', '') + '\n')
                 with landmarks_db_lock:                # keep landmarks.db read-consistent
                     if os.path.exists(LANDMARKS_DB):
                         zf.write(LANDMARKS_DB, "landmarks.db")
@@ -2355,6 +2575,9 @@ class Handler(BaseHTTPRequestHandler):
             "sources": srcs, "pack": pack_id(srcs),
             "basemaps": list(BASEMAPS.keys()), "basemaps_disabled": disabled,
             "basemap": basemap,
+            "hybrid_style": hybrid_style(config['map'].get('hybrid_style', '')),
+            "hybrid_credit": HYBRID_CREDIT,
+            "hybrid_satellite_pack": config['map'].get('hybrid_satellite_pack', ''),
             "elevation": dem_enabled(), "dem_zoom": DEM_ZOOM,
             "max_dem_tiles": MAX_DEM_TILES,
             "armed": ar,
@@ -2390,8 +2613,22 @@ class Handler(BaseHTTPRequestHandler):
             data = self._json_body()
         except ValueError:
             return self._send(400, b"bad json")
+        if not isinstance(data, dict):
+            return self._send(400, b'expected settings object')
+        if 'hybrid_style' in data:
+            style = data['hybrid_style']
+            if not isinstance(style, dict) or any(not valid_style_value(k, v) for k, v in style.items()):
+                return self._send(400, b'invalid hybrid style')
+        if data.get('hybrid_satellite_pack') and not resolve_pack(str(data['hybrid_satellite_pack'])):
+            return self._send(400, b'unknown satellite pack')
         with config_lock:
             m = config["map"]
+            if 'hybrid_style' in data:
+                style = hybrid_style(m.get('hybrid_style', ''))
+                style.update(data['hybrid_style'])
+                m['hybrid_style'] = json.dumps(style)
+            if 'hybrid_satellite_pack' in data:
+                m['hybrid_satellite_pack'] = str(data['hybrid_satellite_pack'])
             if "zoom" in data:
                 m["zoom"] = str(int(data["zoom"]))
             if "detail_zoom" in data:
@@ -2491,10 +2728,19 @@ class Handler(BaseHTTPRequestHandler):
             zs = zoom_set(detail)
             srcs = parse_sources(m.get("sources", ""),
                                  m.get("basemap", "Satellite"), len(zs))
+        if not (all(math.isfinite(v) for v in (north, south, east, west))
+                and -85.051129 <= south < north <= 85.051129 and -180 <= west < east <= 180):
+            return self._send(400, b'Invalid map bounds')
         total = plan_total(north, south, east, west, zs)
         if total > MAX_TILES:
             return self._send(409, json.dumps({"error": f"area too large ({total} tiles) — zoom in", "total": total}), "application/json")
-        pack = start_download(d.get("name"), zs, srcs, north, south, east, west)
+        # Validate hybrid inputs before reserving the job, so a rejected request
+        # never overwrites the status of a download that is already running.
+        try:
+            hybrid = hybrid_options() if HYBRID in srcs else None
+        except (ValueError, OSError) as exc:
+            return self._send(400, json.dumps({"error": str(exc)}), "application/json")
+        pack = start_download(d.get("name"), zs, srcs, north, south, east, west, hybrid)
         if pack is False:
             return self._send(409, json.dumps({"error": "busy"}), "application/json")
         if pack is None:

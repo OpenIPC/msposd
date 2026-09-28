@@ -63,6 +63,8 @@
   #panel .checkrow { justify-content: flex-start; }
   #panel .checkrow label { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
   #panel .checkrow input[type="checkbox"] { width: auto; margin: 0; }
+  #panel .checkrow .num { margin-left: 6px; white-space: nowrap; }
+  #panel .checkrow .num input { width: 35px; margin-left: 2px; }
   /* Target slots (preflight only) — same collapsing idiom as the POI panel */
   #tgtpanel {
     font: 12px/1.3 sans-serif; color: #fff;
@@ -233,7 +235,21 @@
 <div id="toolbox">
   <div id="panel">
     <div class="row"><span><span id="netdot" class="dot off"></span><span id="nettext">checking…</span></span></div>
-    <div class="row"><span>Basemap</span><select id="basemap" style="width:110px"></select></div>
+    <div class="row"><span>Basemap</span><select id="basemap" style="width:150px"></select></div>
+    <div id="hybridControls" style="display:none">
+      <div class="row checkrow"><label><input type="checkbox" data-hybrid="roads" checked> Roads</label></div>
+      <div class="row checkrow"><label><input type="checkbox" data-hybrid="road_names" checked> Road names</label></div>
+      <div class="row checkrow"><label><input type="checkbox" data-hybrid="villages" checked> Villages / hamlets</label></div>
+      <div class="row checkrow"><label><input type="checkbox" data-hybrid="cities"> Towns / cities</label></div>
+      <div class="row checkrow"><label><input type="checkbox" data-hybrid="buildings" checked> Buildings</label></div>
+      <div class="row checkrow"><label><input type="checkbox" data-hybrid="contours" checked> Contour lines</label>
+        <span class="num">alpha:<input type="number" data-hybrid-int="contour_alpha" min="1" max="100" value="30" title="Contour opacity, 1–100 %"></span></div>
+      <div class="row checkrow"><label><input type="checkbox" data-hybrid="hillshade"> Hillshade</label>
+        <span class="num">relief:<input type="number" data-hybrid-int="shade_relief" min="1" max="20" value="5" title="Height exaggeration, 1–20"></span>
+        <span class="num">dark:<input type="number" data-hybrid-int="shade_dark" min="1" max="100" value="45" title="Shadow opacity, 1–100 %"></span></div>
+      <div class="row"><span>Reuse imagery</span><select id="hybridSatellite"><option value="">Download satellite</option></select></div>
+      <div id="hybridStatus" style="font-size:11px;max-width:240px" role="status"></div>
+    </div>
     <div class="row"><span>Detail</span><select id="detailzoom" style="width:110px"></select></div>
     <div id="srcpanel">
       <div class="srchdr" id="srchdr"><span class="caret" id="srccaret">▸</span><span id="srcsummary">Advanced</span></div>
@@ -554,6 +570,11 @@ const scaleHome = scaleEl.parentNode;
 
 // ?src=<basemap> gives each basemap its own browser-cache key (forces fresh fetch on switch).
 let basemap = "Satellite";
+let hybridToken = "", hybridGeneration = 0, hybridTimer = null;
+let hybridVersion = 0, hybridLoading = false, hybridCredit = "";
+const hybridFailed = new Map();   // tile element -> coords awaiting prepared vectors
+let hybridSatellite = "";
+let hybridSettingsReady = Promise.resolve();
 let offlineTest = !PREFLIGHT;     // overlay defaults to cache-only; preflight keeps online-friendly default
 /** Return whether preflight tiles should use the selected downloaded pack.
  * @returns {boolean} True while a selected pack viewing mode is active.
@@ -584,7 +605,8 @@ function activeZooms() {
  */
 function tileUrl() {
   return "tiles/{z}/{x}/{y}?src=" + encodeURIComponent(activePack()) +
-    (cacheOnlyMode() ? "&offline=1" : "");
+    (cacheOnlyMode() ? "&offline=1" :
+      "&hybrid=" + encodeURIComponent(hybridToken) + "&hv=" + hybridVersion);
 }
 const tileLayer = L.tileLayer(tileUrl(), {
   minZoom: 2, maxZoom: 18,
@@ -1151,6 +1173,10 @@ function pollDownload() {
     setDownloadingPack(s.state === "running" ? (s.pack || "") : "");
     if (s.state === "running") {
       setDownloadProgress(s.done || 0, s.total || 0, s.phase);
+      if (s.phase === "vectors" || s.phase === "compose")
+        dlStatus.textContent = (s.msg || s.phase) + " · pack " + fmtBytes(s.pack_bytes || 0) +
+          " · vectors " + fmtBytes(s.vector_bytes || 0) +
+          " · imagery received " + fmtBytes(s.imagery_download_bytes || 0);
       setTimeout(pollDownload, 500);
     } else {
       endDownloadUI();
@@ -1165,8 +1191,22 @@ function pollDownload() {
     }
   });
 }
+/** Persist patch settings; return a promise that resolves after the server accepts them.
+ * @param {Object} patch Changed settings.
+ * @returns {Promise} Server response completion.
+ */
 function saveSettings(patch) {
-  fetch("settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+  hybridSettingsReady = hybridSettingsReady.catch(() => {}).then(() =>
+    fetch("settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) })
+      .then(r => { if (!r.ok) throw new Error("Settings were not saved"); }));
+  const hybridKeys = ["hybrid_style", "hybrid_satellite_pack", "sources", "basemap", "detail_zoom"];
+  hybridSettingsReady.then(() => {
+    if (Object.keys(patch).some(k => hybridKeys.includes(k))) scheduleHybrid();
+  }).catch(e => {
+    const status = document.getElementById("hybridStatus");
+    if (status) status.textContent = e.message;
+  });
+  return hybridSettingsReady;
 }
 
 // --- downloaded-coverage overlay (preflight) --------------------------------
@@ -1264,6 +1304,7 @@ function applyOfflineMode(fitIfOutside = false) {
   }
   tileLayer.redraw();
   updateZoomBtns();
+  scheduleHybrid();
 }
 const covChk = PREFLIGHT ? document.getElementById("covChk") : null;
 const offChk = PREFLIGHT ? document.getElementById("offChk") : null;
@@ -1350,6 +1391,7 @@ function deleteDownloadedPack(pack) {
 
 /** Render every downloaded pack and its stored metadata into the selector. */
 function renderDownloadedPacks() {
+  hybridPackChoices();
   if (!packList || !packSummary) return;
   packSummary.textContent = `Downloaded maps (${DOWNLOADED_PACKS.length})`;
   packList.textContent = "";
@@ -1711,6 +1753,134 @@ es.onmessage = (ev) => {
     `fix ${d.fix}  sats ${d.sats}  hdg ${d.heading}  crs ${Math.round(d.course)}`;
 };
 
+/** Return whether the current zoom previews Satellite Hybrid live.
+ * @returns {boolean} True when the nearest stored level uses the hybrid source.
+ */
+function hybridActive() {
+  return PREFLIGHT && !cacheOnlyMode() &&
+    SOURCES[ZOOMS.indexOf(nearestStoredZoom())] === "Satellite Hybrid";
+}
+/** Update layer controls and schedule preview for the current viewport; returns nothing. */
+function scheduleHybrid() {
+  if (!PREFLIGHT) return;
+  clearTimeout(hybridTimer);
+  document.getElementById("hybridControls").style.display =
+    SOURCES.includes("Satellite Hybrid") ? "" : "none";
+  const generation = ++hybridGeneration;
+  if (hybridActive()) hybridTimer = setTimeout(() => prepareHybrid(generation), 400);
+}
+/** Ensure vectors for the viewport; redraw only when the style snapshot changes.
+ * @param {number} generation Current viewport/settings generation.
+ * @returns {Promise<void>} Completion of the preparation request.
+ */
+async function prepareHybrid(generation) {
+  const status = document.getElementById("hybridStatus");
+  try {
+    await hybridSettingsReady;
+    if (generation !== hybridGeneration) return;
+    const b = map.getBounds(), z = map.getZoom();
+    const body = {north: Math.min(85.051128, b.getNorth()), south: Math.max(-85.051128, b.getSouth()),
+                  west: Math.max(-180, b.getWest()), east: Math.min(180, b.getEast()), zoom: z};
+    const response = await fetch("hybrid/preview", {method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body)});
+    const result = await response.json();
+    if (generation !== hybridGeneration) return;
+    if (!response.ok) throw new Error(result.error || "Preview preparation failed");
+    if (result.id !== hybridToken) {      // new style snapshot: every visible tile changes
+      hybridToken = result.id;
+      hybridFailed.clear();
+      tileLayer.setUrl(tileUrl());
+    }
+    showHybridState(result, generation);
+  } catch (error) {
+    if (generation === hybridGeneration) status.textContent = error.message;
+  }
+}
+/** Show a preview state, reloading waiting tiles when ready and polling while loading.
+ * @param {Object} result Server state {state, message, vector_bytes}.
+ * @param {number} generation Viewport/settings generation that requested it.
+ */
+function showHybridState(result, generation) {
+  const status = document.getElementById("hybridStatus");
+  hybridLoading = result.state === "loading";
+  if (result.state === "ready") {
+    reloadHybridTiles();
+    status.textContent = "Ready" + (result.vector_bytes ? " · vector data " + fmtBytes(result.vector_bytes) : "");
+  } else if (hybridLoading) {
+    status.textContent = result.message || "Preparing roads and buildings…";
+    hybridTimer = setTimeout(() => pollHybrid(generation), 700);
+  } else {
+    status.textContent = result.message || "Preview expired; move the map to retry";
+  }
+}
+/** Poll the current preview session until its vectors are ready.
+ * @param {number} generation Viewport/settings generation.
+ * @returns {Promise<void>} One poll and optional rescheduling.
+ */
+async function pollHybrid(generation) {
+  try {
+    const result = await fetch("hybrid/preview?id=" + encodeURIComponent(hybridToken)).then(r => r.json());
+    if (generation === hybridGeneration) showHybridState(result, generation);
+  } catch (error) {
+    if (generation === hybridGeneration) document.getElementById("hybridStatus").textContent = error.message;
+  }
+}
+/** Re-request only tiles that failed while their vectors were being prepared; returns nothing. */
+function reloadHybridTiles() {
+  hybridVersion++;
+  tileLayer.setUrl(tileUrl(), true);      // new tiles use the new version without a full redraw
+  const z = map.getZoom();
+  for (const [tile, coords] of hybridFailed) {
+    if (tile.isConnected && coords.z === z) {
+      tile.dataset.hybridRetry = "1";
+      tile.src = tileLayer.getTileUrl(coords);
+    }
+  }
+  hybridFailed.clear();
+}
+/** Populate reusable imagery choices from downloaded packs; returns nothing. */
+function hybridPackChoices() {
+  const select = document.getElementById("hybridSatellite");
+  if (!select) return;
+  select.replaceChildren(new Option("Download satellite", ""));
+  for (const pack of DOWNLOADED_PACKS) {
+    if (pack.map_type === "Satellite" && pack.compatible)
+      select.add(new Option(pack.id, pack.id));
+  }
+  if (hybridSatellite && ![...select.options].some(o => o.value === hybridSatellite))
+    select.add(new Option(hybridSatellite + " (unavailable)", hybridSatellite));
+  select.value = hybridSatellite;
+}
+if (PREFLIGHT) {
+  map.on("moveend", scheduleHybrid);
+  for (const checkbox of document.querySelectorAll("[data-hybrid]")) {
+    checkbox.onchange = () => saveSettings({hybrid_style: {[checkbox.dataset.hybrid]: checkbox.checked}});
+  }
+  for (const field of document.querySelectorAll("[data-hybrid-int]")) {
+    field.onchange = () => {
+      field.value = Math.min(+field.max, Math.max(+field.min, Math.round(+field.value) || +field.min));
+      saveSettings({hybrid_style: {[field.dataset.hybridInt]: +field.value}});
+    };
+  }
+  document.getElementById("hybridSatellite").onchange = event => {
+    hybridSatellite = event.target.value;
+    saveSettings({hybrid_satellite_pack: hybridSatellite});
+  };
+  tileLayer.on("tileerror", e => {
+    if (!hybridActive()) return;
+    hybridFailed.set(e.tile, e.coords);
+    if (e.tile.dataset.hybridRetry && !hybridLoading)
+      document.getElementById("hybridStatus").textContent = "Some hybrid tiles failed; check imagery coverage or connection";
+  });
+}
+const mapCredit = L.control.attribution({position: "bottomleft", prefix: false}).addTo(map);
+/** Update credits for preview or the selected offline pack; returns nothing. */
+function updateMapCredit() {
+  const pack = viewingPackActive() ? DOWNLOADED_PACKS.find(p => p.id === VIEW_PACK) : null;
+  const credit = pack ? (pack.attribution || "") :
+    (SOURCES.includes("Satellite Hybrid") ? hybridCredit : "");
+  mapCredit.getContainer().textContent = credit;
+}
+
 // --- init / poll ------------------------------------------------------------
 let inited = false;
 function refreshStatus() {
@@ -1768,6 +1938,16 @@ function refreshStatus() {
         buildSourceRows();            // auto-opens when the mix is non-uniform
         tileLayer.setUrl(tileUrl());
       }
+      for (const checkbox of document.querySelectorAll("[data-hybrid]")) {
+        if (s.hybrid_style && typeof s.hybrid_style[checkbox.dataset.hybrid] === "boolean")
+          checkbox.checked = s.hybrid_style[checkbox.dataset.hybrid];
+      }
+      for (const field of document.querySelectorAll("[data-hybrid-int]")) {
+        if (s.hybrid_style && typeof s.hybrid_style[field.dataset.hybridInt] === "number")
+          field.value = s.hybrid_style[field.dataset.hybridInt];
+      }
+      hybridSatellite = s.hybrid_satellite_pack || "";
+      scheduleHybrid();
       // restore the saved elevation choice without firing onchange back at it
       const demChkEl = document.getElementById("demChk");
       if (demChkEl && typeof s.elevation === "boolean") demChkEl.checked = s.elevation;
@@ -1787,6 +1967,8 @@ function refreshStatus() {
       inited = true;
     }
     updateEstimate();
+    hybridCredit = s.hybrid_credit || hybridCredit;
+    updateMapCredit();
   });
 }
 // Adopt the server's target slots without POSTing them back. Also used on the

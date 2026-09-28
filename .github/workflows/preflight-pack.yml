@@ -33,10 +33,20 @@ jobs:
       # certifi: bundled root CAs so the Windows binary verifies Let's Encrypt
       # tile sources (OpenTopoMap) regardless of the client's certificate store.
       - name: Install PyInstaller
-        run: python -m pip install --upgrade pyinstaller certifi
+        run: |
+          python -m pip install --upgrade pyinstaller certifi
+          python -m pip install -r gs/requirements-hybrid-dev.txt
+
+      - name: Test hybrid rendering
+        run: python -m unittest discover -s tests -p "test_hybrid*.py"
 
       - name: Build
         run: python -m PyInstaller --clean --noconfirm --distpath gs/dist --workpath gs/build gs/pack/mapserver.spec
+
+      - name: Smoke test packaged hybrid renderer
+        shell: bash
+        run: |
+          python gs/pack/smoke_hybrid.py gs/dist/mspmaptool_*
 
       - name: Upload binary
         uses: actions/upload-artifact@v4

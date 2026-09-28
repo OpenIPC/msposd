@@ -1,0 +1,3 @@
+-r requirements-hybrid.txt
+# Reference MVT encoder for test fixtures only; not bundled in the app.
+mapbox-vector-tile==2.2.0

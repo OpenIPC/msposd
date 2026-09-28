@@ -1,0 +1,2 @@
+Pillow==12.3.0
+pmtiles==3.8.1

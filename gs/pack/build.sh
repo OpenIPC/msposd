@@ -12,6 +12,7 @@ cd "$REPO"
 
 PY="${PYTHON:-python3}"
 "$PY" -m pip install --quiet --upgrade pyinstaller
+"$PY" -m pip install -r gs/requirements-hybrid.txt
 
 "$PY" -m PyInstaller --clean --noconfirm --distpath gs/dist --workpath gs/build "$HERE/mapserver.spec"
 
