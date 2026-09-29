@@ -5,13 +5,15 @@ import gzip
 import io
 import json
 import math
-import os
 from pathlib import Path
 import sqlite3
 import sys
 import tempfile
 import threading
+import time
 import unittest
+import urllib.error
+import urllib.request
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'gs'))
@@ -24,12 +26,16 @@ import hybrid_service
 from hybrid_render import compose_tile, features, render_overlay
 from hybrid_service import HybridService, HybridSession
 import protomaps_source
-from protomaps_source import SourceManager, VectorSource, decode_tile, padded_bounds
+from protomaps_source import LocalArchive, RemoteArchive, TileCache, decode_tile, latest_build
 import mapserver
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'gs/pack'))
 
 FONTS = Path(__file__).resolve().parents[1] / 'gs/assets/fonts'
 DEFAULTS = mapserver.HYBRID_DEFAULTS
 OFF = {k: False if isinstance(v, bool) else v for k, v in DEFAULTS.items()}   # every layer switched off
+OFF['shade_source'] = 'terrain'                  # hillshade tests use the computed method
+STYLE = dict(DEFAULTS, shade_source='terrain')   # defaults, without the network-only Esri shading
 
 # Encoder input for source tile 15/100/100: a road, a building with a hole, a village and a city.
 FIXTURE_LAYERS = {
@@ -68,9 +74,11 @@ class FixtureSource:
         """Return the fixture at source XYZ 15/100/100; other coordinates are empty."""
         return decode_tile(encode_fixture()[0]) if (z, x, y) == (15, 100, 100) else {}
 
-    def covers(self, bounds, z):
-        """Report complete coverage for any W/S/E/N bounds and zoom."""
-        return True
+    identity = 'fixture'
+    download_bytes = 0
+
+    def prefetch(self, keys):
+        """Nothing to fetch for an in-memory fixture."""
 
 
 class Terrain:
@@ -79,6 +87,9 @@ class Terrain:
     def __init__(self, height=150):
         """Store hill amplitude in metres."""
         self.height = height
+
+    def prefetch(self, keys):
+        """Nothing to fetch for synthetic terrain."""
 
     @functools.lru_cache(maxsize=64)
     def tile(self, z, x, y):
@@ -97,12 +108,26 @@ def render(source, z, gx, gy, settings, terrain=HILLS):
             for x in range(gx, gx + hybrid_render.GROUP) for y in range(gy, gy + hybrid_render.GROUP)}
 
 
-def write_archive(path):
-    """Write the fixture as a gzip PMTiles archive at path; return path."""
+def smoke():
+    """Return the packaged smoke-test module, imported lazily because it imports this module's fixtures."""
+    import smoke_hybrid
+    return smoke_hybrid
+
+
+def http_range(url, offset, length):
+    """Return length bytes at offset of url using a plain urllib Range request."""
+    request = urllib.request.Request(url, headers={'Range': f'bytes={offset}-{offset + length - 1}'})
+    with urllib.request.urlopen(request, timeout=5) as response:
+        return response.read()
+
+
+def write_archive(path, tiles=((15, 100, 100),)):
+    """Write the fixture into a gzip PMTiles archive at path at each XYZ in tiles; return path."""
     encoded, names = encode_fixture()
     with path.open('wb') as file:
         writer = Writer(file)
-        writer.write_tile(zxy_to_tileid(15, 100, 100), gzip.compress(encoded))
+        for tile_id in sorted(zxy_to_tileid(*tile) for tile in tiles):
+            writer.write_tile(tile_id, gzip.compress(encoded))
         writer.finalize({'tile_type': TileType.MVT, 'tile_compression': Compression.GZIP},
                         {'version': '4.0.0', 'vector_layers': [{'id': name} for name in names]})
     return path
@@ -224,6 +249,33 @@ class HybridTests(unittest.TestCase):
             self.assertEqual(again.tile(12, 1, 2)[-1], 100.5)
         self.assertEqual(len(calls), 1)
 
+    def test_hybrid_defaults(self):
+        """Satellite Hybrid starts with roads, both place types, contours at 22 and Esri shading at 3."""
+        on = {k for k, v in DEFAULTS.items() if v is True}
+        self.assertEqual(on, {'roads', 'villages', 'cities', 'contours', 'hillshade'})
+        self.assertEqual((DEFAULTS['contour_alpha'], DEFAULTS['shade_source'], DEFAULTS['esri_contrast']),
+                         (22, 'esri', 3))
+
+    def test_village_labels_smaller_than_towns(self):
+        """Village names use an 11 px font, 20% below the 14 px town names."""
+        class Places(FixtureSource):
+            """One village or town label at 15/100/100."""
+            detail = 'village'
+            def tile(self, z, x, y):
+                """Return the configured place in tile 15/100/100."""
+                if (z, x, y) != (15, 100, 100):
+                    return {}
+                return {'places': {'extent': 4096, 'features': [{'id': 1, 'type': 1, 'parts': [[(2048, 2048)]],
+                        'properties': {'kind_detail': self.detail, 'name': 'Ееее'}}]}}
+        source, heights = Places(), {}
+        for detail in ('village', 'town'):
+            source.detail = detail
+            overlay = render_overlay(source, 15, 100, 100, dict(OFF, villages=True, cities=True), FONTS)
+            box = overlay.getbbox()
+            heights[detail] = box[3] - box[1]
+        self.assertLess(heights['village'], heights['town'])
+        self.assertAlmostEqual(heights['village'] / heights['town'], 0.8, delta=0.12)
+
     def test_labels_across_render_group_boundary(self):
         """Compare adjacent groups against one larger render to detect clipped or inconsistent labels."""
         class EdgeSource(FixtureSource):
@@ -245,13 +297,26 @@ class HybridTests(unittest.TestCase):
     def test_download_order_renders_each_group_once(self):
         """A tall area in download order renders every group once and fetches imagery once per tile."""
         fetches = []
-        session = HybridSession({'style': DEFAULTS}, FONTS,
-                                lambda z, x, y: fetches.append((x, y)) or satellite(z, x, y), [FixtureSource()])
+        session = HybridSession({'style': STYLE}, FixtureSource(), None, FONTS,
+                                lambda z, x, y: fetches.append((x, y)) or satellite(z, x, y))
         with patch.object(hybrid_service, 'render_overlay', wraps=render_overlay) as renders:
             for x, y in mapserver.tile_order(range(400, 408), range(400, 448)):
                 session.tile(17, x, y)
         self.assertEqual(renders.call_count, 24)
         self.assertEqual(len(fetches), 8 * 48)
+
+    def test_interleaved_groups_render_once_in_parallel(self):
+        """Interleaving keeps every tile once, spreads a batch over distinct groups, and never re-renders."""
+        order = list(mapserver.tile_order(range(400, 416), range(400, 412)))      # 12 groups of 16 tiles
+        mixed = mapserver.interleave_groups(order, 6)
+        self.assertEqual(sorted(mixed), sorted(order))
+        self.assertEqual(len({(x // 4, y // 4) for x, y in mixed[:6]}), 6)
+        session = HybridSession({'style': STYLE}, FixtureSource(), None, FONTS, satellite)
+        with patch.object(hybrid_service, 'render_overlay', wraps=render_overlay) as renders:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(6) as pool:
+                list(pool.map(lambda t: session.tile(17, *t), mixed))
+        self.assertEqual(renders.call_count, 12)
 
     def test_download_order_covers_ranges_once(self):
         """Group ordering yields each tile of unaligned ranges exactly once."""
@@ -266,7 +331,7 @@ class HybridTests(unittest.TestCase):
             if failures.pop() if failures else False:
                 raise OSError('network')
             return satellite(z, x, y)
-        session = HybridSession({'style': DEFAULTS}, FONTS, flaky, [FixtureSource()])
+        session = HybridSession({'style': STYLE}, FixtureSource(), None, FONTS, flaky)
         with patch.object(hybrid_service, 'render_overlay', wraps=render_overlay) as renders:
             with self.assertRaises(OSError):
                 session.tile(17, 400, 400)
@@ -274,120 +339,274 @@ class HybridTests(unittest.TestCase):
             session.tile(17, 401, 401)
         self.assertEqual(renders.call_count, 1)
 
-    def test_uncovered_tile_waits_for_vectors(self):
-        """A session returns None, not plain imagery, until an area covering the tile is added."""
-        class Nowhere(FixtureSource):
-            """Cover no area."""
-            def covers(self, bounds, z):
-                """Report no coverage."""
-                return False
-        session = HybridSession({'style': DEFAULTS}, FONTS, satellite, [Nowhere()])
-        self.assertIsNone(session.tile(17, 400, 400))
-        session.add(FixtureSource())
-        self.assertIsNotNone(session.tile(17, 400, 400))
-
     def test_archive_decode(self):
         """Decode a real gzip-compressed PMTiles MVT fixture with correct coordinate orientation."""
         with tempfile.TemporaryDirectory() as directory:
-            source = VectorSource(write_archive(Path(directory) / 'sample.pmtiles'), 'fixture')
+            source = LocalArchive(write_archive(Path(directory) / 'sample.pmtiles'))
+            self.assertEqual(source.identity, 'local:sample.pmtiles')
             self.assertEqual(source.tile(15, 100, 100)['places']['features'][0]['properties']['name'], 'Село')
             self.assertEqual(source.tile(15, 99, 99), {})
             self.assertEqual(source.maxzoom, 15)
 
-    def test_extract_coverage_zoom(self):
-        """A z13 regional extract never serves z15 output, which needs z15 source detail."""
+    def test_remote_archive_reads_ranges_and_caches(self):
+        """Tiles come by HTTP range with directories cached in memory and tiles in SQLite for offline reuse."""
         with tempfile.TemporaryDirectory() as directory:
-            area = (10, 10, 11, 11)
-            source = VectorSource(write_archive(Path(directory) / 'x.pmtiles'), 'u', (area, 13))
-            self.assertTrue(source.covers(area, 13))
-            self.assertFalse(source.covers(area, 15))
-            self.assertFalse(source.covers((9, 10, 11, 11), 13))
+            server = smoke().serve_ranges(write_archive(Path(directory) / 'planet.pmtiles'))
+            url = f'http://127.0.0.1:{server.server_port}/planet.pmtiles'
+            calls = []
+            def fetch(target, offset, length):
+                """Record and perform one range read."""
+                calls.append((offset, length))
+                return http_range(target, offset, length)
+            try:
+                cache = TileCache(Path(directory) / 'v.db')
+                archive = RemoteArchive(url, fetch, cache, auto=True)
+                self.assertEqual(len(calls), 2)                              # header, metadata
+                self.assertEqual(archive.tile(15, 100, 100)['places']['features'][0]['properties']['name'], 'Село')
+                self.assertEqual(len(calls), 4)                              # root directory, tile
+                self.assertEqual(archive.tile(15, 99, 99), {})
+                archive.prefetch([(15, 100, 100), (15, 99, 99), (15, 98, 98)])
+                self.assertEqual(len(calls), 4)                              # directory reused, absences recorded
+                self.assertGreater(archive.download_bytes, 0)
+                offline = RemoteArchive(url, lambda *args: (_ for _ in ()).throw(OSError('offline')), cache)
+                self.assertEqual(offline.tile(15, 100, 100)['roads']['features'][0]['properties']['name'], 'Main Road')
+                self.assertEqual(offline.tile(15, 98, 98), {})
+                with self.assertRaises(OSError):
+                    offline.tile(15, 97, 97)
+                self.assertEqual(latest_build(cache), url)                   # recent build reused, no manifest
+            finally:
+                server.shutdown()
 
-    def test_padding_poles_and_dateline(self):
-        """Extract buffers stay within world bounds and clamp at the dateline instead of wrapping."""
-        west, south, east, north = padded_bounds(85, 84, 180, 179, 10)
-        self.assertEqual(east, 180)
-        self.assertGreater(west, 170)
-        self.assertLessEqual(north, 85.051129)
-        self.assertLess(south, north)
-
-    def test_cache_evicts_least_recent_unused_extracts(self):
-        """Eviction removes old idle extracts and keeps those referenced by live sessions."""
-        with tempfile.TemporaryDirectory() as directory, patch.object(protomaps_source, 'MAX_CACHE', 1000):
-            manager = SourceManager(directory, directory)
-            paths = []
-            for index in range(4):
-                path = Path(directory) / f'{index}.pmtiles'
-                path.write_bytes(b'x' * 300)
-                path.with_suffix('.json').write_text('{}')
-                os.utime(path, (index, index))
-                paths.append(path)
-            class Live:
-                """Stand-in referenced extract."""
-                path = str(paths[0])
-            live = Live()
-            manager.live = [live]
-            used = manager._evict()
-            self.assertTrue(paths[0].exists())         # oldest, but in use
-            self.assertFalse(paths[1].exists())
-            self.assertFalse(paths[1].with_suffix('.json').exists())
-            self.assertTrue(paths[3].exists())
-            self.assertLessEqual(used, 750)
-
-    def test_preview_session_reuse_and_cancel(self):
-        """Pans inside prepared areas keep the id; uncovered areas cancel the superseded extraction."""
-        started, release = threading.Event(), threading.Event()
-        calls = []
-        class Vectors(FixtureSource):
-            """Cover one W/S/E/N area."""
-            path = __file__
-            def __init__(self, bounds):
-                """Store covered bounds."""
-                self.bounds = bounds
-            def covers(self, bounds, z):
-                """Return containment of bounds."""
-                return protomaps_source.contains(self.bounds, bounds)
-        def prepare(configured, bounds, zoom, progress=None, cancel=None):
-            """Record the request and block until released or cancelled."""
-            calls.append((bounds, cancel))
-            started.set()
-            while not release.wait(0.01):
-                if cancel.is_set():
-                    raise protomaps_source.Cancelled('stop')
-            return Vectors(bounds)
+    def test_prefetch_merges_neighbouring_tiles(self):
+        """A group's uncached tiles arrive in one merged range request and decode individually."""
         with tempfile.TemporaryDirectory() as directory:
-            service = HybridService(directory, FONTS.parents[1], directory)
-            options = {'style': DEFAULTS, 'source': 'https://example.invalid/x.pmtiles'}
-            view = (45.01, 45.0, 10.01, 10.0)
-            with patch.object(service.manager, 'find', return_value=None), \
-                    patch.object(service.manager, 'prepare', side_effect=prepare):
-                first = service.preview(options, view, 15, satellite)
-                self.assertEqual(first['state'], 'loading')
-                self.assertTrue(started.wait(5))
-                self.assertEqual(service.preview(options, view, 15, satellite)['state'], 'loading')
-                self.assertEqual(len(calls), 1)
-                far = (46.01, 46.0, 11.01, 11.0)
-                self.assertEqual(service.preview(options, far, 15, satellite)['id'], first['id'])
-                self.assertTrue(calls[0][1].is_set())
-                release.set()
-                service.job.future.result(timeout=5)
-                self.assertEqual(service.status(first['id'])['state'], 'ready')
-                self.assertEqual(service.preview(options, far, 15, satellite)['state'], 'ready')
-                restyled = service.preview(dict(options, style=dict(DEFAULTS, cities=True)), far, 15, satellite)
-                self.assertNotEqual(restyled['id'], first['id'])
-                service.executor.shutdown(wait=True)
+            tiles = [(15, x, y) for x in (100, 101) for y in (100, 101)]
+            server = smoke().serve_ranges(write_archive(Path(directory) / 'p.pmtiles', tiles))
+            url = f'http://127.0.0.1:{server.server_port}/p.pmtiles'
+            calls = []
+            def fetch(target, offset, length):
+                """Record and perform one range read."""
+                calls.append((offset, length))
+                return http_range(target, offset, length)
+            try:
+                archive = RemoteArchive(url, fetch, TileCache(Path(directory) / 'v.db'))
+                archive.prefetch(tiles + [(15, 102, 102)])
+                self.assertEqual(len(calls), 4)                              # header, metadata, directory, one chunk
+                for tile in tiles:
+                    self.assertEqual(archive.tile(*tile)['roads']['features'][0]['properties']['name'], 'Main Road')
+                self.assertEqual(archive.tile(15, 102, 102), {})
+                self.assertEqual(len(calls), 4)
+            finally:
+                server.shutdown()
+
+    def test_tile_cache_eviction(self):
+        """Once over its bound the cache drops the least recently used tiles down to 75%."""
+        with tempfile.TemporaryDirectory() as directory:
+            cache = TileCache(Path(directory) / 'v.db', max_bytes=1000)
+            for i in range(4):
+                cache.put('b', 15, i, 0, b'x' * 300)
+                time.sleep(0.002)
+            cache.get('b', 15, 0, 0)                                         # oldest row becomes most recent
+            with cache.lock:
+                cache.evict()
+            self.assertEqual([cache.has('b', 15, i, 0) for i in range(4)], [True, False, False, True])
+
+    def test_fetch_range(self):
+        """mapserver.fetch_range reads exact byte ranges and refuses to fetch while offline."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = write_archive(Path(directory) / 'p.pmtiles')
+            server = smoke().serve_ranges(path)
+            url = f'http://127.0.0.1:{server.server_port}/p.pmtiles'
+            try:
+                with patch.object(mapserver, 'is_online', return_value=True):
+                    self.assertEqual(mapserver.fetch_range(url, 0, 7), b'PMTiles')
+                    self.assertEqual(mapserver.fetch_range(url, 10, 20), path.read_bytes()[10:30])
+                with patch.object(mapserver, 'is_online', return_value=False), self.assertRaises(OSError):
+                    mapserver.fetch_range(url, 0, 7)
+            finally:
+                server.shutdown()
+
+    def test_preview_sessions_share_overlays_per_style(self):
+        """Preview tiles reuse one session per style snapshot; a style change starts a new one."""
+        with tempfile.TemporaryDirectory() as directory:
+            vector = write_archive(Path(directory) / 'local.pmtiles')
+            service = HybridService(directory, FONTS.parents[1], lambda *args: 1 / 0)
+            options = {'style': STYLE, 'source': str(vector)}
+            with patch.object(hybrid_service, 'render_overlay', wraps=render_overlay) as renders:
+                service.tile(options, 17, 400, 400, satellite)
+                service.tile(options, 17, 401, 401, satellite)
+                self.assertEqual(renders.call_count, 1)
+                service.tile(dict(options, style=dict(STYLE, cities=False)), 17, 400, 400, satellite)
+                self.assertEqual(renders.call_count, 2)
+
+    def test_shade_mask_blend(self):
+        """White hillshade leaves imagery unchanged; grey darkens it, more with higher contrast."""
+        def png(colour):
+            """Return a 256 x 256 PNG filled with colour."""
+            out = io.BytesIO()
+            Image.new('RGB', (256, 256), colour).save(out, 'PNG')
+            return out.getvalue()
+        imagery = png((200, 160, 120))
+        def centre(shade, contrast, crop=(0, 0, 256)):
+            """Return the blended centre pixel."""
+            mask = hybrid_render.shade_mask(shade, crop, contrast)
+            return Image.open(io.BytesIO(compose_tile(None, 0, 0, 0, 0, imagery, mask))).getpixel((128, 128))
+        near = lambda a, b: all(abs(p - q) <= 3 for p, q in zip(a, b))
+        self.assertTrue(near(centre(png((255, 255, 255)), 3), (200, 160, 120)))
+        self.assertTrue(near(centre(png((191, 191, 191)), 1), (150, 120, 90)))      # x 0.75
+        self.assertTrue(near(centre(png((191, 191, 191)), 3), (50, 40, 30)))        # darkness x 3
+        self.assertTrue(near(centre(png((0, 0, 0)), 1, (128, 128, 128)), (0, 0, 0)))
+
+    def test_esri_shading_in_hybrid_keeps_roads_bright(self):
+        """With Esri shading the imagery darkens but roads drawn on top keep their colour."""
+        out = io.BytesIO()
+        Image.new('RGB', (256, 256), (128, 128, 128)).save(out, 'PNG')
+        grey = out.getvalue()
+        style = dict(OFF, roads=True, hillshade=True, shade_source='esri', esri_contrast=1)
+        requests = []
+        session = HybridSession({'style': style}, FixtureSource(), None, FONTS, satellite,
+                                lambda z, x, y: requests.append((z, x, y)) or (grey, (0, 0, 256)))
+        shaded = Image.open(io.BytesIO(session.tile(15, 100, 100)))
+        self.assertEqual(requests, [(15, 100, 100)])
+        plain = HybridSession({'style': dict(style, shade_source='terrain')}, FixtureSource(), None, FONTS,
+                              satellite, lambda *args: 1 / 0)               # Esri never asked for
+        unshaded = Image.open(io.BytesIO(plain.tile(15, 100, 100)))
+        near = lambda a, b: all(abs(p - q) <= 6 for p, q in zip(a, b))
+        self.assertTrue(near(unshaded.getpixel((100, 200)), (20, 50, 30)))
+        self.assertTrue(near(shaded.getpixel((100, 200)), (10, 25, 15)))          # imagery x 0.5
+        self.assertTrue(near(shaded.getpixel((100, 50)), unshaded.getpixel((100, 50))))   # road on top, not shaded
+
+    def test_shaded_basemap_falls_back_to_parent_hillshade(self):
+        """Above Esri's hillshade zooms the parent tile's matching quarter is enlarged and used."""
+        def png(colour, split=None):
+            """Return a PNG; with split, the right half is white."""
+            image = Image.new('RGB', (256, 256), colour)
+            if split:
+                image.paste((255, 255, 255), (128, 0, 256, 256))
+            out = io.BytesIO()
+            image.save(out, 'PNG')
+            return out.getvalue()
+        requests = []
+        def tile_get(url):
+            """Serve imagery, a 404 for z17 hillshade and a half-dark z16 parent."""
+            requests.append(url)
+            if 'World_Imagery' in url:
+                return png((200, 200, 200))
+            if '/tile/17/' in url:
+                raise mapserver.TileHTTPError(404)
+            return png((128, 128, 128), split=True)
+        mapserver._hillshade.cache_clear()
+        with patch.object(mapserver, '_tile_get', side_effect=tile_get):
+            left = Image.open(io.BytesIO(mapserver.fetch_shaded(17, 800, 800, 1))).getpixel((128, 128))
+            self.assertEqual(mapserver.esri_hillshade(17, 801, 801)[1], (128, 128, 128))   # quarter of z16 parent
+            right = Image.open(io.BytesIO(mapserver.fetch_shaded(17, 801, 800, 1))).getpixel((128, 128))
+        self.assertLess(left[0], 120)                      # left child of z16/400/400: dark half
+        self.assertGreater(right[0], 190)                  # right child: white half, imagery unchanged
+        self.assertEqual(sum('/tile/16/' in u for u in requests), 1)   # parent fetched once for both
+        mapserver._hillshade.cache_clear()
+
+    def test_live_tile_retries_once_on_network_error(self):
+        """A reset connection is retried once for live tiles; a 404 is not."""
+        server = mapserver.ThreadingHTTPServer(('127.0.0.1', 0), mapserver.Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+        base = f'http://127.0.0.1:{server.server_port}/tiles/13/10/10?hv=0'
+        try:
+            with patch.object(mapserver, 'source_for', return_value=mapserver.SHADED), \
+                    patch.object(mapserver, 'is_online', return_value=True):
+                with patch.object(mapserver, 'fetch_tile', side_effect=[ConnectionResetError(104, 'reset'), b'jpeg']) as fetch:
+                    with urllib.request.urlopen(base) as response:
+                        self.assertEqual(response.read(), b'jpeg')
+                    self.assertEqual(fetch.call_count, 2)
+                with patch.object(mapserver, 'fetch_tile', side_effect=mapserver.TileHTTPError(404)) as fetch:
+                    with self.assertRaises(urllib.error.HTTPError) as failure:
+                        urllib.request.urlopen(base)
+                    self.assertEqual((failure.exception.code, fetch.call_count), (503, 1))
+        finally:
+            server.shutdown(); server.server_close(); thread.join()
+
+    def test_low_zoom_preview_is_plain_imagery(self):
+        """Below HYBRID_PREVIEW_MIN_ZOOM the hybrid preview proxies imagery instead of rendering."""
+        server = mapserver.ThreadingHTTPServer(('127.0.0.1', 0), mapserver.Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+        base = f'http://127.0.0.1:{server.server_port}/tiles/{{}}/10/10?hv=0'
+        try:
+            with patch.object(mapserver, 'source_for', return_value=mapserver.HYBRID), \
+                    patch.object(mapserver, 'is_online', return_value=True), \
+                    patch.object(mapserver, 'read_tile', return_value=None), \
+                    patch.object(mapserver, 'fetch_tile', return_value=b'\xff\xd8plain') as fetch, \
+                    patch.object(mapserver, 'hybrid_service', side_effect=AssertionError('rendered')):
+                with urllib.request.urlopen(base.format(mapserver.HYBRID_PREVIEW_MIN_ZOOM - 1)) as response:
+                    self.assertEqual(response.read(), b'\xff\xd8plain')
+                fetch.assert_called_once_with(mapserver.HYBRID, mapserver.HYBRID_PREVIEW_MIN_ZOOM - 1, 10, 10)
+                with self.assertRaises(urllib.error.HTTPError):          # at the limit it renders (here: fails)
+                    urllib.request.urlopen(base.format(mapserver.HYBRID_PREVIEW_MIN_ZOOM))
+        finally:
+            server.shutdown(); server.server_close(); thread.join()
+
+    def test_failed_probe_tolerated_after_recent_success(self):
+        """A failed probe keeps the server online while other requests recently succeeded."""
+        with patch.object(mapserver, 'online_ok', False), patch.object(mapserver, 'online_last_ok', float('-inf')):
+            self.assertFalse(mapserver.record_probe(False))
+            mapserver.mark_online()
+            self.assertTrue(mapserver.is_online())
+            self.assertTrue(mapserver.record_probe(False))
+            with patch.object(mapserver.time, 'monotonic', return_value=time.monotonic() + mapserver.ONLINE_GRACE + 1):
+                self.assertFalse(mapserver.record_probe(False))
+            self.assertTrue(mapserver.record_probe(True))
+
+    def test_generated_downloads_run_in_parallel(self):
+        """Shaded tiles download several at a time and are all stored; plain sources stay sequential."""
+        import contextlib
+        with tempfile.TemporaryDirectory() as directory, contextlib.ExitStack() as stack:
+            for name, value in (('MAPS_DIR', directory), ('LANDMARKS_DB', directory + '/l.db'),
+                                ('ELEVATION_DB', directory + '/e.db')):
+                stack.enter_context(patch.object(mapserver, name, value))
+            for name, value in (('fetch_landmarks', {'elements': []}), ('save_config', None), ('log_cache_summary', None)):
+                stack.enter_context(patch.object(mapserver, name, return_value=value))
+            stack.enter_context(patch.dict(mapserver.config['map'], {'elevation': '0'}))
+            threads, active, peak, lock = set(), [0], [0], threading.Lock()
+            def slow(basemap, z, x, y, contrast=None):
+                """Stand-in fetch taking 0.2 s and recording concurrency."""
+                with lock:
+                    threads.add(threading.get_ident()); active[0] += 1; peak[0] = max(peak[0], active[0])
+                time.sleep(0.2)
+                with lock:
+                    active[0] -= 1
+                return b'\xff\xd8' + bytes([x % 256, y % 256])
+            stack.enter_context(patch.object(mapserver, 'fetch_tile', side_effect=slow))
+            north, west = mapserver.num2deg(400, 400, 17)
+            south, east = mapserver.num2deg(404, 406, 17)
+            bounds = (north - 1e-7, south + 1e-7, east - 1e-7, west + 1e-7)
+            started = time.monotonic()
+            mapserver.download_worker('shaded-test', [17], [mapserver.SHADED], *bounds)
+            took = time.monotonic() - started
+            self.assertEqual(mapserver.dl_status['state'], 'done', mapserver.dl_status)
+            self.assertEqual((mapserver.dl_status['done'], mapserver.dl_status['failed']), (24, 0))
+            self.assertLess(took, 24 * 0.2 / 3)                       # well under a sequential run
+            self.assertEqual(peak[0], mapserver.DOWNLOAD_WORKERS)
+            self.assertEqual(mapserver.read_tile('shaded-test', 17, 403, 402), b'\xff\xd8' + bytes([403 % 256, 402 % 256]))
+            peak[0] = 0
+            mapserver.download_worker('plain-test', [17], ['Satellite'], *bounds)
+            self.assertEqual(peak[0], 1)
 
     def test_malformed_style_settings(self):
         """Invalid stored style JSON falls back to defaults instead of breaking /status."""
         self.assertEqual(mapserver.hybrid_style('not json'), DEFAULTS)
         self.assertEqual(mapserver.hybrid_style('[1]'), DEFAULTS)
-        self.assertEqual(mapserver.hybrid_style('{"roads": "yes", "cities": true}'), dict(DEFAULTS, cities=True))
-        self.assertEqual(mapserver.hybrid_style('{"contour_alpha": 150}')['contour_alpha'], 30)
-        self.assertEqual(mapserver.hybrid_style('{"contour_alpha": "50"}')['contour_alpha'], 30)
-        self.assertEqual(mapserver.hybrid_style('{"contour_alpha": true}')['contour_alpha'], 30)
+        self.assertEqual(mapserver.hybrid_style('{"roads": "yes", "cities": false}'), dict(DEFAULTS, cities=False))
+        alpha = DEFAULTS['contour_alpha']
+        self.assertEqual(mapserver.hybrid_style('{"contour_alpha": 150}')['contour_alpha'], alpha)
+        self.assertEqual(mapserver.hybrid_style('{"contour_alpha": "50"}')['contour_alpha'], alpha)
+        self.assertEqual(mapserver.hybrid_style('{"contour_alpha": true}')['contour_alpha'], alpha)
         self.assertEqual(mapserver.hybrid_style('{"contour_alpha": 50}')['contour_alpha'], 50)
         self.assertEqual(mapserver.hybrid_style('{"shade_relief": 21}')['shade_relief'], 5)
         self.assertEqual(mapserver.hybrid_style('{"shade_relief": 12, "shade_dark": 70}')['shade_dark'], 70)
+        self.assertEqual(mapserver.hybrid_style('{"shade_source": "esri"}')['shade_source'], 'esri')
+        self.assertEqual(mapserver.hybrid_style('{"shade_source": "other"}')['shade_source'], DEFAULTS['shade_source'])
+        self.assertEqual(mapserver.hybrid_style('{"esri_contrast": 6}')['esri_contrast'], 3)
+        esri = dict(DEFAULTS, hillshade=True, shade_source='esri')
+        self.assertIn(mapserver.ESRI_HILLSHADE_CREDIT, mapserver.credits(esri)[mapserver.HYBRID])
+        self.assertNotIn(mapserver.ESRI_HILLSHADE_CREDIT, mapserver.credits(STYLE)[mapserver.HYBRID])
 
     def test_offline_pack_reuse_and_tms(self):
         """Read only the selected pure-satellite tile, preserving its XYZ/TMS placement."""
@@ -414,12 +633,10 @@ class HybridTests(unittest.TestCase):
         import urllib.error
         import zipfile
         from protomaps_source import bounds_for_tiles
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'gs/pack'))
-        from smoke_hybrid import fixtures
         with tempfile.TemporaryDirectory() as directory, contextlib.ExitStack() as stack:
             root = Path(directory)
-            vector, maps = fixtures(root)
-            engine = HybridService(root / 'cache', FONTS.parents[1], root / 'bin')
+            vector, maps = smoke().fixtures(root)
+            engine = HybridService(root / 'cache', FONTS.parents[1], lambda *args: 1 / 0)
             stack.enter_context(patch.object(mapserver, 'MAPS_DIR', str(maps)))
             stack.enter_context(patch.object(mapserver, 'LANDMARKS_DB', str(maps / 'landmarks.db')))
             stack.enter_context(patch.object(mapserver, 'ELEVATION_DB', str(maps / 'elevation.db')))
@@ -434,7 +651,7 @@ class HybridTests(unittest.TestCase):
             west, south, east, north = bounds_for_tiles(17, 400, 400, 401, 401)
             bounds = (north - 1e-7, south + 1e-7, east - 1e-7, west + 1e-7)
             options = mapserver.hybrid_options()
-            session = engine.prepare(options, bounds, [17], mapserver.hybrid_satellite(options))
+            session = engine.prepare(options, mapserver.hybrid_satellite(options))
             expected = session.tile(17, 400, 400)
             mapserver.download_worker('hybrid-test', [17], [mapserver.HYBRID], *bounds, hybrid=options)
             self.assertEqual(mapserver.dl_status['state'], 'done', mapserver.dl_status)
@@ -442,6 +659,7 @@ class HybridTests(unittest.TestCase):
             metadata = mapserver.pack_metadata('hybrid-test')
             self.assertEqual((metadata['complete'], metadata['failed_tiles'], metadata['format']), ('1', '0', 'jpg'))
             self.assertEqual(metadata['protomaps_build'], 'local:vectors.pmtiles')
+            self.assertEqual(metadata['attribution'], mapserver.HYBRID_CREDIT)
             self.assertNotIn(directory, json.dumps(metadata))
             server = mapserver.ThreadingHTTPServer(('127.0.0.1', 0), mapserver.Handler)
             thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
@@ -470,7 +688,6 @@ class HybridTests(unittest.TestCase):
                 self.assertEqual(failure.exception.code, 409)
             finally:
                 server.shutdown(); server.server_close(); thread.join()
-                engine.executor.shutdown(wait=True)
 
 
 if __name__ == '__main__':

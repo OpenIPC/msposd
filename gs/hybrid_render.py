@@ -6,11 +6,11 @@ import io
 import math
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 from protomaps_source import GROUP, PAD
 
-STYLE_VERSION = 7
+STYLE_VERSION = 8
 BUFFER = 256
 LAYER_ORDER = {'buildings': 0, 'roads': 1, 'places': 2}
 
@@ -75,10 +75,13 @@ def dashes(line, on, off):
 def elevation_samples(terrain, dz, ox, oy, w, h):
     """Return h rows of w elevations in metres, starting at terrain sample ox/oy of zoom dz.
 
-    terrain: Object with tile(z, x, y) returning 256 x 256 row-major elevations.
+    terrain: Object with prefetch(keys) and tile(z, x, y) returning 256 x 256 row-major elevations.
     Columns wrap around the dateline; rows are clamped at the poles.
     """
     n = 256 * 2 ** dz
+    terrain.prefetch({(dz, (x % n) // 256, min(max(y, 0), n - 1) // 256)
+                      for x in range(ox, ox + w, 256) for y in range(oy, oy + h, 256)}
+                     | {(dz, ((ox + w - 1) % n) // 256, min(max(oy + h - 1, 0), n - 1) // 256)})
     rows = []
     for j in range(h):
         py = min(max(oy + j, 0), n - 1)
@@ -190,16 +193,18 @@ def shade_layer(terrain, z, gx, gy, relief, dark):
 def features(source, z, gx, gy, layers=tuple(LAYER_ORDER)):
     """Yield (layer, properties, type, parts, identity) near output group gx/gy at z.
 
-    source: Vector source with maxzoom and tile(z, x, y). layers: Layer names to read.
+    source: Archive with maxzoom, prefetch(keys) and tile(z, x, y). layers: Layer names to read.
     Parts are lists of global output-pixel points; identity is a stable feature digest.
     """
     sz = min(z, source.maxzoom)
     factor = 2 ** (z - sz)
     seen = set()
     world = 2 ** sz
-    for tx in range(math.floor((gx - PAD) / factor), math.ceil((gx + GROUP + PAD) / factor)):
-        for ty in range(max(0, math.floor((gy - PAD) / factor)),
-                        min(world, math.ceil((gy + GROUP + PAD) / factor))):
+    columns = range(math.floor((gx - PAD) / factor), math.ceil((gx + GROUP + PAD) / factor))
+    rows = range(max(0, math.floor((gy - PAD) / factor)), min(world, math.ceil((gy + GROUP + PAD) / factor)))
+    source.prefetch([(sz, tx % world, ty) for tx in columns for ty in rows])
+    for tx in columns:
+        for ty in rows:
             tile = source.tile(sz, tx % world, ty)
             for name in layers:
                 layer = tile.get(name, {})
@@ -231,13 +236,13 @@ def render_overlay(source, z, gx, gy, settings, font_dir, terrain=None):
     size = GROUP * 256 + 2 * BUFFER
     origin = (gx * 256 - BUFFER, gy * 256 - BUFFER)
     overlay = Image.new('RGBA', (size, size))
-    if settings['hillshade'] and terrain is not None:
+    if settings['hillshade'] and settings['shade_source'] == 'terrain' and terrain is not None:
         shade = shade_layer(terrain, z, gx, gy, settings['shade_relief'], settings['shade_dark'])
         if shade is not None:
             overlay.paste(shade, (BUFFER, BUFFER))
     draw = ImageDraw.Draw(overlay)
     regular = str(Path(font_dir) / 'DejaVuSans.ttf')
-    fonts = {12: ImageFont.truetype(regular, 12), 14: ImageFont.truetype(regular, 14)}
+    fonts = {size: ImageFont.truetype(regular, size) for size in (11, 12, 14)}
     labels = []
 
     def local(points):
@@ -311,7 +316,8 @@ def render_overlay(source, z, gx, gy, settings, font_dir, terrain=None):
             if ((settings['villages'] and detail in ('village', 'hamlet')) or
                     (settings['cities'] and detail in ('town', 'city'))):
                 x, y = parts[0][0]
-                label(name, x, y, 0, 0 if detail in ('town', 'city') else 1, 14,
+                town = detail in ('town', 'city')
+                label(name, x, y, 0, 0 if town else 1, 14 if town else 11,   # villages 20% smaller
                       f'{name}:{x:.2f}:{y:.2f}')
 
     # Pairwise priority suppression, rather than order-dependent greedy placement,
@@ -341,15 +347,34 @@ def render_overlay(source, z, gx, gy, settings, font_dir, terrain=None):
     return overlay if overlay.getbbox() else None
 
 
-def compose_tile(overlay, gx, gy, x, y, raw):
+def shade_mask(shade, crop, contrast):
+    """Return a 256 x 256 greyscale multiply mask from a hillshade tile.
+
+    shade: hillshade image bytes (white means lit, i.e. unchanged).
+    crop: (left, top, size) square of shade covering the tile, enlarged to 256 when smaller.
+    contrast: factor stretching the shadows; 1 keeps the hillshade as published.
+    """
+    with Image.open(io.BytesIO(shade)) as image:
+        left, top, size = crop
+        grey = image.convert('L').crop((left, top, left + size, top + size))
+    if size != 256:
+        grey = grey.resize((256, 256), Image.Resampling.BILINEAR)
+    return grey.point([max(0, 255 - round((255 - v) * contrast)) for v in range(256)])
+
+
+def compose_tile(overlay, gx, gy, x, y, raw, mask=None):
     """Return JPEG bytes of satellite tile raw at XYZ x/y under its part of a group overlay.
 
     overlay: Result of render_overlay for group gx/gy (None when empty). raw: 256 x 256 image bytes.
+    mask: Optional shade_mask multiplied into the imagery before the overlay is drawn on top.
     """
     with Image.open(io.BytesIO(raw)) as image:
         if image.size != (256, 256):
             raise ValueError('Satellite tiles must be 256 x 256')
-        tile = image.convert('RGBA')
+        tile = image.convert('RGB')
+    if mask is not None:
+        tile = ImageChops.multiply(tile, mask.convert('RGB'))
+    tile = tile.convert('RGBA')
     if overlay is not None:
         left, top = (x - gx) * 256, (y - gy) * 256
         tile.alpha_composite(overlay.crop((left, top, left + 256, top + 256)))

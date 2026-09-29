@@ -116,6 +116,8 @@ a final tie-breaker.
 | Basemap | Content | Format |
 | ------- | ------- | ------ |
 | Satellite | Esri World Imagery — aerial, no labels | JPEG |
+| Satellite Hybrid | the same imagery with OpenStreetMap roads, names and terrain drawn in ([below](#satellite-hybrid)) | JPEG |
+| Satellite Shaded | the same imagery darkened by Esri World Hillshade ([below](#satellite-shaded)) | JPEG |
 | Streets | Esri World Street Map — roads + city names | JPEG |
 | Topo | Esri World Topo — terrain + roads + names | JPEG |
 | OpenTopoMap | topographic with contours | PNG |
@@ -151,6 +153,64 @@ committed) under the `[server]` section, then restart `mapserver.py`. The standa
 [server]
 tile_key = <your-api-key>
 ```
+
+### Satellite Hybrid
+
+Satellite imagery with OpenStreetMap roads, road names, village names, building outlines
+and optional contour lines or hillshade drawn onto it. Everything is drawn by preflight
+when the tiles are made, so the pack holds ordinary JPEG tiles: the ground station needs
+nothing new and shows a hybrid pack like any other.
+
+The switches under the basemap choose what is drawn: roads, road names, villages, towns,
+buildings, **Contour lines** (with *alpha*, their opacity in %), and **Hillshade**. The
+dropdown next to Hillshade picks how shading is made: *Elevation* computes it from the
+terrain heights (*relief* sets the height exaggeration, *dark* the shadow strength in %),
+while *Esri* multiplies in Esri World Hillshade as described for
+[Satellite Shaded](#satellite-shaded) (*contrast* 1–5). Either way the shading darkens only
+the imagery; roads, names and contours are drawn on top. Changing one
+redraws the preview; packs already downloaded keep the style they were made with.
+Settlement streets, service roads and unpaved tracks are deliberately left out, because
+the imagery already shows them.
+
+**What it needs**
+
+| Where | Needs |
+| ----- | ----- |
+| Standalone app ([download](#download) or [build](#standalone-app)) | nothing extra — Pillow, `pmtiles` and the font are built in |
+| Source checkout (`run-map.sh`, `run-map.bat`) | Python 3.10+ and, once, `python3 gs/setup_hybrid.py` (below) |
+| Ground station | nothing — the exported `.mbtiles` is plain JPEG tiles |
+
+`setup_hybrid.py` is only for running from a source checkout. It creates
+`gs/.venv-hybrid` and installs the two pinned packages from `requirements-hybrid.txt`
+there, because many Linux systems refuse `pip install` into the system Python. The
+launchers use that environment automatically when it exists. Without it the basemap
+list shows *Satellite Hybrid (install hybrid components)*.
+
+**Network and caches.** Previewing or downloading a new area needs internet: roads and
+names are read on demand from the current [Protomaps](https://protomaps.com) build
+(`build.protomaps.com`), imagery from Esri, and heights for contours and hillshade from
+the AWS terrain tiles. Everything fetched is kept in `hybrid-cache/` (vector tiles up to
+1 GiB in `vectors.db`, heights up to about 150 MB in `terrain/`), so areas you have
+already viewed work offline. The cache can be deleted at any time; it refills as needed.
+To use your own copy of the data instead, set `protomaps_source` under `[server]` in
+`config.ini` to a local `.pmtiles` file or a mirror URL.
+
+Exports of hybrid packs include `ATTRIBUTION.txt` with the imagery, OpenStreetMap and
+terrain credits.
+
+### Satellite Shaded
+
+Esri World Imagery multiplied by Esri's own World Hillshade layer, so slopes facing away
+from the light are darker while flat ground keeps its colours. **contrast** (1–5, next to
+the basemap) stretches the shadows; 3 suits most terrain, raise it for gentle hills. Each
+download stores the contrast it was made with. Where Esri has no hillshade at the chosen
+zoom (above z16 in much of Europe), the nearest coarser tile is enlarged. It needs the
+same Python packages as Satellite Hybrid (built into the standalone app) but no vector
+data and no cache; it has no roads or labels.
+
+Both Esri layers are free to request without an account, but Esri's terms state they are
+"not intended to be used to export tiles for offline" use; that applies equally to the
+plain Satellite basemap. Exports include the required credits in `ATTRIBUTION.txt`.
 
 **Do not** point this at volunteer OSM servers (`tile.openstreetmap.org`, or the
 community `openstreetmap.fr` servers behind CyclOSM / Humanitarian) — they throttle or
@@ -415,6 +475,17 @@ false-positive on PyInstaller one-file builds.
 | `config.ini` | preflight settings (gitignored; holds any API key) |
 | `state.ini` | station-local **home** only |
 | `pack/` | PyInstaller build for the standalone binary |
+| `protomaps_source.py`, `hybrid_render.py`, `hybrid_service.py` | Satellite Hybrid: vector and terrain reading, drawing, sessions |
+| `assets/fonts/` | label font (DejaVu Sans) and its licence |
+| `requirements-hybrid.txt` | the two packages Satellite Hybrid needs (Pillow, `pmtiles`) |
+| `requirements-hybrid-dev.txt` | adds the test-only reference encoder; used by CI |
+| `setup_hybrid.py` | one-time setup of `.venv-hybrid` for source checkouts |
+| `.venv-hybrid/` | that environment (gitignored) |
+| `hybrid-cache/` | cached vector tiles and heights (gitignored, safe to delete) |
+
+**Left over from earlier development builds** — none of these are used any more and all
+can be deleted: `assets/bin/` (the `pmtiles` extractor binary), `hybrid-cache/vectors/`
+(regional `.pmtiles` extracts with `.json` sidecars), and `pack/fetch_pmtiles.py`.
 
 ---
 

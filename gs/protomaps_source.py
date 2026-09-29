@@ -1,83 +1,29 @@
-"""Bounded regional extraction and reading of Protomaps v4 vector data."""
+"""Reading Protomaps v4 vector data from local or remote PMTiles archives, with tile caching."""
 
-from collections import OrderedDict
-import gzip
+from concurrent.futures import ThreadPoolExecutor
 import functools
-import hashlib
+import gzip
 import io
 import json
 import math
 import os
 from pathlib import Path
-import platform
 import re
+import sqlite3
 import struct
-import subprocess
-import tarfile
 import threading
 import time
 import urllib.request
-import weakref
-import zipfile
 
 MANIFEST = "https://build-metadata.protomaps.dev/builds.json"
-MAX_CACHE = 1024 * 1024 * 1024
-MAX_EXTRACT_SECONDS = 600
-PLANET_MAXZOOM = 15          # highest zoom published in Protomaps v4 builds
-GROUP = 4                    # output tiles per render-group side
-PAD = 2                      # neighbouring output tiles read around each group
-
-PMTILES_VERSION = "1.31.2"
-PMTILES_ASSETS = {
-    ("Linux", "x86_64"): ("go-pmtiles_1.31.2_Linux_x86_64.tar.gz", "3ed7dbf4ec2e6dfe5e25b6f70d1ffc932729f93c86db353bf514dd71010a312f"),
-    ("Linux", "arm64"): ("go-pmtiles_1.31.2_Linux_arm64.tar.gz", "f8bd47e7ea866863489cad588fbaf2f31f42e5821f7a03f009b3769f05801cb1"),
-    ("Darwin", "x86_64"): ("go-pmtiles-1.31.2_Darwin_x86_64.zip", "1f0dc02eee6c58312dd6c509faee1b5c32f0596568af1bf51f1b034e7a88a65b"),
-    ("Darwin", "arm64"): ("go-pmtiles-1.31.2_Darwin_arm64.zip", "40528f7f616fcbf91207cd48c8fc023d213f6d86c0cbf1f748732803d1880f3d"),
-    ("Windows", "x86_64"): ("go-pmtiles_1.31.2_Windows_x86_64.zip", "a658baa4d7e55020aef6ca17bd9ff9faa1582671266b36f58c52db0ac8e785a1"),
-    ("Windows", "arm64"): ("go-pmtiles_1.31.2_Windows_arm64.zip", "8780a17453c63af757917a694cbbb50b943db89cc3f1b07e6fd62c1ff8e6963b"),
-}
-
-
-class Cancelled(RuntimeError):
-    """Raised when a superseded preview extraction is stopped."""
-
-
-def install_extractor(directory):
-    """Download and verify the official pmtiles CLI into directory.
-
-    directory: Writable folder receiving the executable and its LICENSE.
-    Returns: Path of the installed executable. Raises on unsupported platforms or bad downloads.
-    """
-    arch = platform.machine().lower()
-    arch = {"amd64": "x86_64", "aarch64": "arm64"}.get(arch, arch)
-    asset = PMTILES_ASSETS.get((platform.system(), arch))
-    if asset is None:
-        raise RuntimeError(f"No pmtiles extractor for {platform.system()} {arch}; "
-                           "set protomaps_source to a local Protomaps archive")
-    name, digest = asset
-    url = f"https://github.com/protomaps/go-pmtiles/releases/download/v{PMTILES_VERSION}/{name}"
-    with urllib.request.urlopen(url, timeout=90) as response:
-        data = response.read(100 * 1024 * 1024)
-    if hashlib.sha256(data).hexdigest() != digest:
-        raise ValueError("pmtiles archive checksum mismatch")
-    if name.endswith(".zip"):
-        with zipfile.ZipFile(io.BytesIO(data)) as archive:
-            files = [(Path(n).name, archive.read(n)) for n in archive.namelist()
-                     if Path(n).name in ("pmtiles", "pmtiles.exe", "LICENSE")]
-    else:
-        with tarfile.open(fileobj=io.BytesIO(data)) as archive:
-            files = [(Path(m.name).name, archive.extractfile(m).read())
-                     for m in archive.getmembers() if m.isfile()
-                     and Path(m.name).name in ("pmtiles", "LICENSE")]
-    target = Path(directory)
-    target.mkdir(parents=True, exist_ok=True)
-    for filename, content in files:
-        part = target / (filename + ".part")
-        part.write_bytes(content)
-        if filename.startswith("pmtiles"):
-            os.chmod(part, 0o755)
-        os.replace(part, target / filename)
-    return target / ("pmtiles.exe" if os.name == "nt" else "pmtiles")
+MAX_CACHE = 1024 * 1024 * 1024   # vector tile cache bound in bytes
+BUILD_MAX_AGE = 7 * 86400        # reuse a cached automatic build this long before checking for newer
+PLANET_MAXZOOM = 15              # highest zoom published in Protomaps v4 builds
+GROUP = 4                        # output tiles per render-group side
+PAD = 2                          # neighbouring output tiles read around each group
+FETCH_THREADS = 4
+CHUNK_GAP = 64 * 1024            # bytes of unneeded data worth fetching to join two tiles in one request
+CHUNK_MAX = 2 * 1024 * 1024      # largest single range request
 
 
 def _fields(buf):
@@ -222,53 +168,124 @@ def bounds_for_tiles(z, left, top, right, bottom):
             right / n * 360 - 180, latitude(top))
 
 
-def group_bounds(z, gx0, gy0, gx1, gy1):
-    """Return W/S/E/N vector coverage needed to render groups gx0..gx1, gy0..gy1 at z.
+class TileCache:
+    """SQLite store of fetched vector tiles and archive headers, bounded by size.
 
-    Includes the PAD-tile label buffer and is clamped at the poles and dateline:
-    geometry wrapping across ±180° is not extracted (documented limitation).
+    Rows record the tile bytes as served (b'' for a tile absent from the archive), so a
+    cached area renders identically offline. The least recently used rows are removed
+    once the stored bytes exceed max_bytes; the file is reused rather than shrunk.
     """
-    n = 2 ** z
-    return bounds_for_tiles(z, max(0, gx0 - PAD), max(0, gy0 - PAD),
-                            min(n, gx1 + GROUP + PAD), min(n, gy1 + GROUP + PAD))
+
+    def __init__(self, path, max_bytes=MAX_CACHE):
+        """Open or create the cache database at path with the given byte bound."""
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self.max_bytes = max_bytes
+        self.lock = threading.Lock()
+        self.conn = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
+        self.conn.executescript(
+            'PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;'
+            'CREATE TABLE IF NOT EXISTS tiles(build TEXT, z INTEGER, x INTEGER, y INTEGER,'
+            ' data BLOB, used INTEGER, PRIMARY KEY(build, z, x, y));'
+            'CREATE INDEX IF NOT EXISTS tiles_used ON tiles(used);'
+            'CREATE TABLE IF NOT EXISTS archives(build TEXT PRIMARY KEY, header BLOB,'
+            ' metadata BLOB, auto INTEGER, stored INTEGER)')
+        self.writes = 0
+
+    def get(self, build, z, x, y):
+        """Return cached tile bytes for build and z/x/y (b'' when known empty), or None if not cached."""
+        with self.lock:
+            row = self.conn.execute('SELECT data FROM tiles WHERE build=? AND z=? AND x=? AND y=?',
+                                    (build, z, x, y)).fetchone()
+            if row is not None:
+                self.conn.execute('UPDATE tiles SET used=? WHERE build=? AND z=? AND x=? AND y=?',
+                                  (time.time_ns(), build, z, x, y))
+        return None if row is None else bytes(row[0])
+
+    def has(self, build, z, x, y):
+        """Return whether a tile row exists for build and z/x/y, without reading its data."""
+        with self.lock:
+            return self.conn.execute('SELECT 1 FROM tiles WHERE build=? AND z=? AND x=? AND y=?',
+                                     (build, z, x, y)).fetchone() is not None
+
+    def put(self, build, z, x, y, data):
+        """Store tile bytes data for build and z/x/y; evict old rows every 200 writes."""
+        with self.lock:
+            self.conn.execute('INSERT OR REPLACE INTO tiles VALUES(?,?,?,?,?,?)',
+                              (build, z, x, y, data, time.time_ns()))
+            self.writes += 1
+            if self.writes % 200 == 0:
+                self.evict()
+
+    def evict(self):
+        """Delete least recently used tiles until stored bytes are under 75% of the bound. Caller holds lock."""
+        used = self.conn.execute('SELECT coalesce(sum(length(data)), 0) FROM tiles').fetchone()[0]
+        if used <= self.max_bytes:
+            return
+        target = self.max_bytes * 3 // 4
+        for rowid, size in self.conn.execute('SELECT rowid, length(data) FROM tiles ORDER BY used').fetchall():
+            if used <= target:
+                break
+            self.conn.execute('DELETE FROM tiles WHERE rowid=?', (rowid,))
+            used -= size
+
+    def archive(self, build):
+        """Return stored (header bytes, metadata bytes) for build, or None."""
+        with self.lock:
+            row = self.conn.execute('SELECT header, metadata FROM archives WHERE build=?', (build,)).fetchone()
+        return None if row is None else (bytes(row[0]), bytes(row[1]))
+
+    def remember(self, build, header, metadata, auto):
+        """Store header and metadata bytes for build; auto marks an automatically chosen build."""
+        with self.lock:
+            self.conn.execute('INSERT OR REPLACE INTO archives VALUES(?,?,?,?,?)',
+                              (build, header, metadata, int(auto), int(time.time())))
+
+    def latest_build(self, max_age=None):
+        """Return the newest automatically chosen build URL stored within max_age seconds, or None."""
+        with self.lock:
+            row = self.conn.execute('SELECT build, stored FROM archives WHERE auto=1 ORDER BY stored DESC LIMIT 1').fetchone()
+        if row is None or (max_age is not None and time.time() - row[1] > max_age):
+            return None
+        return row[0]
 
 
-def padded_bounds(north, south, east, west, z):
-    """Return extraction bounds covering the bbox and buffered render groups at z."""
-    n = 2 ** z
-    def row(lat):
-        """Return fractional XYZ row for latitude lat at the enclosing zoom."""
-        r = math.radians(max(-85.05112878, min(85.05112878, lat)))
-        return (1 - math.asinh(math.tan(r)) / math.pi) / 2 * n
-    def group(tile):
-        """Return the aligned group origin containing fractional tile index tile."""
-        return min(n - 1, math.floor(tile)) // GROUP * GROUP
-    return group_bounds(z, group((west + 180) / 360 * n), group(row(north)),
-                        group((east + 180) / 360 * n), group(row(south)))
+def latest_build(cache):
+    """Return the Protomaps v4 build URL to use.
+
+    cache: TileCache whose recent automatic build is reused (BUILD_MAX_AGE), so daily builds
+    do not force re-downloads. Otherwise the newest build in the published manifest; when
+    that is unreachable, any cached automatic build is used.
+    """
+    cached = cache.latest_build(BUILD_MAX_AGE)
+    if cached:
+        return cached
+    try:
+        request = urllib.request.Request(MANIFEST, headers={"User-Agent": "msposd-gs-map/1.0"})
+        with urllib.request.urlopen(request, timeout=30) as r:
+            builds = json.loads(r.read(4 * 1024 * 1024))
+    except OSError:
+        fallback = cache.latest_build()
+        if fallback:
+            return fallback
+        raise
+    candidates = [b for b in builds if str(b.get('version', '')).startswith('4.')
+                  and re.fullmatch(r'[\w.-]+\.pmtiles', b.get('key', ''))]
+    if not candidates:
+        raise ValueError('No compatible Protomaps v4 build available')
+    return 'https://build.protomaps.com/' + max(candidates, key=lambda b: b['key'])['key']
 
 
-def contains(outer, inner):
-    """Return whether W/S/E/N rectangle outer contains rectangle inner (1e-9° tolerance)."""
-    e = 1e-9
-    return (outer[0] <= inner[0] + e and outer[1] <= inner[1] + e and
-            outer[2] >= inner[2] - e and outer[3] >= inner[3] - e)
+class Archive:
+    """Protomaps v4 archive read through read(offset, length), with cached directories."""
 
-
-class VectorSource:
-    """Immutable local archive with bounded decoded-tile caching."""
-
-    def __init__(self, path, identity, coverage=None):
-        """Open archive path, labelled by public identity (build URL or local name).
-
-        coverage: Optional (W/S/E/N bounds, maxzoom) of a regional extract; archives
-        without it are treated as complete within their header bounds and zooms.
-        """
-        from pmtiles.reader import Reader
-        from pmtiles.tile import TileType
-        self.path, self.identity = str(path), identity
-        reader = Reader(self._read)
-        self.header = reader.header()
-        meta = reader.metadata()
+    def _open(self, header, metadata, identity):
+        """Validate header and metadata bytes; set identity, maxzoom and compression."""
+        from pmtiles.tile import Compression, TileType, deserialize_header
+        self.identity = identity
+        self.header = deserialize_header(header)
+        if self.header['internal_compression'] == Compression.GZIP:
+            metadata = gzip.decompress(metadata)
+        meta = json.loads(metadata)
         layers = {v['id'] for v in meta.get('vector_layers', [])}
         if self.header['tile_type'] != TileType.MVT or not {'roads', 'places', 'buildings'} <= layers:
             raise ValueError("Expected Protomaps v4 roads, places and buildings")
@@ -276,33 +293,39 @@ class VectorSource:
         if version and not version.startswith('4.'):
             raise ValueError(f"Unsupported Protomaps schema {version}")
         self.maxzoom = self.header['max_zoom']
-        self.native = self.maxzoom
-        self.bounds = tuple(self.header[k] / 1e7 for k in
-                            ('min_lon_e7', 'min_lat_e7', 'max_lon_e7', 'max_lat_e7'))
-        if coverage is not None:
-            self.bounds, self.maxzoom = tuple(coverage[0]), min(self.maxzoom, coverage[1])
-            self.native = PLANET_MAXZOOM
+        self.directory = functools.lru_cache(maxsize=64)(self._directory)
         self.tile = functools.lru_cache(maxsize=96)(self._tile)
+        self.download_bytes = 0
 
-    def covers(self, bounds, z):
-        """Return whether W/S/E/N bounds are available at the source zoom used for output z."""
-        return min(z, self.native) <= self.maxzoom and contains(self.bounds, bounds)
+    def _directory(self, offset, length):
+        """Return the decoded directory stored at offset/length."""
+        from pmtiles.tile import deserialize_directory
+        return deserialize_directory(self.read(offset, length))
 
-    def _read(self, offset, length):
-        """Read length bytes at offset in the archive; return bytes or raise on truncation."""
-        with open(self.path, 'rb') as f:
-            f.seek(offset)
-            data = f.read(length)
-        if len(data) != length:
-            raise ValueError('Truncated vector archive')
-        return data
+    def locate(self, z, x, y):
+        """Return (offset, length) of tile z/x/y in the archive, or None when absent."""
+        from pmtiles.tile import find_tile, zxy_to_tileid
+        tile_id = zxy_to_tileid(z, x, y)
+        h = self.header
+        offset, length = h['root_offset'], h['root_length']
+        for _ in range(4):
+            entry = find_tile(self.directory(offset, length), tile_id)
+            if entry is None:
+                return None
+            if entry.run_length:
+                return h['tile_data_offset'] + entry.offset, entry.length
+            offset, length = h['leaf_directory_offset'] + entry.offset, entry.length
+        return None
 
-    def _tile(self, z, x, y):
-        """Decode source XYZ tile z/x/y; return layer dictionary, empty for absent tiles."""
-        from pmtiles.reader import Reader
+    def raw(self, z, x, y):
+        """Return the stored (still compressed) bytes of tile z/x/y, or b'' when absent."""
+        where = self.locate(z, x, y)
+        return self.read(*where) if where else b''
+
+    def decode(self, data):
+        """Return decoded layers for stored tile bytes data; empty for an absent tile."""
         from pmtiles.tile import Compression
-        data = Reader(self._read).get(z, x, y)
-        if data is None:
+        if not data:
             return {}
         compression = self.header['tile_compression']
         if compression == Compression.GZIP:
@@ -311,165 +334,104 @@ class VectorSource:
             raise ValueError('Unsupported vector compression')
         return decode_tile(data)
 
+    def _tile(self, z, x, y):
+        """Return decoded layers of tile z/x/y."""
+        return self.decode(self.raw(z, x, y))
 
-class SourceManager:
-    """Regional extraction with a bounded, least-recently-used local working cache."""
+    def prefetch(self, keys):
+        """Make (z, x, y) keys ready for tile(); local archives need nothing."""
 
-    def __init__(self, cache_dir, tool_dir):
-        """Use writable cache_dir for extracts and tool_dir for the pmtiles executable."""
-        self.directory = Path(cache_dir)
-        self.executable = Path(tool_dir) / ('pmtiles.exe' if os.name == 'nt' else 'pmtiles')
-        self.lock = threading.Lock()           # cache bookkeeping only, never held while extracting
-        self.build_lock = threading.Lock()
-        self.install_lock = threading.Lock()
-        self.build = None
-        self.sources = OrderedDict()
-        self.live = weakref.WeakSet()          # sources still referenced; never evicted
 
-    def resolve(self):
-        """Return the newest Protomaps v4 build URL, looked up once until reset."""
-        with self.build_lock:
-            if self.build is None:
-                with urllib.request.urlopen(urllib.request.Request(MANIFEST, headers={"User-Agent": "msposd-gs-map/1.0"}), timeout=30) as r:
-                    builds = json.loads(r.read(4 * 1024 * 1024))
-                candidates = [b for b in builds if str(b.get('version', '')).startswith('4.')
-                              and re.fullmatch(r'[\w.-]+\.pmtiles', b.get('key', ''))]
-                if not candidates:
-                    raise ValueError('No compatible Protomaps v4 build available')
-                self.build = 'https://build.protomaps.com/' + max(candidates, key=lambda b: b['key'])['key']
-            return self.build
+class LocalArchive(Archive):
+    """Archive read from a file on disk."""
 
-    def find(self, configured, bounds, maxzoom):
-        """Return cached vectors covering W/S/E/N bounds up to maxzoom, or None.
+    def __init__(self, path):
+        """Open archive file path; identity is 'local:<file name>'."""
+        self.path = str(path)
+        header = self.read(0, 127)
+        from pmtiles.tile import deserialize_header
+        h = deserialize_header(header)
+        self._open(header, self.read(h['metadata_offset'], h['metadata_length']), 'local:' + Path(path).name)
 
-        configured: Local archive path, mirror URL, or '' for any automatic build.
-        Raises ValueError when a configured local archive does not cover the area.
+    def read(self, offset, length):
+        """Read length bytes at offset; raise on truncation."""
+        with open(self.path, 'rb') as f:
+            f.seek(offset)
+            data = f.read(length)
+        if len(data) != length:
+            raise ValueError('Truncated vector archive')
+        return data
+
+
+class RemoteArchive(Archive):
+    """Archive read over HTTP range requests, with every tile cached locally.
+
+    Cached tiles (and the archive header) are served without network access, so an area
+    seen once renders offline; an uncached tile while offline raises from fetch_range.
+    """
+
+    def __init__(self, url, fetch_range, cache, auto=False):
+        """Open url via fetch_range(url, offset, length); cache is a TileCache; auto marks a manifest build."""
+        self.url, self.fetch_range, self.cache = url, fetch_range, cache
+        stored = cache.archive(url)
+        if stored is None:
+            header = self.read(0, 127)
+            from pmtiles.tile import deserialize_header
+            h = deserialize_header(header)
+            stored = (header, self.read(h['metadata_offset'], h['metadata_length']))
+            cache.remember(url, *stored, auto)
+        self._open(*stored, url)
+        self.pool = ThreadPoolExecutor(max_workers=FETCH_THREADS, thread_name_prefix='vector-fetch')
+        self.count_lock = threading.Lock()
+
+    def read(self, offset, length):
+        """Return length bytes at offset of the archive URL."""
+        return self.fetch_range(self.url, offset, length)
+
+    def _tile(self, z, x, y):
+        """Return decoded layers of tile z/x/y from the cache, fetching and storing it when missing."""
+        data = self.cache.get(self.url, z, x, y)
+        if data is None:
+            data = self.raw(z, x, y)
+            self._store(z, x, y, data)
+        return self.decode(data)
+
+    def _store(self, z, x, y, data):
+        """Cache tile bytes data for z/x/y and count them as downloaded."""
+        with self.count_lock:
+            self.download_bytes += len(data)
+        self.cache.put(self.url, z, x, y, data)
+
+    def prefetch(self, keys):
+        """Fetch uncached (z, x, y) keys, merging neighbouring tiles into few parallel range requests.
+
+        Tiles are stored in spatial order, so a group's tiles are nearly contiguous; runs
+        separated by less than CHUNK_GAP bytes share one request. The first failure propagates.
         """
-        with self.lock:
-            if configured and not configured.startswith(('https://', 'http://')):
-                stamp = os.stat(configured)
-                key = f'{os.path.abspath(configured)}:{stamp.st_size}:{stamp.st_mtime_ns}'
-                vectors = self.sources.get(key) or VectorSource(configured, 'local:' + Path(configured).name)
-                self._remember(key, vectors)
-                if not vectors.covers(bounds, maxzoom):
-                    raise ValueError('Local vector archive does not cover the selected area and label buffer')
-                return vectors
-            # Sidecar bounds describe extraction coverage, even when the archive header
-            # retains the planet bounds. Never infer coverage from a missing vector tile.
-            maxzoom = min(PLANET_MAXZOOM, maxzoom)
-            for sidecar in self.directory.glob('*.json'):
-                try:
-                    entry = json.loads(sidecar.read_text())
-                    path = sidecar.with_suffix('.pmtiles')
-                    wanted = entry['source'] == configured if configured else entry.get('auto')
-                    if (wanted and entry['zoom'] >= maxzoom and path.is_file()
-                            and contains(entry['bounds'], bounds)):
-                        key = str(path)
-                        if key not in self.sources:
-                            self._remember(key, VectorSource(path, entry['source'],
-                                                             (entry['bounds'], entry['zoom'])))
-                        os.utime(path)             # mark recently used for eviction
-                        self._remember(key, self.sources[key])
-                        return self.sources[key]
-                except (OSError, ValueError, KeyError):
-                    continue
-            return None
-
-    def prepare(self, configured, bounds, maxzoom, progress=None, cancel=None):
-        """Return local vectors for W/S/E/N bounds and maxzoom, extracting when needed.
-
-        configured: Local archive, mirror URL, or '' to use the current Protomaps build.
-        progress: Optional callable receiving status text. cancel: Optional Event stopping extraction.
-        """
-        vectors = self.find(configured, bounds, maxzoom)
-        if vectors is not None:
-            return vectors
-        source = configured or self.resolve()
-        maxzoom = min(PLANET_MAXZOOM, maxzoom)
-        if not self.executable.is_file():
-            with self.install_lock:
-                if not self.executable.is_file():
-                    if progress:
-                        progress('Downloading the pmtiles extractor…')
-                    install_extractor(self.executable.parent)
-        entry = {'source': source, 'bounds': list(bounds), 'zoom': maxzoom, 'auto': not configured}
-        key = hashlib.sha256(json.dumps(entry, sort_keys=True).encode()).hexdigest()[:24]
-        path = self.directory / (key + '.pmtiles')
-        part = path.with_suffix('.part')
-        logpath = path.with_suffix('.log')
-        with self.lock:
-            self.directory.mkdir(parents=True, exist_ok=True)
-            used = self._evict()
-        cmd = [str(self.executable), 'extract', source, str(part),
-               '--bbox=' + ','.join(str(v) for v in bounds),
-               f'--maxzoom={maxzoom}', '--download-threads=2']
-        started = time.monotonic()
-        try:
-            with open(logpath, 'wb') as log:
-                proc = subprocess.Popen(cmd, stdout=log, stderr=log)
-                try:
-                    while proc.poll() is None:
-                        if cancel is not None and cancel.is_set():
-                            raise Cancelled('Superseded by a newer preview area')
-                        size = part.stat().st_size if part.exists() else 0
-                        if size + used > MAX_CACHE or time.monotonic() - started > MAX_EXTRACT_SECONDS:
-                            raise RuntimeError('Vector extraction exceeded its disk/time limit')
-                        if progress:
-                            progress(f'Preparing roads and buildings ({size // 1024} KiB written)')
-                        time.sleep(0.2)
-                    if proc.returncode:
-                        tail = logpath.read_text(errors='replace')[-600:]
-                        raise RuntimeError(f'Vector extraction failed: {tail}')
-                finally:
-                    if proc.poll() is None:
-                        proc.kill()
-                    proc.wait()
-            vectors = VectorSource(part, source, (bounds, maxzoom))
-            os.replace(part, path)
-            vectors.path = str(path)
-            path.with_suffix('.json').write_text(json.dumps(entry))
-            with self.lock:
-                self._remember(str(path), vectors)
-            return vectors
-        except Exception as exc:
-            if not configured and not isinstance(exc, Cancelled):
-                with self.build_lock:
-                    self.build = None          # a retired daily build is looked up again
-            raise
-        finally:
-            part.unlink(missing_ok=True)
-            logpath.unlink(missing_ok=True)
-
-    def _evict(self):
-        """Delete least-recently-used unreferenced extracts until usage is under 75% of MAX_CACHE.
-
-        Caller holds self.lock. Returns bytes still used by extracts and partial downloads.
-        Raises RuntimeError when referenced extracts alone keep the cache full.
-        """
-        live = {v.path for v in self.live}
-        files = sorted(self.directory.glob('*.pmtiles'), key=lambda p: p.stat().st_mtime)
-        used = sum(p.stat().st_size for p in files) + sum(
-            p.stat().st_size for p in self.directory.glob('*.part'))
-        for path in files:
-            if used <= MAX_CACHE * 3 // 4:
-                break
-            if str(path) in live:
+        located = []
+        for key in keys:
+            if self.cache.has(self.url, *key):
                 continue
-            used -= path.stat().st_size
-            self.sources.pop(str(path), None)
-            path.unlink(missing_ok=True)
-            path.with_suffix('.json').unlink(missing_ok=True)
-        if used >= MAX_CACHE:
-            raise RuntimeError('Vector cache is full of areas in use; close previews and retry')
-        return used
+            where = self.locate(*key)
+            if where is None:
+                self._store(*key, b'')
+            else:
+                located.append((*where, key))
+        chunks = []
+        for offset, length, key in sorted(located):
+            if chunks and offset - chunks[-1][0] + length <= CHUNK_MAX and offset - chunks[-1][1] <= CHUNK_GAP:
+                chunks[-1][1] = max(chunks[-1][1], offset + length)
+                chunks[-1][2].append((offset, length, key))
+            else:
+                chunks.append([offset, offset + length, [(offset, length, key)]])
 
-    def _remember(self, key, source):
-        """Retain source under key among the four most recent; track it as in use. Caller holds lock."""
-        self.sources[key] = source
-        self.sources.move_to_end(key)
-        self.live.add(source)
-        while len(self.sources) > 4:
-            self.sources.popitem(last=False)
+        def fetch(chunk):
+            """Read one merged range and store every tile inside it."""
+            start, end, members = chunk
+            data = self.read(start, end - start)
+            for offset, length, key in members:
+                self._store(*key, data[offset - start:offset - start + length])
+        list(self.pool.map(fetch, chunks))
 
 
 class TerrainCache:
@@ -482,6 +444,13 @@ class TerrainCache:
         self.directory, self.fetch = Path(cache_dir), fetch
         self.lock = threading.Lock()
         self.tile = functools.lru_cache(maxsize=16)(self._tile)
+        self.pool = ThreadPoolExecutor(max_workers=FETCH_THREADS, thread_name_prefix='terrain-fetch')
+
+    def prefetch(self, keys):
+        """Fetch and decode (z, x, y) keys not yet on disk in parallel; the first failure propagates."""
+        missing = [k for k in keys if not (self.directory / '{}_{}_{}.png'.format(*k)).exists()]
+        if missing:
+            list(self.pool.map(lambda k: self.tile(*k), missing))
 
     def _tile(self, z, x, y):
         """Return elevations in metres for terrarium tile z/x/y as a flat 256 x 256 row-major list."""

@@ -13,7 +13,9 @@ See documentation/offline-map-overlay-spec.md.
 """
 
 import http.client
+import functools
 import importlib.util
+import itertools
 import json
 import math
 import os
@@ -31,6 +33,7 @@ import urllib.request
 import zipfile
 import zlib
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 from configparser import ConfigParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, urljoin
@@ -90,18 +93,48 @@ def zooms():
 # browser and on the OSD (see BASEMAP_FORMAT / OSD_TILE_FORMATS below).
 # You are responsible for each provider's usage terms and attribution.
 HYBRID = "Satellite Hybrid"
-HYBRID_DEFAULTS = dict(roads=True, road_names=True, villages=True, cities=False, buildings=True,
-                       hillshade=False, contours=True,
-                       contour_alpha=30,        # contour opacity in percent
-                       shade_relief=5,          # hillshade height exaggeration at z13
-                       shade_dark=45)           # hillshade shadow opacity in percent
-HYBRID_RANGES = {'contour_alpha': (1, 100), 'shade_relief': (1, 20), 'shade_dark': (1, 100)}
-HYBRID_CREDIT = ("Imagery: Esri, Maxar, Earthstar Geographics and contributors; "
-                 "© OpenStreetMap contributors; terrain: Mapzen Terrain Tiles on AWS Open Data")
+SHADE_CONTRAST_RANGE = (1, 5)            # Esri hillshade shadow stretch
+HYBRID_DEFAULTS = dict(roads=True, road_names=False, villages=True, cities=True, buildings=False,
+                       hillshade=True, contours=True,
+                       contour_alpha=22,        # contour opacity in percent
+                       shade_source='esri',     # 'terrain': computed from elevation; 'esri': Esri layer
+                       shade_relief=5,          # terrain hillshade height exaggeration at z13
+                       shade_dark=45,           # terrain hillshade shadow opacity in percent
+                       esri_contrast=3)         # Esri hillshade shadow stretch
+HYBRID_RANGES = {'contour_alpha': (1, 100), 'shade_relief': (1, 20), 'shade_dark': (1, 100),
+                 'esri_contrast': SHADE_CONTRAST_RANGE}
+HYBRID_CHOICES = {'shade_source': ('terrain', 'esri')}
+# Below this zoom the preview shows plain imagery: a render group would span whole
+# countries of vector data, and roads are unreadable at that scale anyway. Downloads
+# still render every stored zoom.
+HYBRID_PREVIEW_MIN_ZOOM = 10
+# Generated tiles (hybrid, shaded) need several remote requests each, so downloads fetch
+# this many at once, as a browser does; plain sources stay sequential and paced.
+DOWNLOAD_WORKERS = 6
+# Esri imagery multiplied by Esri World Hillshade; its contrast is [map] esri_shade_contrast.
+SHADED = "Satellite Shaded"
+HILLSHADE_URL = ("https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/"
+                 "MapServer/tile/{z}/{y}/{x}?blankTile=false")   # 404, not a placeholder, where absent
+IMAGERY_CREDIT = "Imagery: Esri, Vantor, Earthstar Geographics and the GIS User Community"
+ESRI_HILLSHADE_CREDIT = ("hillshade: Esri, Vantor, Airbus DS, USGS, NGA, NASA, CGIAR, N Robinson, NCEAS, "
+                         "NLS, OS, NMA, Geodatastyrelsen, Rijkswaterstaat, GSA, Geoland, FEMA, Intermap "
+                         "and the GIS user community")
+HYBRID_CREDIT = (IMAGERY_CREDIT + "; © OpenStreetMap contributors; "
+                 "terrain: Mapzen Terrain Tiles on AWS Open Data")
+SHADED_CREDIT = IMAGERY_CREDIT + "; " + ESRI_HILLSHADE_CREDIT
+
+
+def credits(style):
+    """Return {basemap: credit text} for generated basemaps, given the hybrid style in use."""
+    esri = style['hillshade'] and style['shade_source'] == 'esri'
+    return {HYBRID: HYBRID_CREDIT + ("; " + ESRI_HILLSHADE_CREDIT if esri else ""), SHADED: SHADED_CREDIT}
 
 
 def valid_style_value(key, value):
-    """Return whether value is acceptable for hybrid style key: a bool, or an int within HYBRID_RANGES."""
+    """Return whether value is acceptable for hybrid style key: a listed choice, an int within
+    HYBRID_RANGES, or otherwise a bool."""
+    if key in HYBRID_CHOICES:
+        return value in HYBRID_CHOICES[key]
     if key in HYBRID_RANGES:
         low, high = HYBRID_RANGES[key]
         return isinstance(value, int) and not isinstance(value, bool) and low <= value <= high
@@ -125,6 +158,7 @@ def hybrid_style(raw):
 BASEMAPS = {
     HYBRID: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     "Satellite": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    SHADED: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     "Streets": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
     "Topo": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
     "OpenTopoMap": "https://a.tile.opentopomap.org/{z}/{x}/{y}.png",
@@ -140,6 +174,7 @@ BASEMAPS = {
 BASEMAP_FORMAT = {
     HYBRID: "JPEG",
     "Satellite": "JPEG",
+    SHADED: "JPEG",
     "Streets": "JPEG",
     "Topo": "JPEG",
     "OpenTopoMap": "PNG",
@@ -165,9 +200,11 @@ def basemap_issues(tile_key):
             issues[name] = "needs key"
         elif fmt not in OSD_TILE_FORMATS:
             issues[name] = f"{fmt or '?'} — not on OSD"
-    # The pmtiles extractor is downloaded on first remote use, so only Python modules are required.
+    # Vector tiles are read over HTTP on demand, so only these Python modules are required.
     if any(importlib.util.find_spec(name) is None for name in ('PIL', 'pmtiles')):
         issues[HYBRID] = "install hybrid components"
+    if importlib.util.find_spec('PIL') is None:
+        issues[SHADED] = "install hybrid components"
     return issues
 
 DEFAULTS = {
@@ -193,6 +230,7 @@ DEFAULTS = {
         "sources": "",
         "hybrid_style": json.dumps(HYBRID_DEFAULTS),
         "hybrid_satellite_pack": "",
+        "esri_shade_contrast": "3",
         "basemap": "Satellite",
         # download terrain elevation for the same area (separate maps/elevation.db)
         "elevation": "1",
@@ -758,28 +796,50 @@ def udp_listener():
 
 online_lock = threading.Lock()
 online_ok = False
+online_last_ok = float("-inf")   # monotonic time of the last successful remote request
+ONLINE_GRACE = 30                # seconds a successful request keeps us online despite a failed probe
+
+
+def mark_online():
+    """Record that a remote request just succeeded, which proves the network is up."""
+    global online_ok, online_last_ok
+    with online_lock:
+        online_ok, online_last_ok = True, time.monotonic()
+
+
+def record_probe(ok):
+    """Update `online_ok` from probe result ok; return the new state.
+
+    A failed probe only means offline when nothing else succeeded recently: on a link
+    saturated by tile downloads the probe can time out while tiles still arrive.
+    """
+    global online_ok
+    with online_lock:
+        online_ok = ok or time.monotonic() - online_last_ok < ONLINE_GRACE
+        return online_ok
 
 
 def online_check_loop():
-    """Probe the active tile server every 15s and update `online_ok`.
+    """Probe the active tile server and update `online_ok`: every 15 s, or 5 s while offline.
 
     Runs in a daemon thread so the UI can show online/offline and the tile
-    handler can skip slow proxy timeouts when offline.
+    handler can skip slow proxy timeouts when offline. A probe gets two attempts.
     """
-    global online_ok
     while True:
         probe = _fmt_tile(current_tile_url(), 0, 0, 0)
         ok = False
-        try:
-            req = urllib.request.Request(probe, headers={"User-Agent": USER_AGENT})
-            with urllib.request.urlopen(req, timeout=5, context=SSL_CONTEXT) as r:
-                r.read(1)
-            ok = True
-        except Exception:
-            ok = False
-        with online_lock:
-            online_ok = ok
-        time.sleep(15)
+        for _ in range(2):
+            try:
+                req = urllib.request.Request(probe, headers={"User-Agent": USER_AGENT})
+                with urllib.request.urlopen(req, timeout=5, context=SSL_CONTEXT) as r:
+                    r.read(1)
+                ok = True
+                break
+            except Exception:
+                pass
+        if ok:
+            mark_online()
+        time.sleep(15 if record_probe(ok) else 5)
 
 
 def is_online():
@@ -934,6 +994,15 @@ def _drop_tile_conn(scheme, host):
             pass
 
 
+class TileHTTPError(OSError):
+    """A tile server answered with a non-200 HTTP status, kept in .status."""
+
+    def __init__(self, status):
+        """Record HTTP status and use the usual "tile HTTP <status>" message."""
+        super().__init__(f"tile HTTP {status}")
+        self.status = status
+
+
 def _tile_get(url, hops=3):
     """GET a tile URL over a kept-alive connection, following redirects.
 
@@ -964,17 +1033,95 @@ def _tile_get(url, hops=3):
                 raise OSError(f"tile redirect loop or missing Location ({r.status})")
             return _tile_get(urljoin(url, loc), hops - 1)
         if r.status != 200:
-            raise OSError(f"tile HTTP {r.status}")
+            raise TileHTTPError(r.status)
+        mark_online()
         return body
     raise OSError("tile connection lost")
 
 
-def fetch_tile(basemap, z, x, y):
+def fetch_range(url, offset, length):
+    """Return length bytes at offset of url via an HTTP Range request on a kept-alive connection.
+
+    Raises OSError when offline, on network errors, or when the server does not honour the range.
+    """
+    if not is_online():
+        raise OSError("Vector data unavailable offline")
+    u = urlparse(url)
+    scheme, host = u.scheme or "https", u.netloc
+    target = u.path + (f"?{u.query}" if u.query else "")
+    for _ in range(2):                          # one retry for a pooled connection the server closed
+        conn, fresh = _tile_conn(scheme, host)
+        try:
+            conn.request("GET", target, headers={"User-Agent": USER_AGENT,
+                                                 "Range": f"bytes={offset}-{offset + length - 1}"})
+            r = conn.getresponse()
+            body = r.read()
+        except (OSError, http.client.HTTPException):
+            _drop_tile_conn(scheme, host)
+            if fresh:
+                raise
+            continue
+        if r.will_close or r.getheader("Connection", "").lower() == "close":
+            _drop_tile_conn(scheme, host)
+        if r.status != 206 or len(body) != length:
+            raise OSError(f"range request failed (HTTP {r.status})")
+        mark_online()
+        return body
+    raise OSError("range connection lost")
+
+
+@functools.lru_cache(maxsize=64)
+def _hillshade(z, x, y):
+    """Return Esri hillshade bytes for z/x/y, or None where Esri has none. Cached: children share parents."""
+    try:
+        return _tile_get(_fmt_tile(HILLSHADE_URL, z, x, y))
+    except TileHTTPError as exc:
+        if exc.status == 404:
+            return None
+        raise
+
+
+def shade_contrast():
+    """Return the configured Esri shading contrast, clamped to SHADE_CONTRAST_RANGE."""
+    with config_lock:
+        raw = config["map"].get("esri_shade_contrast", "3")
+    low, high = SHADE_CONTRAST_RANGE
+    try:
+        return min(high, max(low, int(raw)))
+    except ValueError:
+        return 3
+
+
+def esri_hillshade(z, x, y):
+    """Return (hillshade bytes, (left, top, size)) covering XYZ tile z/x/y.
+
+    Where Esri has no hillshade at z (above z16 in much of Europe), the nearest parent
+    tile is returned with the square of it that covers z/x/y. Raises on network errors.
+    """
+    for up in range(min(z, 8) + 1):
+        shade = _hillshade(z - up, x >> up, y >> up)
+        if shade is not None:
+            size = 256 >> up
+            return shade, ((x % (1 << up)) * size, (y % (1 << up)) * size, size)
+    raise OSError("no hillshade near this tile")
+
+
+def fetch_shaded(z, x, y, contrast):
+    """Return Esri imagery z/x/y multiplied by Esri hillshade with the given contrast, as JPEG bytes."""
+    from hybrid_render import compose_tile, shade_mask
+    raw = _tile_get(_fmt_tile(BASEMAPS[SHADED], z, x, y))
+    return compose_tile(None, x, y, x, y, raw, shade_mask(*esri_hillshade(z, x, y), contrast))
+
+
+def fetch_tile(basemap, z, x, y, contrast=None):
     """Fetch one tile live from a basemap's remote tile server.
 
     basemap: basemap name. z/x/y: XYZ tile coordinates.
+    contrast: Esri shading contrast snapshot for SHADED; None reads the current setting.
     Returns: tile bytes. Raises on network/HTTP error.
     """
+    if basemap == SHADED:
+        return fetch_shaded(z, x, y, contrast or shade_contrast())
     url = _fmt_tile(BASEMAPS.get(basemap, config["server"]["tile_url"]), z, x, y)
     return _tile_get(url)
 
@@ -1649,7 +1796,7 @@ def hybrid_service():
         if _hybrid_service is None:
             from hybrid_service import HybridService
             _hybrid_service = HybridService(os.path.join(APP_DIR, 'hybrid-cache'), RES_DIR,
-                                            os.path.join(APP_DIR, 'assets', 'bin'), fetch_terrain)
+                                            fetch_range, fetch_terrain, esri_hillshade)
         return _hybrid_service
 
 
@@ -1699,6 +1846,7 @@ def hybrid_options():
 def hybrid_satellite(options):
     """Return an imagery callback bound to frozen options; reuses raw tiles before network."""
     pack = options['satellite_pack']
+    count_lock = threading.Lock()
     def get_tile(z, x, y):
         """Return raw satellite bytes at z/x/y, or None when offline coverage is absent."""
         if pack:
@@ -1711,7 +1859,8 @@ def hybrid_satellite(options):
         if not is_online():
             return None
         data = fetch_tile('Satellite', z, x, y)
-        get_tile.download_bytes += len(data)
+        with count_lock:                       # called from several download workers
+            get_tile.download_bytes += len(data)
         return data
     get_tile.download_bytes = 0
     return get_tile
@@ -1728,6 +1877,25 @@ def tile_order(xs, ys):
             for x in range(max(gx, xs.start), min(gx + 4, xs.stop)):
                 for y in range(max(gy, ys.start), min(gy + 4, ys.stop)):
                     yield x, y
+
+
+def interleave_groups(tiles, width):
+    """Reorder tiles given in tile_order so each run of `width` consecutive 4 x 4 blocks is
+    visited round-robin: parallel workers then render `width` hybrid groups at once instead
+    of queueing on one, while no more than `width` group overlays are needed at a time.
+    """
+    groups = []
+    for x, y in tiles:
+        key = (x // 4, y // 4)
+        if not groups or groups[-1][0] != key:
+            groups.append((key, []))
+        groups[-1][1].append((x, y))
+    out = []
+    for i in range(0, len(groups), width):
+        batch = [members for _, members in groups[i:i + width]]
+        for row in itertools.zip_longest(*batch):
+            out.extend(t for t in row if t is not None)
+    return out
 
 
 def download_worker(basemap, zs, srcs, north, south, east, west, hybrid=None):
@@ -1751,17 +1919,15 @@ def download_worker(basemap, zs, srcs, north, south, east, west, hybrid=None):
     set_dl(state="running", phase="tiles", done=0, total=total, failed=0,
            msg=f"downloading {basemap}", pack=basemap)
     delay = int(config["server"]["tile_delay_ms"]) / 1000.0
+    contrast = shade_contrast()               # later setting changes never alter this pack
+    table = credits(hybrid['style'] if hybrid else hybrid_style(config['map'].get('hybrid_style', '')))
+    credit = "; ".join(dict.fromkeys(table[s] for s in srcs if s in table))
     done = failed = 0
     hybrid_session = None
     try:
         if hybrid is not None:
-            set_dl(phase='vectors', done=0, total=0, msg='Preparing roads and buildings…')
-            hybrid_session = hybrid_service().prepare(
-                hybrid, (north, south, east, west),
-                [z for z, src in zip(zs, srcs) if src == HYBRID],
-                hybrid_satellite(hybrid), lambda message: set_dl(msg=message))
-            set_dl(phase='compose', done=0, total=total,
-                   vector_bytes=os.path.getsize(hybrid_session.vectors[0].path), msg='Composing satellite hybrid…')
+            hybrid_session = hybrid_service().prepare(hybrid, hybrid_satellite(hybrid))
+            set_dl(phase='compose', msg='Composing satellite hybrid…')
         with db_lock:
             conn = open_mbtiles(basemap, write=True)
             # Record the mix this pack was built from, so the tool can tell when a
@@ -1774,8 +1940,8 @@ def download_worker(basemap, zs, srcs, north, south, east, west, hybrid=None):
                 metadata = {
                     'hybrid': json.dumps({'style': hybrid['style'],
                                           'satellite_pack': hybrid['satellite_pack']}, sort_keys=True),
-                    'protomaps_build': hybrid_session.vectors[0].identity,
-                    'hybrid_style_version': str(STYLE_VERSION), 'attribution': HYBRID_CREDIT,
+                    'protomaps_build': hybrid_session.vectors.identity,
+                    'hybrid_style_version': str(STYLE_VERSION), 'attribution': credit,
                     'complete': '0',
                     'bounds': f'{west},{south},{east},{north}',
                     'minzoom': str(min(zs)), 'maxzoom': str(max(zs)),
@@ -1784,44 +1950,68 @@ def download_worker(basemap, zs, srcs, north, south, east, west, hybrid=None):
                 if len(formats) == 1 and formats <= {'JPEG', 'PNG'}:
                     metadata['format'] = {'JPEG': 'jpg', 'PNG': 'png'}[formats.pop()]
                 conn.executemany('INSERT INTO metadata VALUES(?,?)', metadata.items())
+            elif credit:
+                conn.execute("INSERT INTO metadata VALUES('attribution',?)", (credit,))
+            if SHADED in srcs:
+                conn.execute("INSERT INTO metadata VALUES('esri_shade_contrast',?)", (str(contrast),))
             conn.commit()
         try:
+            def fetch_one(z, z_src, x, y):
+                """Return tile bytes for z/x/y from z_src, retrying transient errors; None on failure."""
+                for _ in range(3):
+                    try:
+                        return (hybrid_session.tile(z, x, y) if z_src == HYBRID
+                                else fetch_tile(z_src, z, x, y, contrast))
+                    except Exception:
+                        time.sleep(0.3)
+                return None
+
             for z, z_src in zip(zs, srcs):
                 xs, ys = bbox_tile_ranges(north, south, east, west, z)
                 ymax = (1 << z) - 1
+                todo = []
                 for x, y in tile_order(xs, ys):
-                    ymbt = ymax - y
                     with db_lock:
                         have = conn.execute(
                             "SELECT 1 FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?",
-                            (z, x, ymbt),
+                            (z, x, ymax - y),
                         ).fetchone()
-                    if not have:
-                        data = None
-                        for _ in range(3):          # retry transient fetch errors
-                            try:
-                                data = (hybrid_session.tile(z, x, y) if z_src == HYBRID
-                                        else fetch_tile(z_src, z, x, y))
-                                break
-                            except Exception:
-                                time.sleep(0.3)
+                    if have:
+                        done += 1
+                    else:
+                        todo.append((x, y))
+                parallel = z_src in (HYBRID, SHADED)
+                if parallel:
+                    todo = interleave_groups(todo, DOWNLOAD_WORKERS)
+                pool = ThreadPoolExecutor(DOWNLOAD_WORKERS) if parallel else None
+                try:
+                    # Results come back in submission order, so tiles are written in sequence;
+                    # at most DOWNLOAD_WORKERS groups are open, each rendered once.
+                    results = (pool.map(lambda t: fetch_one(z, z_src, *t), todo) if parallel
+                               else (fetch_one(z, z_src, *t) for t in todo))
+                    for (x, y), data in zip(todo, results):
                         if data is not None:
                             with db_lock:
                                 conn.execute(
                                     "INSERT OR REPLACE INTO tiles VALUES(?,?,?,?)",
-                                    (z, x, ymbt, data),
+                                    (z, x, ymax - y, data),
                                 )
-                            time.sleep(delay)
+                            if not parallel:
+                                time.sleep(delay)
                         else:
                             failed += 1
-                    done += 1
-                    if done % 10 == 0:
-                        with db_lock:
-                            conn.commit()
-                        set_dl(done=done, failed=failed,
-                               pack_bytes=os.path.getsize(mbtiles_for(basemap)),
-                               imagery_download_bytes=(hybrid_session.satellite.download_bytes
-                                                       if hybrid_session else 0))
+                        done += 1
+                        if done % 10 == 0:
+                            with db_lock:
+                                conn.commit()
+                            set_dl(done=done, failed=failed,
+                                   pack_bytes=os.path.getsize(mbtiles_for(basemap)),
+                                   vector_bytes=hybrid_session.vectors.download_bytes if hybrid_session else 0,
+                                   imagery_download_bytes=(hybrid_session.satellite.download_bytes
+                                                           if hybrid_session else 0))
+                finally:
+                    if pool is not None:
+                        pool.shutdown(cancel_futures=True)
             with db_lock:
                 if hybrid_session is not None:
                     # Failed tiles are gaps, as in other packs; only an interrupted job stays incomplete.
@@ -2218,13 +2408,6 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path in ("/", "/viewer.html"):
             return self.serve_static("viewer.html")
-        if path == '/hybrid/preview':
-            key = parse_qs(urlparse(self.path).query).get('id', [''])[0]
-            try:
-                state = hybrid_service().status(key)
-            except (ImportError, OSError) as exc:
-                state = {'state': 'error', 'message': str(exc)}
-            return self._send(200, json.dumps(state), 'application/json')
         if path == "/pos":
             return self.serve_sse()
         if path == "/status":
@@ -2257,8 +2440,6 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         """Route POST requests (settings, target, download, poi-selection)."""
         path = urlparse(self.path).path
-        if path == '/hybrid/preview':
-            return self.serve_hybrid_preview()
         if path == "/settings":
             return self.serve_settings_post()
         if path == "/target":
@@ -2294,26 +2475,6 @@ class Handler(BaseHTTPRequestHandler):
         # viewer.html across mapwin restarts and code changes don't take effect.
         self._send(200, body, ctype, {"Cache-Control": "no-store"})
 
-    def serve_hybrid_preview(self):
-        """Ensure preview vectors for JSON viewport bounds and zoom; send session id and state."""
-        try:
-            data = self._json_body()
-            bounds = tuple(float(data[k]) for k in ('north', 'south', 'east', 'west'))
-            n, s, e, w = bounds
-            z = int(data['zoom'])
-            if not (all(math.isfinite(v) for v in bounds) and -85.051129 <= s < n <= 85.051129
-                    and -180 <= w < e <= 180 and BROWSE_MIN <= z <= BROWSE_MAX):
-                raise ValueError('Invalid preview bounds or zoom')
-            if source_for(z) != HYBRID:
-                raise ValueError('Satellite Hybrid is not used at this zoom')
-            if plan_total(n, s, e, w, [z]) > 256:
-                raise ValueError('Preview too large; reduce the browser window or zoom in')
-            options = hybrid_options()
-            result = hybrid_service().preview(options, bounds, z, hybrid_satellite(options))
-            self._send(200, json.dumps(result), 'application/json')
-        except (ValueError, TypeError, KeyError, RuntimeError, OSError, ImportError) as exc:
-            self._send(400, json.dumps({'error': str(exc)}), 'application/json')
-
     def serve_tile(self, path):
         """Serve a /tiles/{z}/{x}/{y} tile: offline cache first, else live proxy.
 
@@ -2332,15 +2493,30 @@ class Handler(BaseHTTPRequestHandler):
         src = q.get("src", [None])[0]
         offline = q.get("offline", [None])[0]      # "test offline" -> cache only, no proxy
         pack = resolve_pack(src) or pack_id()
-        hybrid_key = q.get('hybrid', [''])[0]
-        if not offline and source_for(z) == HYBRID:
-            try:
-                data = hybrid_service().tile(hybrid_key, z, x, y) if hybrid_key else None
-            except Exception as exc:
-                return self._send(503, str(exc).encode(), 'text/plain')
-            if data is None:
-                return self._send(204)
-            return self._send(200, data, 'image/jpeg', {'Cache-Control': 'no-store'})
+        live = source_for(z) if not offline else None
+        if live == HYBRID and z < HYBRID_PREVIEW_MIN_ZOOM:
+            live = None                        # plain imagery through the proxy below
+        if live == HYBRID or (live == SHADED and BROWSE_MIN <= z <= BROWSE_MAX and is_online()):
+            # Generated live; failures are reported, never replaced by plain imagery. The
+            # viewer's ?hv= counter defeats browser caching after a style or contrast change.
+            # One retry, because Leaflet never re-requests a failed tile and a remote server
+            # occasionally resets a connection while many tiles load in parallel.
+            for attempt in (1, 2):
+                try:
+                    if live == SHADED:
+                        data = fetch_tile(SHADED, z, x, y)
+                    else:
+                        options = hybrid_options()
+                        data = hybrid_service().tile(options, z, x, y, hybrid_satellite(options))
+                    return self._send(200, data, 'image/jpeg', {'Cache-Control': 'no-store'})
+                except (OSError, http.client.HTTPException) as exc:
+                    error = exc
+                    if isinstance(exc, TileHTTPError) and exc.status < 500:
+                        break
+                except Exception as exc:
+                    error = exc
+                    break
+            return self._send(503, str(error).encode(), 'text/plain')
         # 1) offline cache for this pack
         try:
             data = read_tile(pack, z, x, y)
@@ -2477,9 +2653,9 @@ class Handler(BaseHTTPRequestHandler):
             with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_STORED, allowZip64=True) as zf:
                 zf.write(mb, os.path.basename(mb))
                 if metadata.get('attribution'):
-                    zf.writestr('ATTRIBUTION.txt', metadata['attribution'] +
-                                '\nhttps://www.openstreetmap.org/copyright\n' +
-                                'Vector data: ' + metadata.get('protomaps_build', '') + '\n')
+                    zf.writestr('ATTRIBUTION.txt', metadata['attribution'] + '\n' +
+                                ('https://www.openstreetmap.org/copyright\nVector data: ' +
+                                 metadata['protomaps_build'] + '\n' if metadata.get('protomaps_build') else ''))
                 with landmarks_db_lock:                # keep landmarks.db read-consistent
                     if os.path.exists(LANDMARKS_DB):
                         zf.write(LANDMARKS_DB, "landmarks.db")
@@ -2576,7 +2752,8 @@ class Handler(BaseHTTPRequestHandler):
             "basemaps": list(BASEMAPS.keys()), "basemaps_disabled": disabled,
             "basemap": basemap,
             "hybrid_style": hybrid_style(config['map'].get('hybrid_style', '')),
-            "hybrid_credit": HYBRID_CREDIT,
+            "credits": credits(hybrid_style(config['map'].get('hybrid_style', ''))),
+            "esri_shade_contrast": shade_contrast(),
             "hybrid_satellite_pack": config['map'].get('hybrid_satellite_pack', ''),
             "elevation": dem_enabled(), "dem_zoom": DEM_ZOOM,
             "max_dem_tiles": MAX_DEM_TILES,
@@ -2619,6 +2796,10 @@ class Handler(BaseHTTPRequestHandler):
             style = data['hybrid_style']
             if not isinstance(style, dict) or any(not valid_style_value(k, v) for k, v in style.items()):
                 return self._send(400, b'invalid hybrid style')
+        if 'esri_shade_contrast' in data:
+            value, (low, high) = data['esri_shade_contrast'], SHADE_CONTRAST_RANGE
+            if not isinstance(value, int) or isinstance(value, bool) or not low <= value <= high:
+                return self._send(400, b'invalid esri_shade_contrast')
         if data.get('hybrid_satellite_pack') and not resolve_pack(str(data['hybrid_satellite_pack'])):
             return self._send(400, b'unknown satellite pack')
         with config_lock:
@@ -2629,6 +2810,8 @@ class Handler(BaseHTTPRequestHandler):
                 m['hybrid_style'] = json.dumps(style)
             if 'hybrid_satellite_pack' in data:
                 m['hybrid_satellite_pack'] = str(data['hybrid_satellite_pack'])
+            if 'esri_shade_contrast' in data:
+                m['esri_shade_contrast'] = str(data['esri_shade_contrast'])
             if "zoom" in data:
                 m["zoom"] = str(int(data["zoom"]))
             if "detail_zoom" in data:

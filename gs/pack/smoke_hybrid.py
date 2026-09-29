@@ -1,8 +1,8 @@
-"""Exercise a frozen hybrid app with generated fixtures and a real pmtiles extraction.
+"""Exercise a frozen hybrid app with generated fixtures and real HTTP range reads.
 
 Vectors are served from a localhost HTTP server with byte-range support, so the
-extractor runs exactly as for a remote Protomaps build. When gs/assets/bin holds
-no extractor, the frozen app downloads it on first use (network required).
+app reads them exactly as it reads a remote Protomaps build. The app's online
+probe must succeed (internet access), or hybrid tiles are refused as offline.
 """
 
 from configparser import ConfigParser
@@ -10,7 +10,6 @@ import gzip
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
 import json
-import os
 from pathlib import Path
 import re
 import shutil
@@ -29,7 +28,6 @@ sys.path.insert(0, str(ROOT / 'gs'))
 from test_hybrid import encode_fixture, satellite
 from pmtiles.writer import Writer
 from pmtiles.tile import Compression, TileType, zxy_to_tileid
-from protomaps_source import bounds_for_tiles
 from PIL import Image
 
 
@@ -110,10 +108,6 @@ def main():
         target = directory / binary.name
         shutil.copy2(binary, target)
         vector, maps = fixtures(directory)
-        tool = 'pmtiles.exe' if os.name == 'nt' else 'pmtiles'
-        if (ROOT / 'gs/assets/bin' / tool).is_file():
-            (directory / 'assets/bin').mkdir(parents=True)
-            shutil.copy2(ROOT / 'gs/assets/bin' / tool, directory / 'assets/bin' / tool)
         vectors = serve_ranges(vector)
         config = ConfigParser()
         config['server'] = {'protomaps_source': f'http://127.0.0.1:{vectors.server_port}/vectors.pmtiles',
@@ -139,21 +133,17 @@ def main():
                 else:
                     raise RuntimeError('Frozen server did not start')
                 assert 'Satellite Hybrid' not in status['basemaps_disabled'], status
-                west, south, east, north = bounds_for_tiles(17, 400, 400, 401, 401)
-                state = request(port, 'hybrid/preview', dict(north=north, south=south, east=east, west=west, zoom=17))
-                token = state['id']
-                for _ in range(1200):              # allows the first-use extractor download
-                    if state['state'] != 'loading':
+                for _ in range(300):               # the online probe gates remote vector reads
+                    if status.get('online'):
                         break
                     time.sleep(.1)
-                    state = request(port, 'hybrid/preview?id=' + token)
-                assert state['state'] == 'ready', state
-                assert (directory / 'assets/bin' / tool).is_file(), 'extractor was not installed'
-                with urllib.request.urlopen(f'http://127.0.0.1:{port}/tiles/17/400/400?hybrid={token}', timeout=20) as response:
+                    status = request(port, 'status')
+                assert status.get('online'), 'online probe failed; the smoke test needs internet access'
+                with urllib.request.urlopen(f'http://127.0.0.1:{port}/tiles/17/400/400?hv=1', timeout=60) as response:
                     data = response.read()
                 image = Image.open(io.BytesIO(data))
                 assert image.size == (256, 256) and image.format == 'JPEG'
-                print('Frozen hybrid smoke passed: dependencies, fonts, pmtiles extraction, overzoom, satellite reuse, JPEG endpoint')
+                print('Frozen hybrid smoke passed: dependencies, fonts, HTTP range reads, overzoom, satellite reuse, JPEG endpoint')
             except BaseException:
                 print((directory / 'server.log').read_text(errors='replace'))
                 raise

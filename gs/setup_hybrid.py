@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare an isolated Python environment for hybrid maps; the extractor installs on first use."""
+"""Prepare an isolated Python environment with the pinned hybrid-map dependencies."""
 
 from pathlib import Path
 import os
