@@ -175,3 +175,21 @@ bool terrain_agl_get(double *agl_m, uint64_t now_ms)
 	*agl_m = terrain_agl.current_agl_m;
 	return true;
 }
+
+/**
+ * Return the aircraft altitude on the terrain model's datum (GPS altitude minus
+ * the arming calibration offset), valid under the same conditions as AGL.
+ *
+ * @param alt_m Receives altitude in metres and remains unchanged on failure.
+ * @param now_ms Monotonic timestamp in milliseconds.
+ * @return true when the altitude is valid; otherwise false.
+ */
+bool terrain_agl_get_altitude(double *alt_m, uint64_t now_ms)
+{
+	double agl_m;
+	if (!alt_m || !terrain_agl_get(&agl_m, now_ms))
+		return false;
+
+	*alt_m = terrain_agl.last_gps_altitude_m - terrain_agl.altitude_offset_m;
+	return true;
+}

@@ -113,6 +113,22 @@ static void expect_agl(double expected, uint64_t now_ms)
 }
 
 /**
+ * Require the terrain-datum aircraft altitude to match an expected value.
+ *
+ * @param expected Expected altitude in metres.
+ * @param now_ms Current monotonic timestamp.
+ */
+static void expect_altitude(double expected, uint64_t now_ms)
+{
+	double actual = 0.0;
+	if (!terrain_agl_get_altitude(&actual, now_ms) || fabs(actual - expected) > 0.001) {
+		fprintf(stderr, "Altitude got %.3f, expected %.3f at %llu ms\n", actual, expected,
+			(unsigned long long)now_ms);
+		exit(1);
+	}
+}
+
+/**
  * Require the current AGL to be unavailable without changing output.
  *
  * @param now_ms Current monotonic timestamp.
@@ -151,6 +167,7 @@ static void test_normal_flight(void)
 
 	terrain_agl_update_gps(latitude_for_sample(0), longitude_for_sample(1), 550.0, true, 1300);
 	expect_agl(30.0, 1300);
+	expect_altitude(150.0, 1300);   /* 550 GPS - 400 arming offset */
 	terrain_agl_update_gps(latitude_for_sample(1), longitude_for_sample(0), 550.0, true, 1400);
 	expect_agl(70.0, 1400);
 	terrain_agl_update_gps(latitude_for_sample(0), longitude_for_sample(1), 510.0, true, 1500);
@@ -161,6 +178,11 @@ static void test_normal_flight(void)
 	terrain_agl_update_gps(latitude_for_sample(0), longitude_for_sample(1), 520.0, true, 1700);
 	expect_agl(0.0, 1700);
 	expect_unavailable(5001);
+	double unchanged = 12345.0;
+	if (terrain_agl_get_altitude(&unchanged, 5001) || unchanged != 12345.0) {
+		fprintf(stderr, "Altitude unexpectedly available at 5001 ms\n");
+		exit(1);
+	}
 }
 
 /** Exercise arming order, source offset cancellation and recalibration. */

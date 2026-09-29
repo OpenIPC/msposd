@@ -147,6 +147,7 @@ Not done now: `place` is a few hundred rows, where a plain `lat,lon` index wins.
 | `poi.db_path` | `gs/maps/landmarks.db` | landmarks DB location |
 | `poi.range_m` | `10000` | max distance (may later scale with altitude) |
 | `poi.fov_deg` | `45` | half-angle filter around heading |
+| `poi.perspective_alt_m` | `100` | height above which Y uses the perspective projection (§12); ±10 m hysteresis |
 
 ## 9. Build / dependencies
 
@@ -171,3 +172,32 @@ Not done now: `place` is a few hundred rows, where a plain `lat,lon` index wins.
 - Non-`place` kinds (peaks, water, etc.) and clutter management / nearest-N capping.
 - Range auto-scaling with altitude.
 ```
+
+## 12. Revision (2026-09-30): altitude-switched vertical model
+
+The opt-in `poi.y_mode` key is gone. The vertical model now switches on height:
+
+- **Above `perspective_alt_m` (default 100 m, ±10 m hysteresis): perspective.**
+  `el = atan2(-h, dist)`, `y = pos_y - f * tan(el - pitch)`, then (x, y) is rotated
+  by the ladder's roll (`Transform_Roll`) about the screen centre, as
+  `drawLineGS(Transpose=true)` does. A POI 1 km away with the plane 1 km above it
+  is drawn 45° below the horizon; distant POIs converge on the horizon line.
+  No clipping to the AHI centre: pitching down lifts the real horizon above
+  `pos_y`. POIs below the screen bottom are skipped (outside the camera view).
+- **Below: distance mode**, now anchored on the AHI centre `pos_y` (follows
+  Ctrl+Up/Down) instead of the screen middle: `range_m` at `pos_y`, 0 m at 95 %
+  of the screen height.
+
+**Height `h` of the plane above a POI:**
+1. Terrain data available (`AGL_enabled` and a valid AGL): plane altitude on the
+   terrain datum (`terrain_agl_get_altitude()`, GPS altitude minus arming offset)
+   minus the POI's terrain elevation (`terrain_elevation_at()`, looked up lazily
+   the first time the POI is in view and cached per POI/target).
+2. Otherwise the POI is assumed at home altitude: `h = gps_alt - home_alt`, where
+   `home_alt` is the MSP_RAW_GPS altitude latched on a disarmed->armed edge.
+3. With no latched home (GS joined mid-flight), the raw altitude is used as `h`.
+
+The mode threshold uses AGL in case 1 and `h` above home otherwise.
+
+**Draw order:** visible POIs are sorted far-to-near, so nearer markers overlap
+farther ones. Targets go through the same projection.

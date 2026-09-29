@@ -39,4 +39,14 @@ void terrain_agl_update_gps(double lat, double lon, double gps_altitude_m, bool 
  */
 bool terrain_agl_get(double *agl_m, uint64_t now_ms);
 
+/**
+ * Return the aircraft altitude on the terrain model's datum (GPS altitude minus
+ * the arming calibration offset), valid under the same conditions as AGL.
+ *
+ * @param alt_m Receives altitude in metres and remains unchanged on failure.
+ * @param now_ms Monotonic timestamp in milliseconds.
+ * @return true when the altitude is valid; otherwise false.
+ */
+bool terrain_agl_get_altitude(double *alt_m, uint64_t now_ms);
+
 #endif /* TERRAIN_AGL_H */

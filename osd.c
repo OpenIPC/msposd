@@ -1646,7 +1646,7 @@ static void draw_Ladder() {
 
 #if defined(_x86) || defined(__ROCKCHIP__)
 	DrawPOIs(last_lat, last_lon, last_altitude, last_heading,
-	         pitch_degree, pos_y, f, vFOV_deg);
+	         pitch_degree, Transform_Roll, pos_y, f, vFOV_deg);
 #endif
 
 	Transform_Pitch = savedTransformPitch;
