@@ -2983,6 +2983,11 @@ static void InitMSPHook() {
 	}
 #endif
 
+#ifdef __HI3536__
+	// No majestic on an NVR: size the OSD to the screen vdec drives
+	if (!majestic_width && !majestic_height)
+		hifb_get_resolution(&majestic_width, &majestic_height);
+#endif
 	if (!majestic_width && !majestic_height) {
 		majestic_height = GetMajesticVideoConfig(&majestic_width);
 	}
