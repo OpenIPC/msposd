@@ -19,6 +19,9 @@ unsigned long set_bitmapEx(int handle, BITMAP *bitmap, int BitsPerPixel);
 int unload_region(int *handle);
 void *get_directBMP(int handle);
 int InitRGN_SigmaStar();
+#ifdef __HI3536__
+int hifb_get_resolution(int *width, int *height);
+#endif
 #ifdef __SIGMASTAR__
 int GetCanvas(int handle, MI_RGN_CanvasInfo_t *stCanvasInfo);
 uint32_t ST_OSD_DrawPoint(

@@ -2983,6 +2983,12 @@ static void InitMSPHook() {
 	}
 #endif
 
+#ifdef __HI3536__
+	// No majestic on an NVR: size the OSD to the screen vdec drives. Only when
+	// drawing, since opening the layer clears it and would wipe vdec's own --osd.
+	if (DrawOSD && !majestic_width && !majestic_height)
+		hifb_get_resolution(&majestic_width, &majestic_height);
+#endif
 	if (!majestic_width && !majestic_height) {
 		majestic_height = GetMajesticVideoConfig(&majestic_width);
 	}
@@ -3233,6 +3239,10 @@ static void CloseMSP() {
 		if (deinit)
 			printf("[%s:%d]RGN_DeInit failed with %#x!\n", __func__, __LINE__, s32Ret);
 	}
+#endif
+#ifdef __HI3536__
+	if (DrawOSD)
+		s32Ret = unload_region(&osds[FULL_OVERLAY_ID].hand);
 #endif
 #if defined(_x86) || defined(__ROCKCHIP__)
 	Close();

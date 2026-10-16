@@ -37,7 +37,7 @@ hisi: version.h
 hi3536: version.h
 	$(eval SDK = ./sdk/hi3536dv100)
 	$(eval CFLAGS += -D__GOKE__ -D__HI3536__)
-	$(eval LIB = -lm -ldnvqe -lmpi -ljpeg -lupvqe -lVoiceEngine)
+	$(eval LIB = -lm)
 	$(BUILD)
 
 star6b0: version.h

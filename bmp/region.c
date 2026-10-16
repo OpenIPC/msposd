@@ -19,6 +19,198 @@ int PIXEL_FORMAT_DEFAULT = 3; // 0 for PIXEL_FORMAT_1555 , 4 for E_MI_RGN_PIXEL_
 extern bool verbose;
 const double inv16 = 1.0 / 16.0;
 
+#ifdef __HI3536__
+// Hi3536DV100 is an NVR: there is no encoder channel to attach an RGN overlay to, and the
+// decoded stream leaves through VO/HDMI. The OSD therefore goes on the hifb graphics layer
+// above the video, as silicon_research's osd does next to vdec (msposd#18).
+#include <errno.h>
+#include <linux/fb.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include "hifb.h"
+
+#define HIFB_DEVICE "/dev/fb0"
+
+static int fb_fd = -1;
+static unsigned char *fb_mem;
+static size_t fb_len;
+static struct fb_var_screeninfo fb_var;
+static unsigned int fb_stride;
+static int fb_x, fb_y;
+
+// hifb keeps whatever size it was last given and does not follow VO, so a
+// stale 1280x720 layer would sit on a 1024x768 screen. vdec's own --osd sets
+// the layer to the VO size; take that size from video layer 0 the same way.
+static int vo_display_size(unsigned int *width, unsigned int *height) {
+	char line[256];
+	int found = 0, header = 0;
+	FILE *f = fopen("/proc/umap/vo", "r");
+	if (!f)
+		return -1;
+	while (!found && fgets(line, sizeof(line), f)) {
+		if (strstr(line, "LayerId") && strstr(line, "DispW")) {
+			header = 1;
+			continue;
+		}
+		unsigned int layer, imgw, imgh, dispw, disph;
+		char en[4], clust[4], fmt[8];
+		if (header && sscanf(line, "%u %3s %3s %7s %u %u %u %u", &layer, en, clust, fmt,
+						  &imgw, &imgh, &dispw, &disph) == 8 &&
+			layer == 0 && dispw && disph) {
+			*width = dispw;
+			*height = disph;
+			found = 1;
+		}
+		header = 0;
+	}
+	fclose(f);
+	return found ? 0 : -1;
+}
+
+static int hifb_open(void) {
+	struct fb_fix_screeninfo fix;
+	unsigned int vo_w, vo_h;
+	HIFB_ALPHA_S alpha;
+	HIFB_COLORKEY_S colorkey;
+	HI_BOOL show = HI_TRUE;
+
+	if (fb_fd >= 0)
+		return 0;
+
+	fb_fd = open(HIFB_DEVICE, O_RDWR);
+	if (fb_fd < 0) {
+		fprintf(stderr, "[%s:%d]open %s failed: %s\n", __func__, __LINE__, HIFB_DEVICE,
+			strerror(errno));
+		return -1;
+	}
+
+	if (ioctl(fb_fd, FBIOGET_VSCREENINFO, &fb_var) < 0)
+		goto fail;
+
+	if (!vo_display_size(&vo_w, &vo_h)) {
+		fb_var.xres = vo_w;
+		fb_var.yres = vo_h;
+	}
+
+	// ARGB1555 is the format msposd composes in, so a frame is a plain row copy
+	fb_var.xres_virtual = fb_var.xres;
+	fb_var.yres_virtual = fb_var.yres;
+	fb_var.xoffset = 0;
+	fb_var.yoffset = 0;
+	fb_var.bits_per_pixel = 16;
+	fb_var.transp = (struct fb_bitfield){15, 1, 0};
+	fb_var.red = (struct fb_bitfield){10, 5, 0};
+	fb_var.green = (struct fb_bitfield){5, 5, 0};
+	fb_var.blue = (struct fb_bitfield){0, 5, 0};
+	if (ioctl(fb_fd, FBIOPUT_VSCREENINFO, &fb_var) < 0 ||
+		ioctl(fb_fd, FBIOGET_VSCREENINFO, &fb_var) < 0 || fb_var.bits_per_pixel != 16 ||
+		ioctl(fb_fd, FBIOGET_FSCREENINFO, &fix) < 0)
+		goto fail;
+
+	fb_stride = fix.line_length;
+	fb_len = (size_t)fb_stride * fb_var.yres;
+	fb_mem = mmap(NULL, fb_len, PROT_READ | PROT_WRITE, MAP_SHARED, fb_fd, 0);
+	if (fb_mem == MAP_FAILED) {
+		fb_mem = NULL;
+		goto fail;
+	}
+
+	// The 1555 alpha bit picks u8Alpha0 (clear) or u8Alpha1 (solid) per pixel
+	memset(&alpha, 0, sizeof(alpha));
+	alpha.bAlphaEnable = HI_TRUE;
+	alpha.bAlphaChannel = HI_FALSE;
+	alpha.u8Alpha0 = 0;
+	alpha.u8Alpha1 = 255;
+	alpha.u8GlobalAlpha = 255;
+
+	memset(&colorkey, 0, sizeof(colorkey));
+	colorkey.bKeyEnable = HI_FALSE;
+
+	memset(fb_mem, 0, fb_len);
+	if (ioctl(fb_fd, FBIOPUT_ALPHA_HIFB, &alpha) < 0 ||
+		ioctl(fb_fd, FBIOPUT_COLORKEY_HIFB, &colorkey) < 0 ||
+		ioctl(fb_fd, FBIOPUT_SHOW_HIFB, &show) < 0)
+		goto fail;
+
+	if (verbose)
+		printf("%s: %ux%u, %u bytes per line\n", HIFB_DEVICE, fb_var.xres, fb_var.yres,
+			fb_stride);
+	return 0;
+
+fail:
+	fprintf(stderr, "[%s:%d]%s setup failed: %s\n", __func__, __LINE__, HIFB_DEVICE,
+		strerror(errno));
+	if (fb_mem) {
+		munmap(fb_mem, fb_len);
+		fb_mem = NULL;
+	}
+	close(fb_fd);
+	fb_fd = -1;
+	return -1;
+}
+
+int hifb_get_resolution(int *width, int *height) {
+	if (hifb_open())
+		return -1;
+	*width = fb_var.xres;
+	*height = fb_var.yres;
+	return 0;
+}
+
+static int hifb_set_bitmap(BITMAP *bitmap) {
+	// The layer is set up as ARGB1555, so only a 16-bit bitmap can be copied in
+	if (!fb_mem || !bitmap->pData || bitmap->enPixelFormat != PIXEL_FORMAT_1555)
+		return -1;
+
+	unsigned int w = bitmap->u32Width;
+	unsigned int h = bitmap->u32Height;
+	unsigned int src_stride = w * 2;
+	unsigned char *src = (unsigned char *)bitmap->pData;
+
+	if (fb_x + w <= fb_var.xres && fb_y + h <= fb_var.yres) {
+		for (unsigned int i = 0; i < h; i++)
+			memcpy(fb_mem + (size_t)(fb_y + i) * fb_stride + fb_x * 2,
+				src + (size_t)i * src_stride, w * 2);
+		return 0;
+	}
+
+	// The glyph grid is sized for 720p or 1080p, but vdec also drives 1024x768 and the
+	// like: shrink it to fit rather than lose the right-hand columns.
+	unsigned int scale = (fb_var.xres << 16) / w;
+	if (((fb_var.yres << 16) / h) < scale)
+		scale = (fb_var.yres << 16) / h;
+	unsigned int dw = (w * scale) >> 16, dh = (h * scale) >> 16;
+	unsigned int ox = (fb_var.xres - dw) / 2, oy = 0;
+	// fb_y places the unscaled grid at the top, centre or bottom (--matrix); keep that
+	// alignment by mapping it onto the room the shrunk grid leaves
+	if (fb_y > 0 && fb_var.yres > h)
+		oy = (unsigned long long)fb_y * (fb_var.yres - dh) / (fb_var.yres - h);
+	if (oy + dh > fb_var.yres)
+		oy = fb_var.yres - dh;
+	unsigned int step = (unsigned int)((1ULL << 32) / scale);
+
+	for (unsigned int y = 0; y < dh; y++) {
+		uint16_t *s = (uint16_t *)(src + (size_t)((y * step) >> 16) * src_stride);
+		uint16_t *d = (uint16_t *)(fb_mem + (size_t)(oy + y) * fb_stride) + ox;
+		for (unsigned int x = 0, sx = 0; x < dw; x++, sx += step)
+			d[x] = s[sx >> 16];
+	}
+	return 0;
+}
+
+static void hifb_close(void) {
+	if (fb_mem) {
+		memset(fb_mem, 0, fb_len);
+		munmap(fb_mem, fb_len);
+		fb_mem = NULL;
+	}
+	if (fb_fd >= 0) {
+		close(fb_fd);
+		fb_fd = -1;
+	}
+}
+#endif
+
 
 
 int InitRGN_SigmaStar(){
@@ -51,7 +243,14 @@ int InitRGN_SigmaStar(){
 
 int create_region(int *handle, int x, int y, int width, int height) {
 	int s32Ret = -1;
-#if !defined(_x86) && !defined(__ROCKCHIP__)
+#ifdef __HI3536__
+	if (hifb_open())
+		return -1;
+	fb_x = x < 0 ? 0 : x;
+	fb_y = y < 0 ? 0 : y;
+	return 0;
+#endif
+#if !defined(_x86) && !defined(__ROCKCHIP__) && !defined(__HI3536__)
 #ifdef __SIGMASTAR__
 	MI_RGN_ChnPort_t stChn;
 
@@ -363,7 +562,10 @@ int prepare_bitmap(
 
 int set_bitmap(int handle, BITMAP *bitmap) {
 	int s32Ret = 0;
-#if !defined(_x86) && !defined(__ROCKCHIP__)
+#ifdef __HI3536__
+	return hifb_set_bitmap(bitmap);
+#endif
+#if !defined(_x86) && !defined(__ROCKCHIP__) && !defined(__HI3536__)
 #ifdef __SIGMASTAR__
 	s32Ret = MI_RGN_SetBitMap(DEV handle, (MI_RGN_Bitmap_t *)(bitmap));
 #elif __GOKE__
@@ -438,7 +640,9 @@ unsigned long set_bitmapEx(int handle, BITMAP *bitmap, int BitsPerPixel) {
 
 int unload_region(int *handle) {
 	int s32Ret = 0;
-#ifdef __SIGMASTAR__
+#ifdef __HI3536__
+	hifb_close();
+#elif defined(__SIGMASTAR__)
 	MI_RGN_ChnPort_t stChn;
 #if __INFINITY6C__
 	stChn.eModId = E_MI_MODULE_ID_VENC;
