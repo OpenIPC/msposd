@@ -122,14 +122,15 @@ static int hifb_open(void) {
 	alpha.u8Alpha0 = 0;
 	alpha.u8Alpha1 = 255;
 	alpha.u8GlobalAlpha = 255;
-	ioctl(fb_fd, FBIOPUT_ALPHA_HIFB, &alpha);
 
 	memset(&colorkey, 0, sizeof(colorkey));
 	colorkey.bKeyEnable = HI_FALSE;
-	ioctl(fb_fd, FBIOPUT_COLORKEY_HIFB, &colorkey);
 
 	memset(fb_mem, 0, fb_len);
-	ioctl(fb_fd, FBIOPUT_SHOW_HIFB, &show);
+	if (ioctl(fb_fd, FBIOPUT_ALPHA_HIFB, &alpha) < 0 ||
+		ioctl(fb_fd, FBIOPUT_COLORKEY_HIFB, &colorkey) < 0 ||
+		ioctl(fb_fd, FBIOPUT_SHOW_HIFB, &show) < 0)
+		goto fail;
 
 	if (verbose)
 		printf("%s: %ux%u, %u bytes per line\n", HIFB_DEVICE, fb_var.xres, fb_var.yres,
@@ -139,6 +140,10 @@ static int hifb_open(void) {
 fail:
 	fprintf(stderr, "[%s:%d]%s setup failed: %s\n", __func__, __LINE__, HIFB_DEVICE,
 		strerror(errno));
+	if (fb_mem) {
+		munmap(fb_mem, fb_len);
+		fb_mem = NULL;
+	}
 	close(fb_fd);
 	fb_fd = -1;
 	return -1;
@@ -176,8 +181,12 @@ static int hifb_set_bitmap(BITMAP *bitmap) {
 		scale = (fb_var.yres << 16) / h;
 	unsigned int dw = (w * scale) >> 16, dh = (h * scale) >> 16;
 	unsigned int ox = (fb_var.xres - dw) / 2, oy = 0;
-	if (fb_y + dh <= fb_var.yres)
-		oy = fb_y;
+	// fb_y places the unscaled grid at the top, centre or bottom (--matrix); keep that
+	// alignment by mapping it onto the room the shrunk grid leaves
+	if (fb_y > 0 && fb_var.yres > h)
+		oy = (unsigned long long)fb_y * (fb_var.yres - dh) / (fb_var.yres - h);
+	if (oy + dh > fb_var.yres)
+		oy = fb_var.yres - dh;
 	unsigned int step = (unsigned int)((1ULL << 32) / scale);
 
 	for (unsigned int y = 0; y < dh; y++) {
