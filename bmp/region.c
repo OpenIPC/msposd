@@ -153,7 +153,8 @@ int hifb_get_resolution(int *width, int *height) {
 }
 
 static int hifb_set_bitmap(BITMAP *bitmap) {
-	if (!fb_mem || !bitmap->pData)
+	// The layer is set up as ARGB1555, so only a 16-bit bitmap can be copied in
+	if (!fb_mem || !bitmap->pData || bitmap->enPixelFormat != PIXEL_FORMAT_1555)
 		return -1;
 
 	unsigned int w = bitmap->u32Width;
