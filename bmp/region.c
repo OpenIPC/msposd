@@ -38,8 +38,38 @@ static struct fb_var_screeninfo fb_var;
 static unsigned int fb_stride;
 static int fb_x, fb_y;
 
+// hifb keeps whatever size it was last given and does not follow VO, so a
+// stale 1280x720 layer would sit on a 1024x768 screen. vdec's own --osd sets
+// the layer to the VO size; take that size from video layer 0 the same way.
+static int vo_display_size(unsigned int *width, unsigned int *height) {
+	char line[256];
+	int found = 0, header = 0;
+	FILE *f = fopen("/proc/umap/vo", "r");
+	if (!f)
+		return -1;
+	while (!found && fgets(line, sizeof(line), f)) {
+		if (strstr(line, "LayerId") && strstr(line, "DispW")) {
+			header = 1;
+			continue;
+		}
+		unsigned int layer, imgw, imgh, dispw, disph;
+		char en[4], clust[4], fmt[8];
+		if (header && sscanf(line, "%u %3s %3s %7s %u %u %u %u", &layer, en, clust, fmt,
+						  &imgw, &imgh, &dispw, &disph) == 8 &&
+			layer == 0 && dispw && disph) {
+			*width = dispw;
+			*height = disph;
+			found = 1;
+		}
+		header = 0;
+	}
+	fclose(f);
+	return found ? 0 : -1;
+}
+
 static int hifb_open(void) {
 	struct fb_fix_screeninfo fix;
+	unsigned int vo_w, vo_h;
 	HIFB_ALPHA_S alpha;
 	HIFB_COLORKEY_S colorkey;
 	HI_BOOL show = HI_TRUE;
@@ -56,6 +86,11 @@ static int hifb_open(void) {
 
 	if (ioctl(fb_fd, FBIOGET_VSCREENINFO, &fb_var) < 0)
 		goto fail;
+
+	if (!vo_display_size(&vo_w, &vo_h)) {
+		fb_var.xres = vo_w;
+		fb_var.yres = vo_h;
+	}
 
 	// ARGB1555 is the format msposd composes in, so a frame is a plain row copy
 	fb_var.xres_virtual = fb_var.xres;
