@@ -626,6 +626,8 @@ void FlushDrawing() {
 
         grab_hotkey(XK_Up,   Mod1Mask);   // Alt + Up   (AHI tilt)
         grab_hotkey(XK_Down, Mod1Mask);   // Alt + Down (AHI tilt)
+        grab_hotkey(XK_Right, Mod1Mask);  // Alt + Right (AHI spacing)
+        grab_hotkey(XK_Left,  Mod1Mask);  // Alt + Left  (AHI spacing)
         grab_hotkey(XK_p,    0);          // P — toggle POI
 
         // Map keys (show/hide, zoom, follow) are grabbed ONLY when the map feature
@@ -780,31 +782,35 @@ extern float Transform_Roll;
 extern float Transform_Pitch;
 bool outlined = true;
 
-void drawLineGS(int x0, int y0, int x1, int y1, uint32_t color, double thickness, bool Transpose) {
+/**
+ * Rotates a point around the overlay centre by Transform_Roll, in double
+ * precision. Integer rotation truncates the result, which makes short ladder
+ * lines wobble by up to a pixel from frame to frame while rolled.
+ *
+ * @param x   Point X, rotated in place.
+ * @param y   Point Y, rotated in place.
+ */
+static void rotate_point_gs(double *x, double *y) {
+	double cx = Transform_OVERLAY_WIDTH / 2.0;
+	double cy = Transform_OVERLAY_HEIGHT / 2.0;
+	double a = Transform_Roll * M_PI / 180.0;
+	double c = cos(a), s = sin(a);
+	double dx = *x - cx, dy = *y - cy;
+	*x = cx + dx * c - dy * s;
+	*y = cy + dx * s + dy * c;
+}
 
+void drawLineGS(int px0, int py0, int px1, int py1, uint32_t color, double thickness, bool Transpose) {
+
+	double x0 = px0, y0 = py0, x1 = px1, y1 = py1;
 	if (Transpose) {
-
-		uint32_t width = Transform_OVERLAY_WIDTH;
-		uint32_t height = Transform_OVERLAY_HEIGHT;
 		// Apply Transform
 		int OffsY = sin((Transform_Pitch) * (M_PI / 180.0)) * 400;//This is wrong
 		//OffsY = (int)lround(Transform_Pitch);//f * tan(pitch_rad)  This assumes Transform_Pitch is pixels
-
-		Point img_center = {Transform_OVERLAY_WIDTH / 2, Transform_OVERLAY_HEIGHT / 2/*Transform_OVERLAY_CENTER*/}; // Center of the image
-
-		// Define the four corners of the rectangle before rotation
-		Point A = {x0, y0 - OffsY};
-		Point B = {x1, y1 - OffsY};
-
-		// Rotate each corner around the center
-		Point rotated_A, rotated_B;
-		rotate_point(A, img_center, Transform_Roll, &rotated_A);
-		rotate_point(B, img_center, Transform_Roll, &rotated_B);
-
-		x0 = rotated_A.x;
-		y0 = rotated_A.y;
-		x1 = rotated_B.x;
-		y1 = rotated_B.y;
+		y0 -= OffsY;
+		y1 -= OffsY;
+		rotate_point_gs(&x0, &y0);
+		rotate_point_gs(&x1, &y1);
 	}
 
 	double r = ((color >> 24) & 0xFF) / 255.0;

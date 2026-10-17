@@ -1020,11 +1020,23 @@ int VariantCounter = 0;
 static bool ReadSerialSimple(int showstat);
 
 static struct event *early_read_tmr = NULL;
-#define EARLY_READ_DELAY_US 15000 // read the FC reply ~10 ms after the attitude request
+#define EARLY_READ_DELAY_US 10000 // INAV rejects a request < 10 ms after the previous one
+static uint8_t pending_cmd = 0; // request deferred to mid-tick when MSP_ATTITUDE was sent
 
 /**
- * One-shot UART read fired shortly after an MSP_ATTITUDE request, so the reply
- * is forwarded within the same tick instead of waiting for the next tick read.
+ * Writes one MSP request without payload to the FC serial port.
+ * @param fd serial port file descriptor
+ * @param cmd MSP command id
+ */
+static void send_msp_request(int fd, uint8_t cmd) {
+	uint8_t buffer[6];
+	construct_msp_command(buffer, cmd, NULL, 0, MSP_OUTBOUND);
+	write(fd, buffer, sizeof(buffer));
+}
+
+/**
+ * One-shot timer fired mid-tick after an MSP_ATTITUDE request. Reads the UART so the
+ * attitude reply is forwarded within the same tick, then sends the deferred request.
  * @param sock unused
  * @param event unused
  * @param arg unused
@@ -1033,7 +1045,11 @@ static void early_read(evutil_socket_t sock, short event, void *arg) {
 	(void)sock;
 	(void)event;
 	(void)arg;
-	ReadSerialSimple(false);
+	if (enable_simple_uart)
+		ReadSerialSimple(false);
+	if (pending_cmd)
+		send_msp_request(serial_fd, pending_cmd);
+	pending_cmd = 0;
 }
 
 static bool ReadSerialSimple(int showstat) {
@@ -1105,11 +1121,12 @@ static bool ReadSerialSimple(int showstat) {
 	}
 }
 
+/**
+ * MSP poll tick: reads the UART in simple mode, sends MSP_ATTITUDE when the AHI is on,
+ * and one other request chosen by a 5-tick cycle (deferred to mid-tick after attitude).
+ * @param serial_fd FC serial port file descriptor
+ */
 static void send_variant_request2(int serial_fd) {
-	uint8_t buffer[6];
-	int res = 0;
-	int cmdlen=6;
-
 	if (AbortNow)
 		return;
 
@@ -1122,63 +1139,49 @@ static void send_variant_request2(int serial_fd) {
 			ReadSerialSimple(VariantCounter == 0);
 	}
 
-	// Attitude goes first every tick so the FC answers it ahead of the other replies.
-	if (AHI_Enabled) {
-		construct_msp_command(buffer, MSP_ATTITUDE, NULL, 0, MSP_OUTBOUND);
-		res = write(serial_fd, buffer, cmdlen);
+	// INAV rejects a request that arrives less than ~10 ms after the previous one, so each
+	// tick sends at most one request besides MSP_ATTITUDE, picked by a 5-tick cycle.
+	uint8_t cmd = 0;
+	switch (VariantCounter % 5) {
+	case 0: // slow slot, each once per second
+		if (VariantCounter == 0)
+			cmd = MSP_CMD_FC_VARIANT;
+		else if (VariantCounter == 5)
+			cmd = MSP_CMD_STATUS;
+		else if (VariantCounter == 10 && bitmapFnt.pData != NULL && mspVTXenabled) // only once fonts are loaded
+			cmd = MSP_GET_VTX_CONFIG;
+		else if (VariantCounter == 15 && AHI_Enabled &&
+				 (strlen(current_fc_uid) == 0 || (get_current_time_ms() / 1000) % 5 == 0)) // every 5 seconds
+			cmd = MSP_UID;
+		break;
+	case 1:
+		if (rc_channel_mon_enabled)
+			cmd = MSP_RC;
+		break;
+	case 2:
+		if (AHI_Enabled >= 3)
+			cmd = MSP_ALTITUDE;
+		break;
+	case 3:
+		if (AHI_Enabled >= 3)
+			cmd = MSP_RAW_GPS;
+		break;
+	case 4:
+		if (AHI_Enabled >= 3)
+			cmd = MSP_COMP_GPS; // home vector
+		break;
+	}
+
+	if (AHI_Enabled) { // attitude first for lowest latency, the other request follows mid-tick
+		send_msp_request(serial_fd, MSP_ATTITUDE);
 		last_MSP_ATTITUDE = get_time_ms();
-		if (early_read_tmr) // one early read to catch the reply before the next tick
+		pending_cmd = cmd;
+		if (early_read_tmr)
 			evtimer_add(early_read_tmr, &(struct timeval){.tv_usec = EARLY_READ_DELAY_US});
+	} else if (cmd) {
+		send_msp_request(serial_fd, cmd);
 	}
 
-	// Sending several request right one after another does not work well on INAV ...
-	if (VariantCounter == 0 ) { // poll every one second, at frame 0 
-		construct_msp_command(buffer, MSP_CMD_FC_VARIANT, NULL, 0, MSP_OUTBOUND);
-		res = write(serial_fd, buffer, cmdlen);	
-	}
-	
-	// Sending several request right one after another does not work well on INAV ...
-		// no need to poll when no fonts are still loaded
-	if (VariantCounter == 1 && bitmapFnt.pData != NULL && mspVTXenabled) {						
-		construct_msp_command(buffer, MSP_GET_VTX_CONFIG, NULL, 0, MSP_OUTBOUND);
-		res = write(serial_fd, buffer, cmdlen);
-	}
-
-	// Sending several request right one after another does not work well on INAV
-	// ...
-	if (VariantCounter==2) { // poll every one second,
-		// poll for FC_STATUS
-		construct_msp_command(buffer, MSP_CMD_STATUS, NULL, 0, MSP_OUTBOUND);
-		res = write(serial_fd, buffer, cmdlen);
-	}
-
-	if (rc_channel_mon_enabled &&
-		VariantCounter % 5 == 3) { // once every 5 cycles, about 4 times per second at 20 cycles per second, that is 3, 8, 13, 18
-		construct_msp_command(buffer, MSP_RC, NULL, 0, MSP_OUTBOUND);
-		res = write(serial_fd, buffer, cmdlen);
-	}
-	
-	if (AHI_Enabled) {
-		if (AHI_Enabled >= 3 && (VariantCounter == 4 || VariantCounter == 14 )) {//twice per second home vector
-			construct_msp_command(buffer, MSP_COMP_GPS, NULL, 0, MSP_OUTBOUND);
-			res = write(serial_fd, buffer, cmdlen);			 
-		}
-		if (AHI_Enabled >= 3 && (VariantCounter == 5 || VariantCounter == 15 )) {//twice per second home vector
-			construct_msp_command(buffer, MSP_RAW_GPS, NULL, 0, MSP_OUTBOUND);
-			res = write(serial_fd, buffer, cmdlen);			 
-		}		
-		if (VariantCounter==5 && (strlen(current_fc_uid)==0 || (get_current_time_ms()/1000)%5==0) ) {//every 5 seconds refresh it
-			construct_msp_command(buffer, MSP_UID, NULL, 0, MSP_OUTBOUND);
-			res = write(serial_fd, buffer, cmdlen);
-		}
-
-		if (AHI_Enabled>=3 && VariantCounter%2==1 ) {//every odd frame
-			construct_msp_command(buffer, MSP_ALTITUDE, NULL, 0, MSP_OUTBOUND);
-			res = write(serial_fd, buffer, cmdlen);
-		}
-		
-	}
-		
 	VariantCounter++;
 	if (VariantCounter >= MSP_PollRate ){ 
 		trace_fragment(true);
@@ -1394,7 +1397,7 @@ uart_configured:
 		evtimer_add(msp_tmr, &interval /*(struct timeval){.tv_sec = 1}*/
 			/*&(struct timeval){.tv_usec = 5000000}*/);
 
-		if (enable_simple_uart && AHI_Enabled) // early read only when attitude is polled
+		if (AHI_Enabled) // mid-tick read and deferred request, only when attitude is polled
 			early_read_tmr = evtimer_new(base, early_read, NULL);
 	}
 
@@ -1534,8 +1537,8 @@ int main(int argc, char **argv) {
 			if (r > 1000) {
 				enable_simple_uart = true;
 				r = r % 1000;
-				if (r>50)//faster polling rate can fool the FC
-					r=50; 
+				if (r>40)// above 40 Hz INAV drops attitude replies: it rejects requests < 10 ms apart
+					r=40;
 				if (r>20)
 					 MSP_PollRate = r;
 				
